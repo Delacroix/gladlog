@@ -38,6 +38,7 @@ import { CANDIDATE_TYPE_FLAGS } from "@gladlog/analysis/src/data/candidateTypeFl
 import { DISPEL_FEATURE_FLAGS } from "@gladlog/analysis/src/data/dispelFeatureFlags";
 import * as dispelVerdicts from "@gladlog/analysis/src/data/dispelVerdicts";
 import * as healingVerdicts from "@gladlog/analysis/src/data/healingVerdicts";
+import * as matchTimelineSections from "@gladlog/analysis/src/context/matchTimelineSections";
 import * as racialAbilities from "@gladlog/analysis/src/data/racialAbilities";
 import * as spellCategories from "@gladlog/analysis/src/data/spellCategories";
 import * as spellEffectData from "@gladlog/analysis/src/data/spellEffectData";
@@ -452,6 +453,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/data/healingVerdicts.ts`,
     symbol: "healingVerdictOf",
     mod: healingVerdicts,
+  },
+  {
+    file: `${A}/context/matchTimelineSections.ts`,
+    symbol: "emitDmgSpikeEntries",
+    mod: matchTimelineSections,
   },
   { file: `${A}/utils/cooldowns.ts`, symbol: "isHealerSpec", mod: cooldowns },
   { file: `${A}/utils/cooldowns.ts`, symbol: "isMeleeSpec", mod: cooldowns },
@@ -1075,10 +1081,22 @@ describe("谓词索引:无法共享 export 的配对,断言相等", () => {
   // relation: everything outputNameFor produces must pass isOwnLogName.
   it("自有日志归档的收件判据认得 collector 产出的全部命名", () => {
     for (const ref of [
-      { logFileName: "WoWCombatLog-082526_200755.txt", hostname: "win-pc", gen8: "02c540d0" },
-      { logFileName: "WoWCombatLog-042126_002657.txt", hostname: "mac-mini", gen8: "82bb77ca" },
+      {
+        logFileName: "WoWCombatLog-082526_200755.txt",
+        hostname: "win-pc",
+        gen8: "02c540d0",
+      },
+      {
+        logFileName: "WoWCombatLog-042126_002657.txt",
+        hostname: "mac-mini",
+        gen8: "82bb77ca",
+      },
       // logFileName without the .txt suffix — outputNameFor tolerates it.
-      { logFileName: "WoWCombatLog-061426_015229", hostname: "win-pc", gen8: "deadbeef" },
+      {
+        logFileName: "WoWCombatLog-061426_015229",
+        hostname: "win-pc",
+        gen8: "deadbeef",
+      },
     ]) {
       const name = collectLogs.outputNameFor(ref as never);
       expect(ownLogArchive.isOwnLogName(name)).toBe(true);

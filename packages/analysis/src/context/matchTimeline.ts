@@ -26,10 +26,11 @@ import {
   HP_SAMPLE_RADIUS_MS,
   IDamageBucket,
   IMajorCooldownInfo,
+  isHealerSpec,
   isSelfOnlyDefensive,
   isTeamHealCD,
-  THROUGHPUT_EMPOWER_DEFENSIVE_IDS,
   specToString,
+  THROUGHPUT_EMPOWER_DEFENSIVE_IDS,
 } from "../utils/cooldowns";
 import { fmtTime, toRenderSecond } from "../utils/renderGrid";
 import {
@@ -351,8 +352,9 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     const duration = spellEffectData[spellId]?.durationSeconds;
     if (!duration) return null;
     const target =
-      (targetName ? allPlayers.find((u) => u.name === targetName) : undefined) ??
-      owner;
+      (targetName
+        ? allPlayers.find((u) => u.name === targetName)
+        : undefined) ?? owner;
     const fromMs = matchStartMs + timeSeconds * 1000;
     const delta = resourceDeltaPct(target, fromMs, fromMs + duration * 1000);
     const who = target.id === owner.id ? "self" : pid(target.name);
@@ -567,9 +569,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       }
       immunityName = [...active.values()][0] ?? "";
     }
-    return immunityName
-      ? ` [IMMUNE — ${immunityName} was up]`
-      : " [IMMUNE]";
+    return immunityName ? ` [IMMUNE — ${immunityName} was up]` : " [IMMUNE]";
   }
 
   /**
@@ -2274,6 +2274,10 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     pid,
     playerIdMap,
     enemyIdMap,
+    // 敌方 CC 掩护标注的数据源 —— 与本文件 [CC ON TEAM] 行同一个数组对象
+    ccTrinketSummaries,
+    ownerName: owner.name,
+    healerNames: friends.filter((f) => isHealerSpec(f.spec)).map((f) => f.name),
     addEntry,
   });
 

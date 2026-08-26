@@ -522,6 +522,42 @@ const DEFENSIVE_ID_BY_NAME = new Map<string, string>(
   ),
 );
 
+/**
+ * [DMG SPIKE] 行的「敌方 CC 掩护」标注一致性 —— 第八类 hardFailure(2026-08-26)。
+ *
+ * 标注(`| enemy CC in window: Spell→who@M:SS (Xs)`)在生产端与 [CC ON TEAM] 行
+ * 同源(同一个 ccTrinketSummaries 数组对象),**今天**不可能分叉;这道门防的是
+ * 未来漂移 —— 逐行探针报告(2026-08-26)的植入实验证明模型对 prompt 里写出来的
+ * 话照单全收、0/100 察觉内部矛盾,所以新事实进 prompt 必须配确定性门(报告建议 R5)。
+ * 判据:标注里的每个 (spell, 渲染时刻) 都必须能在某条 [CC ON TEAM] 行找到 ——
+ * 时刻用同一个 fmtTime 渲染,故按字符串比对即可。方向是单向的(只验正向断言;
+ * 「no enemy CC in window」的反向验证需要解析 CC 时长,暂不做,注记在此)。
+ */
+export function checkDmgSpikeCcCoverConsistency(lines: string[]): string[] {
+  const failures: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.includes("[DMG SPIKE]") || !line.includes("enemy CC in window:"))
+      continue;
+    const seg = line.split("enemy CC in window:")[1] ?? "";
+    for (const m of seg.matchAll(/([^,:]+?)\u2192[^@,]+@(\d+:\d\d)/g)) {
+      const spell = m[1].trim();
+      const at = m[2];
+      const ok = lines.some(
+        (l) =>
+          l.trimStart().startsWith(at) &&
+          l.includes("[CC ON TEAM]") &&
+          l.includes(spell),
+      );
+      if (!ok)
+        failures.push(
+          `line ${i + 1}: [DMG SPIKE] CC 掩护标注引用 ${spell}@${at},但没有任何 [CC ON TEAM] 行与之对应`,
+        );
+    }
+  }
+  return failures;
+}
+
 export function checkSelfOnlyDefensiveClaims(lines: string[]): string[] {
   const violations: string[] = [];
   lines.forEach((line, i) => {
@@ -762,6 +798,7 @@ export function checkMatch(
   hardFailures.push(...checkCooldownLedgerConsistency(lines));
   hardFailures.push(...checkSnapshotFactsConsistency(promptText));
   hardFailures.push(...checkSelfOnlyDefensiveClaims(lines));
+  hardFailures.push(...checkDmgSpikeCcCoverConsistency(lines));
 
   return {
     ordinal: entry.ordinal,

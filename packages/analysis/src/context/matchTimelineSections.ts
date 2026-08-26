@@ -283,6 +283,14 @@ export function emitDmgSpikeEntries(params: {
   pid: (name: string) => string;
   playerIdMap?: Map<string, number>;
   enemyIdMap?: Map<string, number>;
+  /** 与 [CC ON TEAM] 行同源的 CC 实例(analyzePlayerCCAndTrinket 产出)——
+   *  「敌方 CC 掩护」标注只做窗口重叠 join,不重新推导任何 CC 事实。
+   *  缺省时不渲染标注(手搭 fixture 兼容;生产调用点总是传)。 */
+  ccTrinketSummaries?: IPlayerCCTrinketSummary[];
+  /** owner 名(角色化命名用:you)。 */
+  ownerName?: string;
+  /** 治疗名单(角色化命名用:healer)。 */
+  healerNames?: string[];
   addEntry: (timeSeconds: number, ...lines: string[]) => void;
 }): void {
   const {
@@ -292,6 +300,9 @@ export function emitDmgSpikeEntries(params: {
     pid,
     playerIdMap,
     enemyIdMap,
+    ccTrinketSummaries,
+    ownerName,
+    healerNames,
     addEntry,
   } = params;
 
@@ -383,9 +394,57 @@ export function emitDmgSpikeEntries(params: {
         ? `\n                 Top sources: ${topSources.join(", ")}`
         : "";
 
+    // 「敌方 CC 掩护」标注(2026-08-26,逐行探针报告 R4 —— 模型点名想要的三样
+    // 事实之一;GH #34 系列)。三条措辞纪律:
+    //  · 只陈述事实不写判决词(labelBias 教训,2026-07-15 三批判官实锤);
+    //  · 无 CC 时**显式**写 no enemy CC in window —— 植入实验(100 局)证明缺省
+    //    是歧义的(「没看」还是「没有」),而模型对写出来的话照单全收;
+    //  · 时间用与 [CC ON TEAM] 行同一个 fmtTime,promptQualityCheck 的
+    //    checkDmgSpikeCcCoverConsistency 据此逐条交叉校验(防未来两处漂移)。
+    // 排序:受害者(被控 = 不能自保,信息量最大)→ 治疗/owner → 其他;上限 3 条。
+    let ccStr = "";
+    if (ccTrinketSummaries) {
+      const hits: { at: number; pri: number; txt: string }[] = [];
+      for (const summary of ccTrinketSummaries) {
+        for (const cc of summary.ccInstances) {
+          if (
+            cc.atSeconds >= pw.toSeconds ||
+            cc.atSeconds + cc.durationSeconds <= pw.fromSeconds
+          )
+            continue;
+          const isTarget = summary.playerName === pw.targetName;
+          const isOwner =
+            ownerName !== undefined && summary.playerName === ownerName;
+          const isHealerUnit =
+            healerNames?.includes(summary.playerName) ?? false;
+          const who = isTarget
+            ? isOwner
+              ? "the target(you)"
+              : "the target"
+            : isOwner
+              ? "you"
+              : isHealerUnit
+                ? "healer"
+                : pid(summary.playerName);
+          hits.push({
+            at: cc.atSeconds,
+            pri: isTarget ? 0 : isOwner || isHealerUnit ? 1 : 2,
+            txt: `${cc.spellName}\u2192${who}@${fmtTime(cc.atSeconds)} (${cc.durationSeconds.toFixed(1)}s)`,
+          });
+        }
+      }
+      hits.sort((a, b) => a.pri - b.pri || a.at - b.at);
+      ccStr = hits.length
+        ? ` | enemy CC in window: ${hits
+            .slice(0, 3)
+            .map((h) => h.txt)
+            .join(", ")}${hits.length > 3 ? ` +${hits.length - 3} more` : ""}`
+        : " | no enemy CC in window";
+    }
+
     addEntry(
       pw.fromSeconds,
-      `${fmtTime(pw.fromSeconds)}–${fmtTime(pw.toSeconds)}  [DMG SPIKE]   ${pid(pw.targetName)} (${pw.targetSpec}): ${dmgM}M in ${windowSec}s (${dpsK}k DPS)${hpStr}${absorbStr}${sourceStr}`,
+      `${fmtTime(pw.fromSeconds)}–${fmtTime(pw.toSeconds)}  [DMG SPIKE]   ${pid(pw.targetName)} (${pw.targetSpec}): ${dmgM}M in ${windowSec}s (${dpsK}k DPS)${hpStr}${absorbStr}${ccStr}${sourceStr}`,
     );
   }
 }
