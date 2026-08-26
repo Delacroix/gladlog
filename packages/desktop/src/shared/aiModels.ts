@@ -13,12 +13,13 @@
  */
 
 export type AiBackend =
-  "anthropic" | "claudeCli" | "agy" | "codex" | "deepseek";
+  "anthropic" | "claudeCli" | "agy" | "codex" | "codebuddy" | "deepseek";
 export const AI_BACKENDS: AiBackend[] = [
   "anthropic",
   "claudeCli",
   "agy",
   "codex",
+  "codebuddy",
   "deepseek",
 ];
 
@@ -98,6 +99,25 @@ export const AI_MODELS: Record<AiBackend, AiModelOption[]> = {
     },
   ],
   codex: [{ id: "gpt-5.5", label: "GPT-5.5" }],
+  // CodeBuddy Code CLI (腾讯云代码助手, 可执行文件 `cbc`).
+  // 模型列表来自 codebuddy-cli 内置 /model 选择器;id 即【】内的值,
+  // 直接传给 --model;label 后缀的 (xN) 是该模型相对基础模型的 credits 倍率,
+  // 仅供用户选型参考,不影响调用。
+  codebuddy: [
+    { id: "hy3", label: "Hy3(免费)" },
+    { id: "hy3-x", label: "Hy3-X(x0.05)" },
+    { id: "glm-5.3", label: "GLM-5.3(x0.79)" },
+    { id: "glm-5.2", label: "GLM-5.2(x0.79)" },
+    { id: "glm-5.1", label: "GLM-5.1(x0.79)" },
+    { id: "glm-5v-turbo", label: "GLM-5v-Turbo(x0.71,视觉)" },
+    { id: "minimax-m3", label: "MiniMax-M3(x0.25)" },
+    { id: "minimax-m2.7", label: "MiniMax-M2.7(x0.19)" },
+    { id: "kimi-k3-1", label: "Kimi-K3(x1.62)" },
+    { id: "kimi-k2.7", label: "Kimi-K2.7-Code(x0.57)" },
+    { id: "kimi-k2.6", label: "Kimi-K2.6(x0.52)" },
+    { id: "deepseek-v4-pro", label: "DeepSeek-V4-Pro(x0.51)" },
+    { id: "deepseek-v4-flash", label: "DeepSeek-V4-Flash(x0.17,快)" },
+  ],
   // DeepSeek's official API (OpenAI-compatible; not local — data leaves the
   // machine). id = the API model name.
   deepseek: [
@@ -112,6 +132,7 @@ export const AI_DEFAULT_MODEL: Record<AiBackend, string> = {
   claudeCli: "claude-sonnet-5",
   agy: "pro",
   codex: "gpt-5.5",
+  codebuddy: "deepseek-v4-flash",
   deepseek: "deepseek-chat",
 };
 
@@ -121,11 +142,12 @@ export const AI_DEFAULT_MODEL: Record<AiBackend, string> = {
  * shared to avoid a value import from renderer into main.
  */
 export const BACKEND_CLI_TOOL: Partial<
-  Record<AiBackend, "claude" | "agy" | "codex">
+  Record<AiBackend, "claude" | "agy" | "codex" | "cbc">
 > = {
   claudeCli: "claude",
   agy: "agy",
   codex: "codex",
+  codebuddy: "cbc",
 };
 
 /**
@@ -153,7 +175,7 @@ export type AiModelSelection = Partial<Record<AiBackend, string>>;
  * localAiBackends.ts's `CliChatBackend` is now an alias of this type (the
  * public name is unchanged, so consumers' imports need no edits).
  */
-export const CLI_AI_BACKENDS = ["claudeCli", "agy", "codex"] as const;
+export const CLI_AI_BACKENDS = ["claudeCli", "agy", "codex", "codebuddy"] as const;
 export type CliAiBackend = (typeof CLI_AI_BACKENDS)[number];
 
 /** Type-narrowing predicate: whether `backend` is in CLI_AI_BACKENDS. */

@@ -9,15 +9,16 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
 import { agyCliModelName, type CliAiBackend } from "../shared/aiModels";
+import type { AnthropicLike } from "./ai";
 import {
+  type CliVersionProbe,
   detectLocalCliCached,
   isWindowsBatchFile,
-  probeCliVersionCached,
-  type CliVersionProbe,
   type LocalCliTool,
+  probeCliVersionCached,
 } from "./cliDetect";
-import type { AnthropicLike } from "./ai";
 
 // `claude -p` carries agentic overhead and is slow on big prompts (minutes);
 // agy/Gemini is much faster. Generous ceiling so a real completion can land.
@@ -672,6 +673,191 @@ export function codexClientFactory(opts?: {
   };
 }
 
+/**
+ * CodeBuddy Code CLI (`cbc`) JSON output envelope parser.
+ *
+ * Fact (measured on cbc 2.97.5, 2026-08-26): `--output-format json` returns
+ * a **JSON array of events**, not a single object. A typical one-shot run has
+ * 5 events: user message → file-history-snapshot → reasoning → assistant
+ * message → result. The assistant message carries:
+ *   - `sessionId` (string, the resumable session id)
+ *   - `content`: array of blocks, each `{ type: "output_text", text: "..." }`
+ *
+ * This parser handles both the event-array format (primary) and a flat single
+ * object (defensive, in case a future version changes the envelope). Returns
+ * null when no response text can be located — the caller then falls back to
+ * treating stdout as plain text. A missing session id is non-fatal.
+ */
+export function parseCodebuddyJsonEnvelope(stdout: string): {
+  sessionId: string | null;
+  response: string;
+} | null {
+  try {
+    const parsed: unknown = JSON.parse(stdout.trim());
+
+    // -- Primary: JSON array of cbc events --
+    if (Array.isArray(parsed)) {
+      let response = "";
+      let sessionId: string | null = null;
+      for (const ev of parsed) {
+        if (!ev || typeof ev !== "object") continue;
+        const e = ev as Record<string, unknown>;
+        // Assistant message: concatenate text from all content blocks
+        // (block.type is "output_text" in cbc 2.x, but we match on any
+        //  block carrying a string `text` to be version-tolerant).
+        if (e.type === "message" && e.role === "assistant") {
+          if (typeof e.sessionId === "string" && e.sessionId) {
+            sessionId = e.sessionId;
+          }
+          if (Array.isArray(e.content)) {
+            for (const block of e.content) {
+              if (
+                block &&
+                typeof block === "object" &&
+                typeof (block as Record<string, unknown>).text === "string"
+              ) {
+                response += (block as Record<string, unknown>).text as string;
+              }
+            }
+          }
+        }
+        // `result` event may carry the final text as a fallback
+        if (e.type === "result" && typeof e.result === "string" && !response) {
+          response = e.result;
+        }
+        // sessionId might appear on non-assistant events too
+        if (!sessionId && typeof e.sessionId === "string" && e.sessionId) {
+          sessionId = e.sessionId;
+        }
+      }
+      if (response) return { sessionId, response };
+      return null;
+    }
+
+    // -- Fallback: flat single object (version-tolerant) --
+    if (parsed && typeof parsed === "object") {
+      const obj = parsed as Record<string, unknown>;
+      let response = "";
+      for (const key of ["response", "content", "text", "output"]) {
+        if (typeof obj[key] === "string" && obj[key]) {
+          response = obj[key] as string;
+          break;
+        }
+      }
+      if (!response && typeof obj.message === "object" && obj.message !== null) {
+        const msg = obj.message as Record<string, unknown>;
+        if (typeof msg.content === "string") response = msg.content;
+      }
+      if (!response) return null;
+      let sessionId: string | null = null;
+      for (const key of ["sessionId", "session_id", "conversation_id", "thread_id", "id"]) {
+        if (typeof obj[key] === "string" && obj[key]) {
+          sessionId = obj[key] as string;
+          break;
+        }
+      }
+      return { sessionId, response };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * CodeBuddy Code CLI 后端 —— 接口与 Claude CLI 高度同构
+ * (`-p --output-format stream-json --include-partial-messages --model`),
+ * 但有两个关键差异:
+ *
+ * 1. **必须禁用工具**:codebuddy 的 `-p` 模式默认可以调用文件读写/命令执行
+ *    等 agentic 工具,gladlog 是纯 Q&A(prompt 已包含全部对局数据),加
+ *    `--tools ""` 禁用全部内置工具,从根源消除非交互模式下的权限弹窗。
+ *    `--max-turns 1` 是第二道保险,防止任何 agentic 循环。
+ * 2. **会话恢复走 captureSession 模式**(与 agy/codex 同组,而非 claudeCli 的
+ *    `--session-id` 预生成 UUID):seeding 时切到 `--output-format json`,
+ *    从返回的事件数组里解析 assistant 消息的 text 和 sessionId;follow-up 时
+ *    用 `--resume <id>`。
+ * 3. **非 captureSession 路径(对比分析)用 text 模式**:cbc 的 stream-json
+ *    事件格式与 Anthropic 不同(发 message/result/reasoning 事件,不是
+ *    content_block_delta/text_delta),实时流式需要单独写解析器;对比面板不
+ *    需要中途 delta(显示「对比中…」,完成后整段替换),text 模式更简单可靠。
+ */
+export function codebuddyClientFactory(opts?: {
+  cmd?: string;
+  run?: Runner;
+}): AnthropicLike {
+  const run = opts?.run ?? defaultRun;
+  // codebuddy 专属安全参数:禁用工具 + 限制单轮,所有调用路径共用。
+  // (可执行文件名为 cbc,见 BACKEND_CLI_TOOL.codebuddy;LocalCliTool 类型用 "cbc")
+  const SAFETY_ARGS = ["--tools", "", "--max-turns", "1"];
+  return {
+    async *stream(params) {
+      const { cmd, versionProbe } = await resolveCliWithVersionProbe(
+        "cbc",
+        opts?.cmd,
+      );
+      const prompt = joinPrompt(params);
+
+      // -- Coach chat seeding: json output, parse session id --
+      if (params.captureSession) {
+        const out = await withVersionHint(
+          () =>
+            run(
+              cmd,
+              [
+                "-p",
+                "--output-format",
+                "json",
+                "--model",
+                params.model,
+                ...SAFETY_ARGS,
+              ],
+              prompt,
+              { signal: params.signal },
+            ),
+          "cbc",
+          versionProbe,
+        );
+        const env = parseCodebuddyJsonEnvelope(out);
+        if (env) {
+          yield { delta: env.response };
+          if (env.sessionId) yield { sessionId: env.sessionId };
+          return;
+        }
+        // Envelope parse failed: fall back to plain text, no session event
+        yield { delta: out };
+        return;
+      }
+
+      // -- Non-captureSession (comparison analysis): text mode --
+      // cbc's stream-json event format differs from Anthropic's (it emits
+      // message/result/reasoning events, not content_block_delta/text_delta),
+      // so real-time streaming would need a separate parser. The comparison
+      // panel does not need mid-run deltas (it shows "对比中…" and replaces
+      // the whole text on done), so text mode is simpler and reliable.
+      const out = await withVersionHint(
+        () =>
+          run(
+            cmd,
+            [
+              "-p",
+              "--output-format",
+              "text",
+              "--model",
+              params.model,
+              ...SAFETY_ARGS,
+            ],
+            prompt,
+            { signal: params.signal },
+          ),
+        "cbc",
+        versionProbe,
+      );
+      yield { delta: out };
+    },
+  };
+}
+
 /** Strip agy's leading `[agy-run] …` header line. */
 export function stripAgyHeader(s: string): string {
   const nl = s.indexOf("\n");
@@ -1021,6 +1207,35 @@ export async function continueCliChat(input: {
         }
       }
     }
+  }
+  if (input.backend === "codebuddy") {
+    const { cmd, versionProbe } = await resolveCliWithVersionProbe(
+      "cbc",
+      input.cmd,
+    );
+    return withVersionHint(
+      () =>
+        run(
+          cmd,
+          [
+            "-p",
+            "--output-format",
+            "text",
+            "--model",
+            input.model,
+            "--resume",
+            input.sessionId,
+            "--tools",
+            "",
+            "--max-turns",
+            "1",
+          ],
+          input.question,
+          opts,
+        ),
+      "cbc",
+      versionProbe,
+    );
   }
   // codex
   const { cmd, versionProbe } = await resolveCliWithVersionProbe(

@@ -17,10 +17,12 @@ import {
   assertNoWindowsCmdMetacharacters,
   claudeCliClientFactory,
   codexClientFactory,
+  codebuddyClientFactory,
   continueCliChat,
   defaultRun,
   ensureSpillDirSwept,
   killAllCliChildren,
+  parseCodebuddyJsonEnvelope,
   stripAgyHeader,
   withVersionHint,
   type Runner,
@@ -1267,5 +1269,70 @@ describe("continueCliChat", () => {
     expect(out).toBe("codex 回答");
     expect(calls[0]!.slice(0, 3)).toEqual(["exec", "resume", "sid-c"]);
     expect(calls[0]).not.toContain("--ephemeral");
+  });
+});
+
+describe("parseCodebuddyJsonEnvelope", () => {
+  it("parses cbc event-array format (assistant message with output_text blocks)", () => {
+    const stdout = JSON.stringify([
+      { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+      { type: "file-history-snapshot", id: "x", timestamp: 1 },
+      { type: "reasoning", id: "y", timestamp: 2 },
+      {
+        type: "message",
+        role: "assistant",
+        sessionId: "sess-abc",
+        content: [{ providerData: { annotations: [] }, type: "output_text", text: "Hello" }],
+        id: "z",
+        timestamp: 3,
+      },
+      { type: "result", id: "w", timestamp: 4 },
+    ]);
+    const env = parseCodebuddyJsonEnvelope(stdout);
+    expect(env).not.toBeNull();
+    expect(env!.response).toBe("Hello");
+    expect(env!.sessionId).toBe("sess-abc");
+  });
+
+  it("concatenates multiple output_text blocks in one assistant message", () => {
+    const stdout = JSON.stringify([
+      {
+        type: "message",
+        role: "assistant",
+        sessionId: "s1",
+        content: [
+          { type: "output_text", text: "Hello " },
+          { type: "output_text", text: "world" },
+        ],
+      },
+    ]);
+    expect(parseCodebuddyJsonEnvelope(stdout)!.response).toBe("Hello world");
+  });
+
+  it("falls back to result event text when assistant message has no content", () => {
+    const stdout = JSON.stringify([
+      { type: "message", role: "assistant", sessionId: "s2", content: [] },
+      { type: "result", result: "fallback text" },
+    ]);
+    expect(parseCodebuddyJsonEnvelope(stdout)!.response).toBe("fallback text");
+  });
+
+  it("returns null for event array with no extractable text", () => {
+    const stdout = JSON.stringify([
+      { type: "message", role: "user", content: [] },
+      { type: "file-history-snapshot" },
+    ]);
+    expect(parseCodebuddyJsonEnvelope(stdout)).toBeNull();
+  });
+
+  it("handles flat single-object format (defensive)", () => {
+    const stdout = JSON.stringify({ response: "flat response", sessionId: "flat-sid" });
+    const env = parseCodebuddyJsonEnvelope(stdout);
+    expect(env!.response).toBe("flat response");
+    expect(env!.sessionId).toBe("flat-sid");
+  });
+
+  it("returns null for invalid JSON", () => {
+    expect(parseCodebuddyJsonEnvelope("not json")).toBeNull();
   });
 });

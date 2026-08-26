@@ -1,13 +1,14 @@
 import {
-  agyClientFactory,
-  claudeCliClientFactory,
-  codexClientFactory,
-  killAllCliChildren,
-} from "./localAiBackends";
-import {
   abortAllDeepSeekStreams,
   deepseekClientFactory,
 } from "./deepseekClient";
+import {
+  agyClientFactory,
+  claudeCliClientFactory,
+  codebuddyClientFactory,
+  codexClientFactory,
+  killAllCliChildren,
+} from "./localAiBackends";
 
 /**
  * Called from the quitLifecycle exit hook (#21 item9, a completeness fix rather
@@ -103,6 +104,7 @@ export function resolveAiClient(
   // script compatibility mode
   if (backend === "agy") return agyClientFactory({ cmd });
   if (backend === "codex") return codexClientFactory({ cmd });
+  if (backend === "codebuddy") return codebuddyClientFactory({ cmd });
   // Official DeepSeek API: same semantics as anthropic -- no key -> null ->
   // deterministic fallback
   if (backend === "deepseek")

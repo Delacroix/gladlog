@@ -4,9 +4,9 @@ import type { AiLanguage, GladlogSettings } from "../../../main/settingsStore";
 import type { UpdateState } from "../../../main/updater";
 import {
   AI_MODELS,
+  type AiBackend,
   BACKEND_CLI_TOOL,
   resolveAiModel,
-  type AiBackend,
 } from "../../../shared/aiModels";
 import {
   API_KEY_REDACTED,
@@ -14,11 +14,11 @@ import {
   DEFAULT_OBS_WS_URL,
   OBS_PASSWORD_REDACTED,
 } from "../../../shared/protocol";
+import { clampUiZoom, UI_ZOOM_LEVELS } from "../../../shared/uiZoom";
 import {
   CHECK_INTERVAL_MS,
   FIRST_CHECK_DELAY_MS,
 } from "../../../shared/updateSchedule";
-import { clampUiZoom, UI_ZOOM_LEVELS } from "../../../shared/uiZoom";
 import { bridge } from "../bridge";
 import { applyUiZoom } from "../uiZoom";
 import {
@@ -387,10 +387,11 @@ export function SettingsPanel() {
               <option value="claudeCli">Claude CLI(本地)</option>
               <option value="agy">agy / Gemini(本地)</option>
               <option value="codex">Codex(本地)</option>
+              <option value="codebuddy">CodeBuddy CLI(本地)</option>
               <option value="deepseek">DeepSeek API</option>
             </select>
             <span className="settings-note">
-              本地 CLI(Claude/agy/Codex)不走网络;DeepSeek 为官方 API,需 key
+              本地 CLI(Claude/agy/Codex/CodeBuddy)不走网络;DeepSeek 为官方 API,需 key
               且数据出机
             </span>
           </span>
