@@ -17,6 +17,17 @@ data is already gladlog-native).
 >    overlap and mean different things: BACKLOG #24 vs GH #24, BACKLOG #25 vs GH #25,
 >    BACKLOG #26 vs GH #26 are three unrelated pairs. Write `BACKLOG #N` or `GH #N`
 >    — never a bare `#N` — in commit messages, code comments and reports.
+> **2026-08-26:全部未完条目已镜像到 GitHub issues(#37–#54)。** 本文件保留为
+> 详细背景的单源,**新增待办请直接开 GH issue**;镜像映射:
+> #1→GH37 · Session follow-ups→GH38 · #17残→GH39 · #18→GH40 · #19→GH41 ·
+> #21→GH42 · #14→GH43 · #24(12.1批)残→GH44 · #25残→GH45 · #30残→GH46 ·
+> #29→GH47 · #31→GH48 · #33→GH49 · #34→GH50 · #35→GH51 · #36→GH52 ·
+> #37→GH53 · #38→GH54。
+> 巡检时判定**已完成、待迁档**的条目(未建 issue):#22(2026-08-20 用户裁定长期保留,
+> 终结 TEMPORARY 身份)· #23(GH #8/#9/#11 均结)· #24(dr reverse,2026-08-14 修)·
+> #26(rawStreams 落地,#40 5/5)· #27(2026-08-14 挂账批修)· #28(auraIntervals
+> 权威构建器收口)· #32(FIXED 2026-08-16)· #39 · #40。
+>
 > 2. **`## 24.` appears twice below** (the 12.1/S2 data wrap-up batch, and the `dr`
 >    reverse-query fix). Both are already cited from source: bare `#24` in
 >    `drAnalysis.ts` / `dispelVerdicts.ts` / `drOutgoingCCReverse.test.ts` means the
