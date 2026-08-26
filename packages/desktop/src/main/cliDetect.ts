@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { posix, win32 } from "node:path";
 import { promisify } from "node:util";
-import { BACKEND_CLI_TOOL, type AiBackend } from "../shared/aiModels";
+
+import { type AiBackend, BACKEND_CLI_TOOL } from "../shared/aiModels";
 
 const execFileP = promisify(execFile);
 
@@ -12,7 +13,7 @@ const execFileP = promisify(execFile);
  *  hand) and does not correspond to any backend. The backend → tool-name map
  *  lives in BACKEND_CLI_TOOL in shared/aiModels.ts (shared with the renderer's
  *  copy). */
-export type LocalCliTool = "claude" | "agy" | "codex" | "node";
+export type LocalCliTool = "claude" | "agy" | "codex" | "cbc" | "node";
 
 export interface CliDetectDeps {
   platform?: NodeJS.Platform;

@@ -17,10 +17,13 @@ import {
   assertNoWindowsCmdMetacharacters,
   claudeCliClientFactory,
   codexClientFactory,
+  CODEBUDDY_SAFETY_ARGS,
+  codebuddyClientFactory,
   continueCliChat,
   defaultRun,
   ensureSpillDirSwept,
   killAllCliChildren,
+  parseCodebuddyJsonEnvelope,
   stripAgyHeader,
   withVersionHint,
   type Runner,
@@ -1267,5 +1270,182 @@ describe("continueCliChat", () => {
     expect(out).toBe("codex 回答");
     expect(calls[0]!.slice(0, 3)).toEqual(["exec", "resume", "sid-c"]);
     expect(calls[0]).not.toContain("--ephemeral");
+  });
+});
+
+describe("parseCodebuddyJsonEnvelope", () => {
+  it("parses cbc event-array format (assistant message with output_text blocks)", () => {
+    const stdout = JSON.stringify([
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "hi" }],
+      },
+      { type: "file-history-snapshot", id: "x", timestamp: 1 },
+      { type: "reasoning", id: "y", timestamp: 2 },
+      {
+        type: "message",
+        role: "assistant",
+        sessionId: "sess-abc",
+        content: [
+          {
+            providerData: { annotations: [] },
+            type: "output_text",
+            text: "Hello",
+          },
+        ],
+        id: "z",
+        timestamp: 3,
+      },
+      { type: "result", id: "w", timestamp: 4 },
+    ]);
+    const env = parseCodebuddyJsonEnvelope(stdout);
+    expect(env).not.toBeNull();
+    expect(env!.response).toBe("Hello");
+    expect(env!.sessionId).toBe("sess-abc");
+  });
+
+  it("concatenates multiple output_text blocks in one assistant message", () => {
+    const stdout = JSON.stringify([
+      {
+        type: "message",
+        role: "assistant",
+        sessionId: "s1",
+        content: [
+          { type: "output_text", text: "Hello " },
+          { type: "output_text", text: "world" },
+        ],
+      },
+    ]);
+    expect(parseCodebuddyJsonEnvelope(stdout)!.response).toBe("Hello world");
+  });
+
+  it("falls back to result event text when assistant message has no content", () => {
+    const stdout = JSON.stringify([
+      { type: "message", role: "assistant", sessionId: "s2", content: [] },
+      { type: "result", result: "fallback text" },
+    ]);
+    expect(parseCodebuddyJsonEnvelope(stdout)!.response).toBe("fallback text");
+  });
+
+  it("returns null for event array with no extractable text", () => {
+    const stdout = JSON.stringify([
+      { type: "message", role: "user", content: [] },
+      { type: "file-history-snapshot" },
+    ]);
+    expect(parseCodebuddyJsonEnvelope(stdout)).toBeNull();
+  });
+
+  it("handles flat single-object format (defensive)", () => {
+    const stdout = JSON.stringify({
+      response: "flat response",
+      sessionId: "flat-sid",
+    });
+    const env = parseCodebuddyJsonEnvelope(stdout);
+    expect(env!.response).toBe("flat response");
+    expect(env!.sessionId).toBe("flat-sid");
+  });
+
+  it("returns null for invalid JSON", () => {
+    expect(parseCodebuddyJsonEnvelope("not json")).toBeNull();
+  });
+});
+
+describe("codebuddy factory / continueCliChat(PR #35 review #1:argv 形状与 stdin 契约钉死)", () => {
+  const envelope = JSON.stringify([
+    {
+      type: "message",
+      role: "assistant",
+      sessionId: "sess-cb",
+      content: [{ type: "output_text", text: "分析结果" }],
+    },
+  ]);
+
+  it("captureSession:json 模式 argv + 安全参数单源 + prompt 走 stdin + sessionId 事件", async () => {
+    let gotArgs: string[] = [];
+    let gotStdin = "";
+    const run: Runner = async (_f, args, stdin) => {
+      gotArgs = args;
+      gotStdin = stdin;
+      return envelope;
+    };
+    const events: Array<{ delta?: string; sessionId?: string }> = [];
+    for await (const ev of codebuddyClientFactory({ cmd: "cbc", run }).stream({
+      model: "m",
+      max_tokens: 10,
+      messages: [{ role: "user", content: "hi" }],
+      captureSession: true,
+    })) {
+      events.push(ev);
+    }
+    expect(gotArgs).toEqual([
+      "-p",
+      "--output-format",
+      "json",
+      "--model",
+      "m",
+      ...CODEBUDDY_SAFETY_ARGS,
+    ]);
+    // 整个后端建立在「cbc -p 从 stdin 读 prompt」这个契约上 —— argv 里没有
+    // prompt 位置参数,契约破了所有调用发的都是空 prompt,必须钉死。
+    expect(gotStdin).toContain("hi");
+    expect(events.map((e) => e.delta).join("")).toBe("分析结果");
+    expect(events.some((e) => e.sessionId === "sess-cb")).toBe(true);
+  });
+
+  it("非 captureSession(对比):text 模式 argv + 原文透传", async () => {
+    let gotArgs: string[] = [];
+    const run: Runner = async (_f, args) => {
+      gotArgs = args;
+      return "TEXT_OUT";
+    };
+    expect(await collect(codebuddyClientFactory({ cmd: "cbc", run }))).toBe(
+      "TEXT_OUT",
+    );
+    expect(gotArgs).toEqual([
+      "-p",
+      "--output-format",
+      "text",
+      "--model",
+      "m",
+      ...CODEBUDDY_SAFETY_ARGS,
+    ]);
+  });
+
+  it("continueCliChat codebuddy:--resume + 安全参数同一单源,问题走 stdin", async () => {
+    const calls: Array<{ args: string[]; stdin: string }> = [];
+    const run: Runner = async (_f, args, stdin) => {
+      calls.push({ args, stdin });
+      return "续聊回答";
+    };
+    const out = await continueCliChat({
+      backend: "codebuddy",
+      cmd: "/bin/cbc",
+      sessionId: "sid-cb",
+      question: "为什么该开减伤?",
+      model: "hy3",
+      run,
+    });
+    expect(out).toBe("续聊回答");
+    expect(calls[0]!.args).toEqual([
+      "-p",
+      "--output-format",
+      "text",
+      "--model",
+      "hy3",
+      "--resume",
+      "sid-cb",
+      ...CODEBUDDY_SAFETY_ARGS,
+    ]);
+    expect(calls[0]!.stdin).toBe("为什么该开减伤?");
+  });
+
+  it("安全参数形状钉死:--tools 空串与 --max-turns 1 成对(win 空参风险见常量注释)", () => {
+    expect([...CODEBUDDY_SAFETY_ARGS]).toEqual([
+      "--tools",
+      "",
+      "--max-turns",
+      "1",
+    ]);
   });
 });

@@ -19,6 +19,7 @@ const BACKEND_LABELS: Record<AiBackend, string> = {
   claudeCli: "Claude CLI",
   agy: "agy",
   codex: "Codex",
+  codebuddy: "CodeBuddy",
   deepseek: "DeepSeek",
 };
 

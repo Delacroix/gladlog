@@ -1,6 +1,13 @@
-import { readFileSync, writeFileSync, mkdirSync, renameSync } from "fs";
 import { randomUUID } from "crypto";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { join } from "path";
+
+import {
+  type AiBackend,
+  type AiModelSelection,
+  isCliAiBackend,
+  resolveAiModel,
+} from "../shared/aiModels";
 import {
   analysisCachePath,
   splitSlotKey,
@@ -8,24 +15,19 @@ import {
 } from "../shared/analysisCache";
 import { PROMPT_VERSION } from "../shared/promptVersion";
 import {
-  isCliAiBackend,
-  resolveAiModel,
-  type AiBackend,
-  type AiModelSelection,
-} from "../shared/aiModels";
-import {
-  buildCoachSystemPrompt,
   type AiLanguage,
   type AnthropicLike,
+  buildCoachSystemPrompt,
 } from "./ai";
+import type { AnalysisResult } from "./analysis";
 import {
   agyClientFactory,
   claudeCliClientFactory,
+  type CliChatBackend,
+  codebuddyClientFactory,
   codexClientFactory,
   continueCliChat,
-  type CliChatBackend,
 } from "./localAiBackends";
-import type { AnalysisResult } from "./analysis";
 
 export type ChatMessage = {
   role: "user" | "assistant";
@@ -150,6 +152,7 @@ export function createCoachChatService(deps: {
     claudeCli: claudeCliClientFactory,
     agy: agyClientFactory,
     codex: codexClientFactory,
+    codebuddy: codebuddyClientFactory,
   };
   const seedClient =
     deps.seedClient ??
