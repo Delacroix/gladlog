@@ -744,13 +744,23 @@ export function parseCodebuddyJsonEnvelope(stdout: string): {
           break;
         }
       }
-      if (!response && typeof obj.message === "object" && obj.message !== null) {
+      if (
+        !response &&
+        typeof obj.message === "object" &&
+        obj.message !== null
+      ) {
         const msg = obj.message as Record<string, unknown>;
         if (typeof msg.content === "string") response = msg.content;
       }
       if (!response) return null;
       let sessionId: string | null = null;
-      for (const key of ["sessionId", "session_id", "conversation_id", "thread_id", "id"]) {
+      for (const key of [
+        "sessionId",
+        "session_id",
+        "conversation_id",
+        "thread_id",
+        "id",
+      ]) {
         if (typeof obj[key] === "string" && obj[key]) {
           sessionId = obj[key] as string;
           break;
@@ -782,14 +792,32 @@ export function parseCodebuddyJsonEnvelope(stdout: string): {
  *    content_block_delta/text_delta),实时流式需要单独写解析器;对比面板不
  *    需要中途 delta(显示「对比中…」,完成后整段替换),text 模式更简单可靠。
  */
+/**
+ * codebuddy 专属安全参数 —— **单源**,factory 与 `continueCliChat` 两个调用点
+ * 共用(PR #35 review #2:安全相关事实不允许两处手写,漂移是静默的)。
+ * `--tools ""` 禁用全部内置工具(gladlog 是纯 Q&A,prompt 含全部对局数据,
+ * 从根源消除非交互模式下的权限弹窗);`--max-turns 1` 防 agentic 循环。
+ *
+ * ⚠ Windows 注意(review #3,未验证):npm 全局安装在 win 落地为 `cbc.cmd`,
+ * 走 `run()` 的 cmd.exe /c 包装 + shim `%*` 转发 —— 空字符串 argv 能否原样
+ * 穿过这条链路没有先例。若被吞,`--tools` 会把 `--max-turns` 吃成自己的值,
+ * 等于工具全开的 agentic 模式。改动本常量形式(如 `--tools=`)前必须过一次
+ * win 真机验证。
+ */
+export const CODEBUDDY_SAFETY_ARGS = [
+  "--tools",
+  "",
+  "--max-turns",
+  "1",
+] as const;
+
 export function codebuddyClientFactory(opts?: {
   cmd?: string;
   run?: Runner;
 }): AnthropicLike {
   const run = opts?.run ?? defaultRun;
-  // codebuddy 专属安全参数:禁用工具 + 限制单轮,所有调用路径共用。
   // (可执行文件名为 cbc,见 BACKEND_CLI_TOOL.codebuddy;LocalCliTool 类型用 "cbc")
-  const SAFETY_ARGS = ["--tools", "", "--max-turns", "1"];
+  const SAFETY_ARGS = CODEBUDDY_SAFETY_ARGS;
   return {
     async *stream(params) {
       const { cmd, versionProbe } = await resolveCliWithVersionProbe(
@@ -1225,10 +1253,7 @@ export async function continueCliChat(input: {
             input.model,
             "--resume",
             input.sessionId,
-            "--tools",
-            "",
-            "--max-turns",
-            "1",
+            ...CODEBUDDY_SAFETY_ARGS,
           ],
           input.question,
           opts,

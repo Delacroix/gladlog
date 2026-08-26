@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { posix, win32 } from "node:path";
 import { promisify } from "node:util";
 
-import { type AiBackend,BACKEND_CLI_TOOL } from "../shared/aiModels";
+import { type AiBackend, BACKEND_CLI_TOOL } from "../shared/aiModels";
 
 const execFileP = promisify(execFile);
 

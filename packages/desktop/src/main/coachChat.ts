@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { mkdirSync, readFileSync, renameSync,writeFileSync } from "fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { join } from "path";
 
 import {
