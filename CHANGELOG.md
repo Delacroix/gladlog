@@ -6,6 +6,53 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.30 (2026-08-26)
+
+Coaching-accuracy + sixth-backend release. Two main threads over three days: a batch of coaching fixes that stop accusing players of things they could not do, plus five new fact annotations in the prompt (each backed by real-model measurement); and CodeBuddy CLI joining as the 6th AI backend. Also a "gut-feel constants" audit (zero value changes, two real bugs caught) and a reusable prompt line-effect probe.
+
+### AI analysis / coaching correctness
+
+- `fe428a6c` Three real bugs surfaced by re-measuring from the DPS point of view: cd-waste no longer counts Control abilities as "the defensive you never pressed" (58/176 → 0), a keyless wall (Berserker Shout) is no longer demanded for a teammate, and buff-expiry lines now use log truth
+- `ba31cd05` Renewing Blaze registered as a major (non-mitigation) defensive per user ruling; Combustion removed from the steal-worthy list (440 applications, 0 steals observed); unsynced-burst no longer double-counts ally-cast throughput buffs (375 → 309)
+- `1273f8f3` Abilities with no button (Renewing Blaze) can no longer be cited by any "you could have pressed it" accusation (8 → 0); loadout marks them [PASSIVE]
+- `10e5aee2` The low-pressure exemption note only vouches for Defensive-tagged cooldowns, no longer for unused Control abilities (12 → 0 misfires)
+- `2abb8376` missed-cleanse now carries the "your hands were busy" fact — "you missed X" becomes "you chose Y"
+- `9ae382e4` Critical-tier missed dispels require a measured consequence before accusing (#39 ruling A)
+- `00ee7110` Pressure computation now includes absorbed damage (absorbsIn re-keyed by victim)
+- `43661043` Innervate reclassified as a mana cooldown (not a healing buff), emitting a [MANA] line
+- `f5ed0256`/`673c9d52` Immunity table completed in two batches; CC cast into immunity now visible in the prompt ([IMMUNE] marker)
+- `861f0fae` Empowered-cast release level enters the prompt ([EMPOWER L?])
+- `9e12b879` [DMG SPIKE] lines gain an enemy-CC-cover annotation — adopted after a paired retrieval test raised weak-backend accuracy 65% → 87% (p=0.0013), guarded by an 8th deterministic gate
+- `3e0dc4bc` Parser now reads five previously-dropped log event kinds (resources / immunity / damage transfer / empower level / absorbed healing)
+- `86258139` #40 two-line fixes + three #36 items landed + playstyle dimensions into the compare engine
+- `4bf5e27e` D7 probe ground truth taken per round (fixes constant-zero truth after 5 solo-shuffle rounds)
+
+### Data & signed registries
+
+- `2e9298e2`/`bdb7848b`/`d75ec874` Healing verdict registry: the "big healing cooldown" category did not exist; all 12 entries user-signed (10 burst-answer / 2 needs-healer); wiring measured as a zero-change edit, deliberately not consumed yet
+- `a3cb4216` Three generated artifacts realigned to build 69404 (zero data change)
+
+### New AI backend
+
+- `564f027b` CodeBuddy CLI (cbc) integrated as the 6th backend: 14-model enum, event-array JSON parsing, coach-session resume (external contribution, PR #35)
+- `84b0abf4` cbc factory-level tests to fix CI + safety-argument single-sourcing; `58492dac` settings visual baseline updated for the backend dropdown
+
+### Constants audit (GH #34, zero value changes)
+
+- `89b30b2d` 73 lines of dead code deleted (old KILL_ATTEMPT path) + computePressureWindows NaN silent-drop fixed (15/5697 windows recovered) + three thresholds annotated with measured evidence
+- `1be8c427`/`c4044a63` At-cap survey for the whole *_CAP family and distribution evidence for every positioning threshold, written into the code
+
+### Tooling & corpus
+
+- `c4646824`/`4deee7da` Prompt line-effect probe (ablation / planted-defect / cross-model, resumable with a circuit breaker)
+- `3ffcbe56`/`b3f21df9`/`255603d6` Real-model smoke suite moved to local CLIs; three-marker verification completed
+- `4db79018` Own match logs permanently archived to Google Drive (21.28 GiB → 1.76 GiB)
+- `aa10f3e2` Corpus validator learns hero grouping + cache moved to gz (103 violations → 0)
+
+### Other (docs / ledger)
+
+- `75664207` line-probe results report; `994a5bf0` BACKLOG fully mirrored to GH #37–#54; `cbc991d8`/`832d1a80`/`5d959269`/`6876b72c`/`551dfa5e` ledger & ruling series; `66249909` archive-doc corrections; `371e3447` handoff doc; `e9e72bfa` numbering coordination
+
 ## v0.1.29 (2026-08-23)
 
 The coaching-correctness release. Two GitHub issues (#28, #29) drove a month of work on one question: when the coach accuses you of something, could you actually have done it? Cooldown targeting, spell school, "does it hit enemies / is it AoE / does it deal damage" and "can this defensive reach a teammate" now all come from official game data instead of hand-typed tags; the mitigation verdict register is fully signed off (32/32, nothing left unresolved); and two accusation types gained feasibility gates. Plus a new evaluation tool that checks coaching signals against an external truth — rating bracket.
