@@ -1740,7 +1740,15 @@ And then twin flame also goes as well." —— 直接解释了 `1265980` 为什�
     Fire Breath 驱散时机成节)。样本全是 L1、无对比对象,级别标注价值
     **未证实**(非误导,中性负结果);要证实需要 L1 vs L3 混用的对局或
     消融探针,暂不扩工。
-  - agy 交叉对照:配额恢复后跑 `run_smoke2.sh agy`(同 9 prompt)。
+  - **跨模型交叉(2026-08-25,agy `gpt-oss-120b-medium`,同 12 prompt;
+    用户指示用 agy 的 GPT 池 —— 配额按模型分,默认模型耗尽时 GPT 可用,
+    `smokeTags.ts` 为此加了 MODEL 环境变量透传)**:
+    [MANA] 3/3、[IMMUNE] 4/5、**[EMPOWER] 0/3 —— 与 claude 完全一致**,
+    级别标注的中性负结果被第二个模型家族独立复证;[CC BROKEN] 5/10,
+    明显弱于 claude 的逢在必提(GPT 是较弱的消费者)。质量注记:GPT 回答
+    有域内幻觉(发明「Psychic Shroud」、驱散机制错),这条线只用作
+    **消费判定**的交叉验证,不作建议质量参照。原始输出:scratchpad
+    `smoke_agy_gpt.txt` / `smoke3_agy_gpt.txt`(会话临时,结论以本段为准)。
 
 ---
 

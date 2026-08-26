@@ -25,6 +25,9 @@ if (files.length === 0) {
   process.exit(1);
 }
 const backend = (process.env.BACKEND ?? "agy") as CliBackend;
+// Optional model override (e.g. MODEL=gpt-... for agy's GPT quota pool when
+// the default model's quota is exhausted — per-model quotas, user 2026-08-25).
+const model = process.env.MODEL || undefined;
 
 const TAGS = ["[MANA]", "[IMMUNE", "[EMPOWER", "[CC BROKEN]"];
 
@@ -38,7 +41,7 @@ for (const f of files) {
   const out = await callCli(
     backend,
     `${RESPONDER_SYSTEM_PROMPT}\n\n${prompt}`,
-    { timeoutMs: 300_000 },
+    { timeoutMs: 300_000, model },
   );
   console.log("── response:\n");
   console.log(out);
