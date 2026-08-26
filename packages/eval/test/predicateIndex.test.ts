@@ -80,6 +80,12 @@ import { join } from "path";
 import * as archiveLedger from "../../corpus-tools/src/archiveLedger";
 import * as archivePlan from "../../corpus-tools/src/archivePlan";
 import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
+import * as driveSync from "../../corpus-tools/src/driveSync";
+import * as ownLogArchive from "../../corpus-tools/src/ownLogArchive";
+// log-pipeline is deliberately dependency-free (that is what lets it deploy
+// standalone on the gaming machine), so corpus-tools cannot import it. The
+// naming relation between the two is asserted below instead.
+import * as collectLogs from "../../log-pipeline/src/collectLogs";
 import * as dashboard from "../../desktop/src/renderer/src/components/dashboard";
 import * as analysisInput from "../../desktop/src/renderer/src/report/derive/analysisInput";
 import * as flowSeries from "../../desktop/src/renderer/src/report/derive/flowSeries";
@@ -661,6 +667,13 @@ const INDEX: PredicateRow[] = [
     symbol: "checkDecompressedPayload",
     mod: pvpLogFetch,
   },
+  { file: `${C}/driveSync.ts`, symbol: "buildRcloneCopyArgs", mod: driveSync },
+  { file: `${C}/ownLogArchive.ts`, symbol: "isOwnLogName", mod: ownLogArchive },
+  {
+    file: `${C}/ownLogArchive.ts`,
+    symbol: "selectOwnLogsToArchive",
+    mod: ownLogArchive,
+  },
   // Report UI (desktop renderer) — two consumers inside one screen rather than
   // an analysis/gate pair; see the doc's Scope note.
   {
@@ -1054,6 +1067,25 @@ describe("谓词索引:无法共享 export 的配对,断言相等", () => {
     ]) {
       expect(archivePlan.matchDateKey(ms)).toBe(archiveLedger.dateKeyOf(ms));
     }
+  });
+
+  // The own-log archiver decides "is this a log I should upload" in
+  // corpus-tools, while the names it must recognise are minted in
+  // log-pipeline. Neither package can import the other's predicate, so pin the
+  // relation: everything outputNameFor produces must pass isOwnLogName.
+  it("自有日志归档的收件判据认得 collector 产出的全部命名", () => {
+    for (const ref of [
+      { logFileName: "WoWCombatLog-082526_200755.txt", hostname: "win-pc", gen8: "02c540d0" },
+      { logFileName: "WoWCombatLog-042126_002657.txt", hostname: "mac-mini", gen8: "82bb77ca" },
+      // logFileName without the .txt suffix — outputNameFor tolerates it.
+      { logFileName: "WoWCombatLog-061426_015229", hostname: "win-pc", gen8: "deadbeef" },
+    ]) {
+      const name = collectLogs.outputNameFor(ref as never);
+      expect(ownLogArchive.isOwnLogName(name)).toBe(true);
+    }
+    // Negative control, so the assertion above cannot silently pass on a
+    // predicate that accepts everything.
+    expect(ownLogArchive.isOwnLogName("manifest.json")).toBe(false);
   });
 
   it("战报曲线的指标组成 == 榜单 meterValue 的组成(治疗含吸收)", () => {

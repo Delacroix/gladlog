@@ -14,6 +14,7 @@
     "verify:parser-oracle": "node scripts/verify-parser-oracle.mjs",
     "logs:stream": "npm -w @gladlog/log-pipeline run stream --",
     "logs:collect": "npm -w @gladlog/log-pipeline run collect --",
+    "logs:archive-own": "tsx packages/corpus-tools/scripts/archiveOwnLogs.ts",
     "logs:fetch-public": "tsx packages/eval/scripts/fetchPublicLogs.ts",
     "corpus:build-reference": "tsx packages/corpus-tools/scripts/buildCorpus.ts"
   },

@@ -17,6 +17,42 @@ npm run logs:collect   # Local machine: byte-accurately reconstruct log files fr
 
 Implementation: `packages/log-pipeline` (independent deployment package, with built-in state/cleanup/heartbeat).
 
+## 2b. Permanent Drive Archive of Your Own Logs
+
+```bash
+npm run logs:archive-own              # incremental: gzip + upload what is new
+DRY_RUN=1 npm run logs:archive-own    # list what would go up, touch nothing
+```
+
+Copies the collector's reconstructed logs (`~/gladlog-sync/logs`) to
+`gdrive:gladlog-own-logs` as gzip (measured **11.6x**: 21 GB of logs →
+1.9 GB on Drive). The local `.txt` files are never touched — this adds a
+copy, it does not move one.
+
+Three things make it permanent, and all three are load-bearing:
+
+- **`rclone copy`, never `rclone sync`.** `sync` deletes remote files that
+  are absent locally, so the day the local 21 GB is cleared, the archive
+  would be cleared with it. A unit test in
+  `packages/corpus-tools/src/ownLogArchive.test.ts` pins the subcommand and
+  the absence of any `--delete` flag.
+- **No delete path at all.** The script deletes only its own local staging,
+  after an upload is confirmed.
+- **A separate Drive directory from `gladlog-relay`**, whose segments the
+  relay cleans up by design.
+
+Dedup keys on **(filename, source size)**, recorded in
+`gdrive:gladlog-own-logs/manifest.json` (on Drive, not locally, so it
+survives losing this machine). Size, not name alone: a session archived
+while the streamer was still appending is a truncated snapshot, and
+name-only dedup would pin that truncation forever. For the same reason a
+log touched within the last 10 minutes is skipped — it is probably still
+being written.
+
+The manifest is written **after** the logs are confirmed uploaded. A
+failed upload keeps the local staging and leaves the manifest alone, so a
+re-run retries; the reverse order would mark a file done that never landed.
+
 ## 3. Public Match Fetching (eval corpus; wowarenalogs public feed)
 
 ```bash

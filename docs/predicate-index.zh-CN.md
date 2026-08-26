@@ -225,6 +225,9 @@
 | 下载下来的载荷完整吗                    | `packages/corpus-tools/src/archivePlan.ts` → `checkArchivePayload`      | `scripts/archivePvpLogs.ts`                                | 按正确顺序组合下面两层检查。                                                                                                   |
 | 压缩字节数与 GCS 声明是否一致           | `packages/corpus-tools/src/pvpLogFetch.ts` → `checkRawPayloadBytes`     | `archivePlan.ts`、`scripts/fetchPvpLogs.ts`                | 必须在**未解压**字节上比。                                                                                                     |
 | 解压后的文本是否含两个哨兵              | `packages/corpus-tools/src/pvpLogFetch.ts` → `checkDecompressedPayload` | `archivePlan.ts`、`scripts/fetchPvpLogs.ts`                | 这一层永远不看字节数——那是上一条的事。                                                                                         |
+| 本地目录如何拷到 Drive(永不删云端)     | `packages/corpus-tools/src/driveSync.ts` → `buildRcloneCopyArgs`        | `scripts/syncPvpLogsToDrive.ts`、`scripts/archiveOwnLogs.ts` | 只能 `copy`,绝不能 `sync`:`sync` 会删掉「云端有、本地没有」的文件,清本地 21GB 就等于清掉永久归档。`ownLogArchive.test.ts` 同时钉住子命令和「不含任何 `--delete` 参数」。 |
+| collector 输出目录里的文件是否是自有战斗日志 | `packages/corpus-tools/src/ownLogArchive.ts` → `isOwnLogName`           | `scripts/archiveOwnLogs.ts`                                | 必须接受 `outputNameFor`(在 `packages/log-pipeline/src/collectLogs.ts` 里)产出的全部命名,否则改名后就静默不再归档。两个包无法共享导出(log-pipeline 刻意保持零依赖),故由 `predicateIndex.test.ts` 直接断言这层关系。 |
+| 已归档的日志是否需要重传                | `packages/corpus-tools/src/ownLogArchive.ts` → `selectOwnLogsToArchive` | `scripts/archiveOwnLogs.ts`                                | 键是(文件名,**源文件大小**)而不是只看文件名:边写边归档得到的是截断快照,只按文件名去重会把这个截断永远钉住。 |
 
 ### 战报 UI(`packages/desktop` renderer)
 
