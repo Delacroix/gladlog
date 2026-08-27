@@ -46,28 +46,20 @@
  * 只是恰好都属于"目标不能按技能"的广义硬控。brief 要求两者分开跑、分开报告,
  * 不合并观测集——本文件的 `--category` 严格一次只选一个类别的 aura 集合。
  *
- * **C×E 口径分歧登记(挂账清理批,2026-08-15)**:本扫描直接消费
- * `DR_CATEGORIES_GENERATED` 原始数组(DB2 `DiminishType` 逐条归类,未加任何
- * 覆盖),而产品侧 DR 语义走的是 `drAnalysis.ts` 的 `DR_CATEGORY_MAP`(在生成层
- * 之上叠了一层已知 Blizzard 数据错误的手工覆盖)。两者在部分 id 上有已知分歧:
- * 33786 旋风(Cyclone)在 `DR_CATEGORIES_GENERATED.disorient` 里,但
- * `DR_CATEGORY_MAP` 把它覆盖成官方独立的 "Cyclone" 类(不与 disorient 共享
- * DR);99 夺魂咆哮(Incapacitating Roar)在 `DR_CATEGORIES_GENERATED.incapacitate`
- * 里,但 `DR_CATEGORY_MAP` 把它覆盖成 "Disorient"(游戏内实际表现为迷惑而非心控)。
- * 本线(Task E)扫描追踪的全部 7 个恐惧类 aura(5484 恐惧嚎叫、6358 诱惑、8122
- * 心灵尖啸、5246 破胆怒吼、118699 恐惧、360806 梦游、207685 悲苦咒符——树皮术
- * 22812 的最终 sign 结论具体引用其中 6 个,见 task-E-report.md)均不在上述分歧
- * 集内,所以这次的 feared 裁决不受影响。但若日后有产品代码想直接复用
- * 这份扫描的 `--category` 集合(而不是重新走 `DR_CATEGORY_MAP`),必须先对齐
- * 覆盖层,否则 33786/99 一类 id 会被错误分类。见
- * `docs/predicate-index.md`/`.zh-CN.md`「尚未统一」节的同名登记。
+ * **C×E 口径分歧(2026-08-15 登记,2026-08-27 收口,GH #33)**:本扫描曾直接消费
+ * `DR_CATEGORIES_GENERATED` 原始数组(DB2 `DiminishType` 逐条归类,未加覆盖),
+ * 与产品侧 `drAnalysis.ts` 的 `DR_CATEGORY_MAP`(叠了手工覆盖层)在 33786 旋风
+ * (产品:独立 "Cyclone" 类,不与 disorient 共享)和 99 夺魂咆哮(产品:Disorient
+ * 而非 Incapacitate)上分歧。现改为消费 `drCategoryIds(label)`——`DR_CATEGORY_MAP`
+ * 的逆视图——与产品同一谓词;收口当日集合差(原始生成 → 产品视图):stun +107079 +376077;disorient −33786 +99;
+ * incapacitate −99 −107079 +12826 +118381。Task E 追踪的 7 个恐惧类 aura 均不在分歧集内,
+ * 历史 feared 裁决不受影响。
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { SPELL_NAMES_ZH_GENERATED } from "@gladlog/analysis";
+import { drCategoryIds, SPELL_NAMES_ZH_GENERATED } from "@gladlog/analysis";
 import { UWC_ANCHORS } from "@gladlog/analysis/scripts/datagen/usableWhileCcAnchors";
-import { DR_CATEGORIES_GENERATED } from "@gladlog/analysis/src/data/drCategoriesGenerated";
 import { USABLE_WHILE_CC_GENERATED } from "@gladlog/analysis/src/data/usableWhileCcGenerated";
 import fs from "fs-extra";
 
@@ -81,6 +73,12 @@ import {
 } from "../src/explore/uwcObserved";
 
 type Category = "stun" | "disorient" | "incapacitate";
+/** CLI category → DR_CATEGORY_MAP label */
+const CATEGORY_LABEL: Record<Category, string> = {
+  stun: "Stun",
+  disorient: "Disorient",
+  incapacitate: "Incapacitate",
+};
 const CATEGORIES: Category[] = ["stun", "disorient", "incapacitate"];
 /** The two categories Task E scans for the feared/disorient observation
  * line — everything except stun, which keeps the pre-existing Task 4 path
@@ -529,10 +527,12 @@ async function main(): Promise<void> {
     disableWindowCap,
   } = parseArgs();
 
-  const auraIds = new Set(DR_CATEGORIES_GENERATED[category] ?? []);
+  // GH #33: the product's category view (DR_CATEGORY_MAP with its override
+  // layer), not the raw DB2 arrays — see drCategoryIds.
+  const auraIds = drCategoryIds(CATEGORY_LABEL[category]);
   if (auraIds.size === 0) {
     throw new Error(
-      `DR_CATEGORIES_GENERATED.${category} is empty — check the import path`,
+      `drCategoryIds(${CATEGORY_LABEL[category]}) is empty — check DR_CATEGORY_MAP`,
     );
   }
 

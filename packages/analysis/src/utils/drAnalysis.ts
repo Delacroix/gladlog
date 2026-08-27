@@ -150,6 +150,24 @@ export const DR_CATEGORY_MAP: Record<string, string> = (() => {
 })();
 
 /**
+ * Every spell id the product files under one DR category label ("Stun",
+ * "Disorient", "Incapacitate", "Cyclone", …) — the inverse view of
+ * `DR_CATEGORY_MAP`, override layer included. The single source for any
+ * consumer that needs a per-category id SET rather than a per-id lookup:
+ * eval's `uwcCorpusScan --category` used to read `DR_CATEGORIES_GENERATED`
+ * directly and therefore disagreed with the product on 33786 Cyclone (own
+ * category, not Disorient) and 99 Incapacitating Roar (Disorient, not
+ * Incapacitate) — predicate-index "not yet unified" entry, closed 2026-08-27
+ * (GH #33).
+ */
+export function drCategoryIds(label: string): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const [id, cat] of Object.entries(DR_CATEGORY_MAP))
+    if (cat === label) out.add(id);
+  return out;
+}
+
+/**
  * Spell IDs whose single cast can apply CC to multiple enemy targets simultaneously.
  * Used to group SPELL_AURA_APPLIED events from analyzeOutgoingCCChains into per-cast AoE events.
  */
