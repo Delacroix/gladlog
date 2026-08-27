@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   addCastToIndex,
+  buildCastMatchIndex,
   classifyDispel,
   createCastMatchIndex,
   DISPEL_CAST_MATCH_WINDOW_MS,
@@ -109,5 +110,50 @@ describe("classifyDispel (UI review 2026-08-21 #3)", () => {
         timestamp: 10_000,
       }),
     ).toBe("rider");
+  });
+});
+
+describe("buildCastMatchIndex (GH #32 — shared by product and the corpus-gate generator)", () => {
+  it("indexes only SPELL_CAST_SUCCESS, keyed on the raw source GUID with unit id as fallback", () => {
+    const idx = buildCastMatchIndex([
+      {
+        id: PLAYER,
+        spellCastEvents: [
+          {
+            logLine: { event: "SPELL_CAST_SUCCESS" },
+            srcUnitId: PLAYER,
+            spellId: "527",
+            spellName: "Purify",
+            timestamp: 10_000,
+          },
+          // a cast START must not count as a decision
+          {
+            logLine: { event: "SPELL_CAST_START" },
+            srcUnitId: PLAYER,
+            spellId: "527",
+            spellName: "Purify",
+            timestamp: 20_000,
+          },
+          // missing srcUnitId falls back to the unit id
+          {
+            logLine: { event: "SPELL_CAST_SUCCESS" },
+            spellId: "19505",
+            spellName: "Devour Magic",
+            timestamp: 30_000,
+          },
+        ],
+      },
+    ]);
+    expect(idx.byId.get(`${PLAYER}|527`)).toEqual([10_000]);
+    expect(idx.byName.get(`${PLAYER}|Purify`)).toEqual([10_000]);
+    expect(idx.byId.get(`${PLAYER}|19505`)).toEqual([30_000]);
+    expect(
+      classifyDispel(idx, {
+        srcUnitId: PLAYER,
+        spellId: "527",
+        spellName: "Purify",
+        timestamp: 20_300,
+      }),
+    ).toBe("proc");
   });
 });

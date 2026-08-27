@@ -16,6 +16,7 @@
  *    confidence, used as the control anchor.
  *
  * Usage: npx tsx packages/eval/scripts/confidenceAudit.ts --manifest <file>
+ *        [--emit-table [--date YYYY-MM-DD]]
  */
 import { readFileSync } from "fs";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
@@ -24,7 +25,13 @@ import {
   CombatUnitReaction,
   LogEvent,
 } from "@gladlog/parser-compat";
-import { extractCandidateFindings, isHealerSpec } from "@gladlog/analysis";
+import {
+  buildCastMatchIndex,
+  classifyDispel,
+  type DispelKind,
+  extractCandidateFindings,
+  isHealerSpec,
+} from "@gladlog/analysis";
 
 const argv = process.argv.slice(2);
 const mIdx = argv.indexOf("--manifest");
@@ -38,8 +45,18 @@ const files = readFileSync(argv[mIdx + 1]!, "utf8")
   .filter(Boolean);
 
 // Corpus observation: spellId that has been dispelled/stolen -> count (either
-// side, any match)
+// side, any match). GH #32: counted under the product's `classifyDispel`
+// predicate — riders (Cat Form shaking off a snare is logged as SPELL_DISPEL)
+// are NOT evidence that anyone dispelled the debuff, so they are excluded.
+// Procs (Cleanse the Weak …) do remove the aura and stay in.
 const dispelledIds = new Map<string, number>();
+// Per-kind tally of the same events, for the before/after ledger
+const kindTally: Record<DispelKind, number> = {
+  deliberate: 0,
+  proc: 0,
+  rider: 0,
+};
+const riderOnlyIds = new Map<string, number>();
 // Candidate references: type -> spellId -> { candidate count, match sample }
 const cleanseCands = new Map<string, { n: number; name: string }>();
 const purgeCands = new Map<string, { n: number; name: string }>();
@@ -60,16 +77,29 @@ for (const f of files) {
     try {
       const legacy = toLegacyMatch({ ...m, rawLines: [] } as GladMatch);
       const units = Object.values(legacy.units);
-      // Observation side: the removed id of every SPELL_DISPEL /
-      // SPELL_STOLEN in the match
+      // Observation side: the removed id of every non-rider SPELL_DISPEL /
+      // SPELL_STOLEN in the match (same cast index + predicate as
+      // reconstructDispelSummary)
+      const castIndex = buildCastMatchIndex(units);
       for (const u of units)
         for (const a of u.actionOut ?? []) {
           const ev = a.logLine?.event;
           if (ev !== LogEvent.SPELL_DISPEL && ev !== LogEvent.SPELL_STOLEN)
             continue;
           const removed = (a as { extraSpellId?: string }).extraSpellId;
-          if (removed)
-            dispelledIds.set(removed, (dispelledIds.get(removed) ?? 0) + 1);
+          if (!removed) continue;
+          const kind = classifyDispel(castIndex, {
+            srcUnitId: a.srcUnitId,
+            spellId: a.spellId,
+            spellName: a.spellName,
+            timestamp: a.timestamp,
+          });
+          kindTally[kind]++;
+          if (kind === "rider") {
+            riderOnlyIds.set(removed, (riderOnlyIds.get(removed) ?? 0) + 1);
+            continue;
+          }
+          dispelledIds.set(removed, (dispelledIds.get(removed) ?? 0) + 1);
         }
 
       const players = units.filter((u) => u.info);
@@ -138,6 +168,11 @@ function reportSide(
 // (part of the update-wow-data flow)
 const eIdx = argv.indexOf("--emit-table");
 if (eIdx >= 0) {
+  const riderOnly = [...riderOnlyIds.keys()].filter(
+    (id) => !dispelledIds.has(id),
+  );
+  const dIdx = argv.indexOf("--date");
+  const args = { date: dIdx >= 0 ? argv[dIdx + 1] : "unknown date" };
   const rows = [...dispelledIds.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([id, n]) => `  "${id}", // ×${n}`)
@@ -152,10 +187,17 @@ if (eIdx >= 0) {
  * no candidate: "you should have dispelled that" does not hold up at the corpus
  * level.
  *
+ * Generated under the dispelKind predicate (utils/dispelKind.ts, GH #32):
+ * only deliberate + proc removals count; rider dispels (a form shift /
+ * movement ability shaking off its own root or snare) are excluded, so a
+ * debuff that was only ever shaken off never opens this gate.
+ * Kind tally at generation: deliberate ${kindTally.deliberate}, proc ${kindTally.proc},
+ * rider ${kindTally.rider} (excluded); ${riderOnly.length} ids were rider-only.
+ *
  * Regenerate: npx tsx packages/eval/scripts/confidenceAudit.ts \\
  *   --manifest $GLADLOG_EVAL_HOME/corpus/manifest-fullscale.txt --emit-table \\
  *   > packages/analysis/src/data/dispelObservedGenerated.ts
- * Corpus snapshot: ${matches} matches, ${dispelledIds.size} ids (2026-07-24).
+ * Corpus snapshot: ${matches} matches, ${dispelledIds.size} ids (${args.date}).
  */
 export const CORPUS_OBSERVED_DISPEL_IDS: ReadonlySet<string> = new Set([
 ${rows}
@@ -166,7 +208,9 @@ ${rows}
 }
 
 console.log(
-  `matches=${matches};语料观测到被驱散/偷取的不同 spellId:${dispelledIds.size}`,
+  `matches=${matches};语料观测到被驱散/偷取的不同 spellId:${dispelledIds.size}` +
+    `(kind: deliberate ${kindTally.deliberate} / proc ${kindTally.proc} / rider ${kindTally.rider} excluded;` +
+    ` rider-only ids ${[...riderOnlyIds.keys()].filter((id) => !dispelledIds.has(id)).length})`,
 );
 reportSide("missed-cleanse(可解性主张)", cleanseCands);
 reportSide("missed-purge(可 purge 主张)", purgeCands);

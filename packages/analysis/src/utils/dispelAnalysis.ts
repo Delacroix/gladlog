@@ -37,9 +37,8 @@ import { threatActiveAt } from "./threatAssessment";
 export type DispelPriority = "Critical" | "High" | "Medium" | "Low";
 import { DISPEL_FEATURE_FLAGS } from "../data/dispelFeatureFlags";
 import {
-  addCastToIndex,
+  buildCastMatchIndex,
   classifyDispel,
-  createCastMatchIndex,
   type DispelKind,
 } from "./dispelKind";
 
@@ -766,10 +765,7 @@ function targetDiedAround(
   applyTs: number,
   removalTs: number,
 ): boolean {
-  const endMs = Math.max(
-    removalTs,
-    applyTs + POST_CC_PRESSURE_WINDOW_S * 1000,
-  );
+  const endMs = Math.max(removalTs, applyTs + POST_CC_PRESSURE_WINDOW_S * 1000);
   return (unit.deathRecords ?? []).some(
     (d) => d.timestamp >= applyTs && d.timestamp <= endMs,
   );
@@ -1325,19 +1321,7 @@ export function reconstructDispelSummary(
 
   // Cast index keyed on the RAW source GUID of each cast (pets index their
   // own casts — see dispelKind.ts). Built once per call over every unit.
-  const castIndex = createCastMatchIndex();
-  for (const u of unitMap.values()) {
-    for (const c of u.spellCastEvents) {
-      if (c.logLine.event !== LogEvent.SPELL_CAST_SUCCESS) continue;
-      addCastToIndex(
-        castIndex,
-        c.srcUnitId || u.id,
-        c.spellId,
-        c.spellName,
-        c.timestamp,
-      );
-    }
-  }
+  const castIndex = buildCastMatchIndex(unitMap.values());
 
   for (const unit of [...friends, ...friendlyPets, ...enemies, ...enemyPets]) {
     const isPetUnit = friendlyPetIds.has(unit.id) || enemyPetIds.has(unit.id);

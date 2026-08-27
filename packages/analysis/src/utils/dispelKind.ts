@@ -29,9 +29,14 @@
  * Shared predicate: analysis stamps `IDispelEvent.dispelKind` from it; the
  * desktop KPI chip / dispel dashboard / stats table read that field; eval's
  * coverageManifest imports MOVEMENT_ROOT_BREAK_DISPEL_IDS from here (it used
- * to own the list). Completeness of the list is checked both directions by
+ * to own the list); eval's confidenceAudit --emit-table (the generator of
+ * data/dispelObservedGenerated.ts, GH #32) builds the corpus-attested
+ * dispellable set through `buildCastMatchIndex` + `classifyDispel`, so a
+ * rider never opens the missed-cleanse / missed-purge corpus gate. Completeness of the list is checked both directions by
  * packages/eval/scripts/dispelKindScan.ts (Curated-List rule).
  */
+import { LogEvent } from "@gladlog/parser-compat";
+
 export type DispelKind = "deliberate" | "proc" | "rider";
 
 /** ±window between the cast and the dispel it produced. Same-GCD in practice;
@@ -101,6 +106,42 @@ export function addCastToIndex(
     list.push(timestamp);
     index.byName.set(k, list);
   }
+}
+
+/**
+ * Build the cast index over every unit's SPELL_CAST_SUCCESS, keyed on the RAW
+ * source GUID (pets index their own casts — see the header). Single source
+ * for the two consumers of `classifyDispel`: `reconstructDispelSummary`
+ * (product) and eval's `confidenceAudit --emit-table` (the generator of
+ * `dispelObservedGenerated.ts`, GH #32) — the corpus gate must be built under
+ * the same kind predicate the product stamps on `IDispelEvent.dispelKind`.
+ */
+export function buildCastMatchIndex(
+  units: Iterable<{
+    id: string;
+    spellCastEvents: ReadonlyArray<{
+      logLine: { event: string };
+      srcUnitId?: string;
+      spellId?: string | null;
+      spellName?: string | null;
+      timestamp: number;
+    }>;
+  }>,
+): CastMatchIndex {
+  const index = createCastMatchIndex();
+  for (const u of units) {
+    for (const c of u.spellCastEvents) {
+      if (c.logLine.event !== LogEvent.SPELL_CAST_SUCCESS) continue;
+      addCastToIndex(
+        index,
+        c.srcUnitId || u.id,
+        c.spellId,
+        c.spellName,
+        c.timestamp,
+      );
+    }
+  }
+  return index;
 }
 
 const within = (list: number[] | undefined, t: number): boolean =>

@@ -51,6 +51,7 @@ import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
 import * as deathOutcomeAnalysis from "@gladlog/analysis/src/utils/deathOutcomeAnalysis";
 import * as dispelAnalysis from "@gladlog/analysis/src/utils/dispelAnalysis";
 import * as dispelKind from "@gladlog/analysis/src/utils/dispelKind";
+import * as dispelObservedGenerated from "@gladlog/analysis/src/data/dispelObservedGenerated";
 import * as dpsMetrics from "@gladlog/analysis/src/utils/dpsMetrics";
 import * as drAnalysis from "@gladlog/analysis/src/utils/drAnalysis";
 import { HEALER_OFFENSE_FLAGS } from "@gladlog/analysis/src/utils/healerOffenseAnalysis";
@@ -475,6 +476,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/utils/dispelKind.ts`,
     symbol: "MOVEMENT_ROOT_BREAK_DISPEL_IDS",
     mod: dispelKind,
+  },
+  {
+    file: `${A}/data/dispelObservedGenerated.ts`,
+    symbol: "CORPUS_OBSERVED_DISPEL_IDS",
+    mod: dispelObservedGenerated,
   },
   {
     file: `${A}/compare/cellLookup.ts`,
