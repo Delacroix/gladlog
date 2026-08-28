@@ -56,12 +56,27 @@ const ADAPTATION_ITEM_IDS = new Set<string>(
 /**
  * Window in ms within which a trinket cast is considered a direct response
  * to a CC application (applied then trinket used within this window).
+ *
+ * GH #34 batch 4 (2026-08-28), 300 matches / 3,130 trinket uses with a prior
+ * CC: latency from the nearest prior CC — < 1 s 1,469 · 1–2 s 1,165 · 2–3 s 142
+ * · 3–5 s 79 · 5–8 s 39 · 8–15 s 54 · ≥ 15 s 182 (p50 1.0 s, p90 3.6 s,
+ * 91.2 % ≤ 5 s). The 5 s cut sits in the sparse tail after the 2 s mass, so
+ * moving it ±2 s reclassifies < 4 % of uses. Measured, not official.
  */
 const TRINKET_RESPONSE_WINDOW_MS = 5000;
 
 /**
  * Minimum damage taken during a CC window for it to be considered a meaningful
  * missed trinket opportunity.
+ *
+ * GH #34 batch 4 (2026-08-28), same corpus, 10,322 `available_unused` CC
+ * instances: damageTakenDuring < 10 k 4,746 · 10–20 k 1,051 · 20–30 k 798 ·
+ * 30–50 k 1,085 · 50–100 k 1,156 · ≥ 100 k 1,486 (p50 13.6 k, p75 51.8 k,
+ * p90 145 k). Share kept as "missed trinket": ≥ 20 k 43.8 % · **≥ 30 k
+ * 36.1 %** · ≥ 50 k 25.6 % — a smooth region with no natural break, so the
+ * threshold is an editorial cut on a continuum. (CCs where the trinket WAS
+ * used show p50 2.7 k — the comparison is confounded by the trinket itself
+ * cutting the window short.) Re-run the distribution before moving it.
  */
 const SIGNIFICANT_CC_DAMAGE = 30_000;
 
@@ -198,6 +213,9 @@ export const PHYSICAL_CC_IDS = new Set<string>([
   "20549", // War Stomp
 ]);
 /** Grounding Totem redirects only the FIRST targeted spell per placement; don't credit two within this window. */
+// GH #34 batch 4 (2026-08-28): rendering dedupe only — collapses Grounding Totem
+// redirects closer than 6 s into one [CC AVOIDED] line. No predicate or candidate
+// reads it; editorial, not measured.
 const GROUNDING_DEDUPE_SECONDS = 6;
 
 export const REPOSITIONING_SPELL_IDS = new Map<string, string>([
