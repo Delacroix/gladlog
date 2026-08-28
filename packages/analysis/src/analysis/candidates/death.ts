@@ -25,10 +25,27 @@ import { CandidateEvent } from "../types";
 import { filterIntentGuardEvidence, formatAttemptedFact } from "./shared";
 
 /** death-setup: maximum lookback (seconds) from a death to a precursor event —
- * resource spends earlier than this are too causally weak for that death. */
+ * resource spends earlier than this are too causally weak for that death.
+ *
+ * GH #34 batch 4 (2026-08-28), 300 matches / 1,127 healer rounds, 507
+ * death-setup candidates (healer-locked 284 · trinket-early 177 ·
+ * defensive-early 46). Gap death − precursor: trinket-early [0,10) 11 ·
+ * [10,20) 17 · [20,30) 17 · [30,45) 25 · [45,60) 46 · [60,75) 39 · ≥ 75 22
+ * (p50 50.9 s, p90 77.5 s, max 89.8 s) — the mass RISES toward the cap, so
+ * 90 s is binding: it is the "causally too weak" cut on a still-populated
+ * tail, not a natural end. defensive-early p50 21.9 s, max 83 s (cap not
+ * binding). Editorial; measured, not official. */
 export const DEATH_SETUP_LOOKBACK_S = 90;
 /** death-setup: minimum healer CC duration (seconds) — a short incapacitate
- * does not make the kill window unhealable. */
+ * does not make the kill window unhealable.
+ *
+ * GH #34 batch 4 (2026-08-28), 300 matches / 566 friendly deaths: 74.6 % of
+ * deaths have a healer CC overlapping the DEATH_CC_LOOKBACK_S window; the
+ * longest such CC per death — [0,1) 23 · [1,2) 42 · [2,3) 45 · [3,4) 75 ·
+ * [4,5) 65 · [5,6) 78 · [6,8) 86 · ≥ 8 8 (p50 4.2 s). Share clearing the
+ * gate: ≥ 2 s 84.6 % · **≥ 3 s 73.9 %** · ≥ 4 s 56.2 % — so "healer-locked"
+ * attaches to roughly 55 % of ALL friendly deaths at 3 s (41 % at 4 s). No
+ * natural break; editorial. Measured, not official. */
 const HEALER_LOCK_MIN_S = 3;
 /** Max precursor events attached to one death (priority: healer-locked >
  * trinket-early > defensive-early). */
