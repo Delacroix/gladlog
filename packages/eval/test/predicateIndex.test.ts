@@ -54,6 +54,7 @@ import * as dispelKind from "@gladlog/analysis/src/utils/dispelKind";
 import * as dispelObservedGenerated from "@gladlog/analysis/src/data/dispelObservedGenerated";
 import * as dpsMetrics from "@gladlog/analysis/src/utils/dpsMetrics";
 import * as drAnalysis from "@gladlog/analysis/src/utils/drAnalysis";
+import * as trinketCooldown from "@gladlog/analysis/src/utils/trinketCooldown";
 import { HEALER_OFFENSE_FLAGS } from "@gladlog/analysis/src/utils/healerOffenseAnalysis";
 import * as incomingPressure from "@gladlog/analysis/src/utils/incomingPressure";
 import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWindowTargetSelection";
@@ -249,6 +250,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/utils/drAnalysis.ts`,
     symbol: "isStunCcInstance",
     mod: drAnalysis,
+  },
+  {
+    file: `${A}/utils/trinketCooldown.ts`,
+    symbol: "HEALER_TRINKET_CD_S",
+    mod: trinketCooldown,
   },
   {
     file: `${A}/utils/drAnalysis.ts`,

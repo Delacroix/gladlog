@@ -21,7 +21,14 @@ const SPELLS = spellsData as Record<string, SpellEntry>;
 
 /** Minimum vulnerability window duration to surface (seconds) */
 const MIN_VULN_SECONDS = 5;
-/** Fallback buff duration when spellEffectData has no durationSeconds */
+/** Fallback buff duration when spellEffectData has no durationSeconds.
+ *  GH #34 batch 4 (2026-08-28): of the 39 externalOrBigDefensiveSpellIds this
+ *  file tracks, exactly ONE lacks an official duration — Rallying Cry 97462,
+ *  whose cast spell has DurationIndex 0 in DB2 (the buff lives on 97463). So
+ *  this fallback fires for Rallying Cry only, and 8s under-states it: the 97463
+ *  aura's official duration is 10s (SpellDuration 1 → 10000ms). Wiring that is a
+ *  data-override decision recorded on the issue, not made here. Any other
+ *  id reaching this branch means the generated table regressed. */
 const DEFAULT_BUFF_DURATION_S = 8;
 // CAPITALIZE_RATIO (1.2× match-average rate) removed 2026-08-19: measured on
 // n=300 (GH #16), only 4 of 3486 windows ever cleared it — the denominator

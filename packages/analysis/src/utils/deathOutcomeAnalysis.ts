@@ -486,7 +486,17 @@ export function wasLockedOutByStunOnly(
   );
 }
 
-// Max range for external defensive spells (all are 40-yard targeted spells in WoW).
+// Max range for external defensive spells. GH #34 batch 4 (2026-08-28) checked
+// every externalDefensiveSpellIds entry against official DB2 SpellMisc.RangeIndex
+// → SpellRange at 12.1.0.69382: 9 targeted externals ARE 40yd (Pain Suppression,
+// Guardian Spirit, Ironbark, BoP, Sacrifice, Spellwarding, Life Cocoon,
+// PW: Barrier, Spirit Link Totem); TWO are 30yd (Anti-Magic Zone 51052
+// placement, Time Dilation 357170); FOUR are caster-centred auras with range 0
+// whose reach is their radius, not a cast range (Rallying Cry, Aura Mastery,
+// Darkness, Zephyr). So 40 over-reaches by ≤10yd for two spells and is the wrong
+// kind of number for four — a per-spell official range/radius table would be the
+// door-1 fix; impact (teammates 30–40yd away holding TD/AMZ at a death) is
+// unmeasured. Left at 40 pending that ruling; do not "fix" by hand-typing 30.
 const EXTERNAL_SPELL_RANGE_YARDS = 40;
 
 export function buildDeathOutcomeSummary(

@@ -6,7 +6,11 @@ import {
 } from "@gladlog/parser-compat";
 
 import { getEnglishSpellName } from "../data/spellEffectData";
-import { spellSchoolMask, immunityCoversSpell, isPhysicalSpell } from "../data/spellSchools";
+import {
+  spellSchoolMask,
+  immunityCoversSpell,
+  isPhysicalSpell,
+} from "../data/spellSchools";
 import {
   BREAK_RACIAL_SPELL_IDS,
   racialName,
@@ -29,6 +33,7 @@ import {
   INTERP_MAX_GAP_MS,
 } from "./positionSampling";
 import { getTalentAvoidanceBuffs } from "./talentBehaviors";
+import { DPS_TRINKET_CD_S, HEALER_TRINKET_CD_S } from "./trinketCooldown";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -47,9 +52,6 @@ const RELENTLESS_ITEM_IDS = new Set<string>(
 const ADAPTATION_ITEM_IDS = new Set<string>(
   trinketItemIdsData.adaptationItemIds,
 );
-
-const HEALER_TRINKET_CD_S = 90;
-const DPS_TRINKET_CD_S = 120;
 
 /**
  * Window in ms within which a trinket cast is considered a direct response

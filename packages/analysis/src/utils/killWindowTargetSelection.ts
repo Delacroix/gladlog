@@ -20,6 +20,7 @@ import {
 } from "./cooldowns";
 import { fmtTime } from "./renderGrid";
 import { IOffensiveWindow } from "./offensiveWindows";
+import { DPS_TRINKET_CD_S, HEALER_TRINKET_CD_S } from "./trinketCooldown";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -37,11 +38,6 @@ const MAJOR_DEF_IDS = new Set<string>(
 export const PVP_TRINKET_SPELL_IDS = new Set<string>([
   "336126", // Gladiator's Medallion (active break-CC)
 ]);
-
-/** Healer trinket CD (seconds). */
-const HEALER_TRINKET_CD_S = 90;
-/** DPS trinket CD (seconds). */
-const DPS_TRINKET_CD_S = 120;
 
 /** Minimum window duration to bother comparing (mirrors MIN_VULN_SECONDS in offensiveWindows).
  * Shared with burstLedger's targeting audit — same "window long enough to judge" fact. */

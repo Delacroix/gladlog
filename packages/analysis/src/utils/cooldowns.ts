@@ -296,7 +296,13 @@ export function usableWhileStunned(
  * at a death (false accusation). Forbearance is not reliably logged as an aura, so detect it from the
  * applying cast: Divine Shield always self-applies; the ally-castable ones self-apply only when cast on self.
  */
-export const FORBEARANCE_SECONDS = 30;
+// Official read (GH #34 batch 4, 2026-08-28): DB2 Spell 25771 Forbearance
+// durationSeconds = 30 at 12.1.0.69382 (SpellMisc.DurationIndex 9 → 30000ms).
+// The literal is only the fallback if the generated table ever loses the row;
+// `forbearance.test.ts` pins official == fallback so a drift goes red.
+export const FORBEARANCE_FALLBACK_SECONDS = 30;
+export const FORBEARANCE_SECONDS =
+  spellEffectData["25771"]?.durationSeconds ?? FORBEARANCE_FALLBACK_SECONDS;
 export const FORBEARANCE_GATED_IDS = new Set<string>([
   "642",
   "633",
