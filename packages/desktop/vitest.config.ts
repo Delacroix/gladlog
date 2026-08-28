@@ -6,6 +6,8 @@ export default defineConfig({
     // Now that the large data tables load in the background, an import no longer
     // guarantees readiness — the setup file waits for them (ensure.ts)
     setupFiles: ["./vitest.setup.ts"],
+    // GH #26: paired with asyncUtilTimeout in vitest.setup.ts
+    testTimeout: 20_000,
     // qa/ is Playwright's territory: *.spec.ts is run by playwright, vitest must
     // not touch it
     exclude: [...configDefaults.exclude, "qa/**"],
