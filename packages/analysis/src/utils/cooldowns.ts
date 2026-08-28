@@ -341,7 +341,14 @@ const OFFENSIVE_SPELL_IDS = new Set<string>(
   ),
 );
 
-/** Only track cooldowns at or above this threshold */
+/** Only track cooldowns at or above this threshold.
+ *
+ * GH #34 batch 4 (2026-08-28), static check against the tagged classMetadata
+ * catalog with official cooldowns: ≥ 120 s 53 · [60,120) 31 · [45,60) 8 ·
+ * [30,45) 10 · [20,30) **1** (Gouge 25 s) · no official cd 19. The 30 s cut
+ * excludes exactly one catalog ability; the catalog itself is the real
+ * selector (it holds only major CDs), so this floor is a guard, not a
+ * curator. Measured against official data; the value is editorial. */
 const MIN_CD_SECONDS = 30;
 
 /**
@@ -480,7 +487,13 @@ export const SPEC_EXCLUSIVE_SPELLS: Record<string, CombatUnitSpec[]> = {
   "360828": [CombatUnitSpec.Evoker_Augmentation], // Blistering Scales
 };
 
-/** Ignore available windows shorter than this (e.g. just before match ends) */
+/** Ignore available windows shorter than this (e.g. just before match ends).
+ *
+ * GH #34 batch 4 (2026-08-28), 300 matches / 8,326 kept healer-owner
+ * available windows: (3,5] 182 · (5,8] 245 · (8,10] 176 · (10,20] 1,376 ·
+ * (20,30] 1,059 · (30,60] 1,851 · > 60 3,437 — ≤ 5 s is 2.2 %, ≤ 10 s 7.2 %.
+ * The 3 s grace sits at the very bottom of the distribution (raising it to
+ * 5 s would drop 2.2 % of windows). Measured, not official. */
 const GRACE_SECONDS = 3;
 
 export type DefensiveTimingLabel =
