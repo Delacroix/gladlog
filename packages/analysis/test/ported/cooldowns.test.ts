@@ -1952,6 +1952,29 @@ describe("findCheaperDefensiveAlternatives (review C2)", () => {
       cooldownSeconds: 180,
     });
 
+    // GH #36 item 4: the teammate-reach predicate is canHelpAnotherUnit (official
+    // targeting), so an unlisted team heal is a legitimate cheaper alternative for
+    // an external thrown on an ally, while a self-only tool still is not.
+    it("suggests an officially ally-reaching team heal (Revival) for a teammate cast even though it is not in externalDefensiveSpellIds", () => {
+      const revival = makeCD({
+        spellId: "115310",
+        spellName: "Revival",
+        cooldownSeconds: 120,
+      });
+      const bigExternal = makeCD({
+        spellId: "116849",
+        spellName: "Life Cocoon",
+        cooldownSeconds: 180,
+      });
+      const result = findCheaperDefensiveAlternatives(
+        bigExternal,
+        [bigExternal, revival, barkskin],
+        60,
+        { castTargetIsTeammate: true },
+      );
+      expect(result).toEqual(["Revival"]);
+    });
+
     it("only returns externals when castTargetIsTeammate is true", () => {
       const result = findCheaperDefensiveAlternatives(
         longCast,

@@ -1597,9 +1597,17 @@ export function findCheaperDefensiveAlternatives(
           (w) => atSeconds >= w.fromSeconds && atSeconds <= w.toSeconds,
         ) &&
         // H11: a self-only tool can't help a teammate — only suggest it when the cast that's
-        // being annotated targeted the owner themself.
+        // being annotated targeted the owner themself. GH #36 item 4 (2026-08-27): the
+        // "can it reach the teammate" fact is `canHelpAnotherUnit` (official targeting +
+        // team-heal registry), no longer the 15-entry hand list EXTERNAL_DEFENSIVE_IDS —
+        // that list could never suggest Tranquility / Divine Hymn / Revival (officially
+        // ally-reaching, unlisted), a false-negative shape recorded in GH #30 C1.
+        // Throughput-empower CDs stay out as ALTERNATIVES too: `canHelpAnotherUnit` counts
+        // Apotheosis as helping an ally (it does, indirectly), but "press Apotheosis
+        // instead of Pain Suppression" is not a cheaper substitute for a mitigation cast.
         (!opts.castTargetIsTeammate ||
-          EXTERNAL_DEFENSIVE_IDS.has(other.spellId)) &&
+          (canHelpAnotherUnit(other.spellId, other.tag) &&
+            !THROUGHPUT_EMPOWER_DEFENSIVE_IDS.has(other.spellId))) &&
         // Self-cast context: exclude damage-redirect externals that do nothing when
         // caster === target (verified mechanic, not a broad External exclusion).
         (!!opts.castTargetIsTeammate ||
