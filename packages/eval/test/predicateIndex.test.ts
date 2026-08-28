@@ -257,6 +257,11 @@ const INDEX: PredicateRow[] = [
     mod: trinketCooldown,
   },
   {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "MIN_CD_SECONDS",
+    mod: cooldowns,
+  },
+  {
     file: `${A}/utils/drAnalysis.ts`,
     symbol: "drCategoryIds",
     mod: drAnalysis,

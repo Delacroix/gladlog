@@ -349,7 +349,10 @@ const OFFENSIVE_SPELL_IDS = new Set<string>(
  * excludes exactly one catalog ability; the catalog itself is the real
  * selector (it holds only major CDs), so this floor is a guard, not a
  * curator. Measured against official data; the value is editorial. */
-const MIN_CD_SECONDS = 30;
+// Exported 2026-08-28 (GH #34 batch 4): enemyCDs.ts carried its own
+// uncommented copy of the same floor for the ENEMY offensive-CD timeline —
+// one fact ("what counts as a major cooldown"), one predicate.
+export const MIN_CD_SECONDS = 30;
 
 /**
  * Passive proc spells that emit SPELL_CAST_SUCCESS but are not intentional player casts.

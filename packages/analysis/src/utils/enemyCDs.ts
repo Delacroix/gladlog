@@ -10,6 +10,7 @@ import {
   getUnitHpAtTimestamp,
   HP_SAMPLE_RADIUS_MS,
   isHealerSpec,
+  MIN_CD_SECONDS,
   specToString,
 } from "./cooldowns";
 import { fmtTime } from "./renderGrid";
@@ -27,7 +28,6 @@ import {
   spellDangerWeight,
 } from "./spellDanger";
 
-const MIN_CD_SECONDS = 30;
 /** Two offensive CD casts within this window are considered an aligned burst.
  * Shared with burstLedger (friendly-side burst grouping) — one clustering predicate for both teams. */
 export const BURST_CLUSTER_SECONDS = 10;
