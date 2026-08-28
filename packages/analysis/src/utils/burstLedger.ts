@@ -36,7 +36,13 @@ const MIN_BURST_SPAN_S = BURST_CLUSTER_SECONDS;
  * kill. Exported 2026-08-18: killAttempts.ts judges "did this attempt convert"
  * with the same slack — one credit predicate, not two (CLAUDE.md rule). */
 export const KILL_CREDIT_SLACK_S = 5;
-/** Defensive overlaps shorter than this are noise (aura edge vs burst edge). */
+/** Defensive overlaps shorter than this are noise (aura edge vs burst edge).
+ *
+ * GH #34 batch 4 (2026-08-28), 300 matches / 2,244 DPS player-rounds / 5,895
+ * bursts / 3,086 kept defensive hits: overlap [0.5,1) 112 · [1,2) 270 ·
+ * [2,3) 299 · [3,5) 467 · [5,8) 744 · ≥ 8 1,194 (p50 6.4 s). Only 3.6 % of
+ * kept hits sit in the first half-second above the cut, so 0.5 s trims edge
+ * noise without touching the mass. Measured, not official. */
 const MIN_DEFENSIVE_OVERLAP_S = 0.5;
 
 export interface IBurstDefensiveHit {
@@ -337,7 +343,16 @@ export function auditWindowTargeting(
 }
 
 /** On-target share below this = off-target discipline problem.
- * Shared by the report card chip, the prompt block, and the off-target finding. */
+ * Shared by the report card chip, the prompt block, and the off-target finding.
+ *
+ * GH #34 batch 4 (2026-08-28), same corpus, 6,239 kill windows audited for
+ * DPS friendlies: onTargetPct < 20 2,053 · [20,40) 1,654 · [40,50) 736 ·
+ * [50,60) 556 · [60,80) 841 · [80,100) 376 · 100 23 (p50 32 %). Share
+ * flagged "off-target": < 40 59.4 % · **< 50 71.2 %** · < 60 80.1 %. At 50 the
+ * criterion fires on nearly three windows in four — it describes the norm,
+ * not a discipline problem; whether that is intended (or the kill-window
+ * target itself is the wrong reference, GH #31) is a value-gate question
+ * recorded on the issue. Value unchanged. Measured, not official. */
 export const ON_TARGET_GOOD_PCT = 50;
 
 // ---------------------------------------------------------------------------
