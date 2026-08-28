@@ -51,8 +51,24 @@ const EXTERNAL_DEFENSIVE_IDS = new Set<string>(
   spellIdListsData.externalDefensiveSpellIds as string[],
 );
 
+// Reaction floors: a dispellable debuff must sit on a friendly (cleanse) / a
+// purgeable buff on an enemy (purge) for at least this long before "you
+// missed it" is a fair claim. GH #34 batch 4 (2026-08-28), 300 matches /
+// 1,127 rounds, apply→removed lifetimes of ids that are officially dispellable
+// AND corpus-observed dispelled: DEBUFFS on friendlies (n=108,615) [0,1) 8,321
+// · [1,2) 9,233 · [2,3) 8,525 · [3,5) 16,890 · [5,8) 18,176 · [8,12) 15,936 ·
+// [12,20) 18,027 · ≥ 20 13,505 (p50 6.3 s) → ≥ 2 s 83.8 % · **≥ 3 s 76.0 %** ·
+// ≥ 5 s 60.4 %. BUFFS on enemies (n=141,840) [0,1) 54,183 · [1,2) 9,250 ·
+// [2,3) 10,340 · [3,5) 23,499 · [5,8) 12,714 · [8,12) 10,838 · [12,20) 11,241
+// · ≥ 20 9,771 (p50 3.0 s) → ≥ 2 s 55.3 % · **≥ 3 s 48.0 %** · ≥ 5 s 31.4 %.
+// The sub-second spike on the buff side (38 %) is procs/short auras the
+// threshold is exactly meant to exclude; the debuff side has no break at 3 s.
+// Both editorial (a human reaction-time bar), measured, not official.
 const MISSED_CLEANSE_THRESHOLD_S = 3;
 const MISSED_PURGE_THRESHOLD_S = 3;
+// Pairs a dispel with the backlash aura it caused (±4 s). Log-latency window
+// of the same kind as timelineHelpers' buff-expiry tolerances; not measured
+// in GH #34 batch 4 (2026-08-28) — noted, editorial.
 const PENALTY_WINDOW_MS = 4000;
 
 // Seconds after CC application to measure incoming damage for post-CC pressure weighting
