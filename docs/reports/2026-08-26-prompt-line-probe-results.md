@@ -42,3 +42,20 @@ promptQualityCheck 的确定性 hardFailures 是唯一防线,本实验验证了�
 跨版本混采(偏向假阳性,而结果仍零显著 → 强化空结论)/ 主题粒度指标 / CLI 无温度控制 /
 治疗视角语料 / 植入单类型单谎话 / 追问 n=1。完整 caveat 与额度节奏见方法文档与
 报告 artifact(2026-08-26 发布)。
+
+## 补记 2026-08-27:SPEC BASELINES 聚合行是惰性的(GH #36 第 1 项 ②a)
+
+逐施法的 Optimal/Late 判词并不进单轮 prompt(`criticalMoments` 零消费者,实测 0/1127 个 context),
+标签唯一进 prompt 的通道是 `Defensive timing: Optimal X% | … | Late Y% | …` 这行每场聚合百分比。
+`promptBaselinePlantProbe.ts`:同一局三份(基线 / Late→45% / Late→0%),agy,40 局 × 3 = 120 次。
+
+| 版本 | 「减伤偏晚」bad 裁决 | 至少一条的对局 | bad 总数 | findings 总数 | 复述了百分比 |
+|---|---:|---:|---:|---:|---:|
+| 基线 | 0 | 0 | 164 | 303 | 0 |
+| Late→45% | 1 | 1 (3%) | 165 | 297 | 1 (3%) |
+| Late→0% | 2 | 2 (5%) | 163 | 305 | 0 |
+
+结论:这行**撬不动**模型——两个方向的差都在 1–2 局,且 Late→0% 反而多出 2 条"偏晚"裁决,是噪声不是效应;
+bad 总数三份相同。时机标签作为判词的真实消费面是桌面端 key-moments UI(`keyMoments.ts:210`,
+直接展示给玩家)、深挖工具输出(`deepDive.ts:262`)和两个谓词(`death.ts:177` Early 门、
+`healerMetrics.ts:35`),不是 prompt。原始数据:`gladlog-eval-private/reports/baseline-plant-2026-08-27/`。
