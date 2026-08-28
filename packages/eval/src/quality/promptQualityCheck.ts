@@ -558,6 +558,37 @@ export function checkDmgSpikeCcCoverConsistency(lines: string[]): string[] {
   return failures;
 }
 
+/**
+ * 9th hardFailure class (GH #36 item 5, 2026-08-27): the `— healed through`
+ * outcome word on a `[DMG SPIKE]` line is the labelBias patch (three
+ * independent judge batches, 2026-07-15) and is derived from the SAME two HP
+ * samples the line prints (`(A% -> B% HP`). Micro-gate: word present ⟺
+ * B − A ≥ 0. Guards refactor drift between the word and the numbers it
+ * summarises; two-sided (a missing word on a non-negative delta is as much a
+ * drift as a stray word on a negative one). Lines without the HP pair are
+ * out of scope (the render site emits neither).
+ */
+export function checkHealedThroughConsistency(lines: string[]): string[] {
+  const failures: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.includes("[DMG SPIKE]")) continue;
+    const m = line.match(/\((\d+)% -> (\d+)% HP/);
+    if (!m) continue;
+    const delta = Number(m[2]) - Number(m[1]);
+    const hasWord = line.includes("\u2014 healed through");
+    if (hasWord && delta < 0)
+      failures.push(
+        `line ${i + 1}: [DMG SPIKE] 标注「healed through」但同行 HP ${m[1]}% -> ${m[2]}%(Δ${delta} < 0)`,
+      );
+    else if (!hasWord && delta >= 0)
+      failures.push(
+        `line ${i + 1}: [DMG SPIKE] 同行 HP ${m[1]}% -> ${m[2]}%(Δ${delta} ≥ 0)却没有「healed through」标注`,
+      );
+  }
+  return failures;
+}
+
 export function checkSelfOnlyDefensiveClaims(lines: string[]): string[] {
   const violations: string[] = [];
   lines.forEach((line, i) => {
@@ -799,6 +830,7 @@ export function checkMatch(
   hardFailures.push(...checkSnapshotFactsConsistency(promptText));
   hardFailures.push(...checkSelfOnlyDefensiveClaims(lines));
   hardFailures.push(...checkDmgSpikeCcCoverConsistency(lines));
+  hardFailures.push(...checkHealedThroughConsistency(lines));
 
   return {
     ordinal: entry.ordinal,
