@@ -29,6 +29,22 @@ export const HEALER_OFFENSE_FLAGS = {
   V2_CONTESTED_TRADES: true,
 };
 
+// GH #34 batch 4 (2026-08-28), 300 matches / 1,127 healer rounds (advanced
+// logging on 1,125), team MIN-HP sampled every 2 s (85,774 known samples):
+//   ≥ 85 % (slack)        41.8 % of match time
+//   70–85 % (contested)   23.8 %
+//   < 70 %                34.4 %
+// So the two HP bands split the match roughly 40 / 25 / 35; the 85 line sits
+// where "nobody needs a heal" plausibly starts, the 70 line where an external
+// or a big heal is due — both editorial bands on a smooth distribution.
+// Slack segments kept (≥ MIN_SLACK_SECONDS, n=3,949): [4,6) 1,178 · [6,8) 815
+// · [8,10) 590 · [10,15) 870 · [15,20) 357 · [20,30) 126 · ≥ 30 13 (p50 7.0 s,
+// p90 16.0 s) — 29.8 % of kept segments are under 6 s, so the 4 s floor is
+// doing real work. Idle slack segments (owner cast nothing offensive, n=937):
+// 63.4 % ≥ IDLE_PRIORITY_SECONDS (6 s), 36.5 % ≥ 8 s — the 6 s priority cut
+// keeps two thirds of idle segments. MOBILITY_EXCLUSION_SECONDS and the two
+// MAX_*_FACTS caps are editorial (exemption / prompt budget), not measured.
+// All measured, not official; re-run before moving any of them.
 export const SLACK_TEAM_HP_THRESHOLD = 85;
 export const CONTESTED_TEAM_HP_MIN = 70;
 export const MAX_CONTESTED_FACTS = 2;
