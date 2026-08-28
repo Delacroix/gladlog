@@ -274,6 +274,17 @@ export const SPELL_DURATION_OVERRIDES: Record<string, number> = {
 // M-b: a real aura removal arrives at ~nominal duration plus minor server-tick/latency slack;
 // a removal more than a couple seconds past nominal duration almost certainly belongs to a
 // different (later) cast, not this one.
+//
+// GH #34 batch 4 (2026-08-28), measured on 300 matches / 4,699 healer-owner CD casts with a
+// friendly-side aura: offset of the next SPELL_AURA_REMOVED from (cast + duration) —
+// < −1.5 s 23.3 % · [−1.5, 0) 12.3 % · [0, +2] 41.8 % · (+2, +5] 18.1 % · (+5, +10] 1.9 % ·
+// > +10 s 2.6 % (p25 −0.01, p50 0.00, p75 +0.02). The two tolerances sit where the
+// on-time mass ends, BUT the tails are not latency: they are per-spell duration mismatches
+// with what the game actually did (observed lifetime p10=p50=p90, i.e. deterministic):
+// Time Dilation 8 → 10.4 s (100 % "estimated"), Power Infusion 20 → 15.0 s (100 % "ended
+// early"), Avenging Wrath 20 → 30 s, Guardian Spirit 10 → 12 s, Divine Hymn 8 → 3.6 s
+// (channel), Tranquility 6 → shorter (72/72 "ended early"). Those need per-spell duration
+// corrections (SPELL_DURATION_OVERRIDES below), not wider tolerances — do not widen these.
 const BUFF_EXPIRY_PAIRING_TOLERANCE_S = 2;
 
 // B129: a removal within this slack of the natural end still counts as a normal expiry (server-tick

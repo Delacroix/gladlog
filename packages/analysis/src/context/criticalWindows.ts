@@ -28,6 +28,18 @@ export interface CriticalWindowInputs {
   matchDurationSeconds: number;
 }
 
+// GH #34 batch 4 (2026-08-28), measured on the last 300 matches / 1,126
+// rounds (1,237 deaths, 5,235 spikes ≥ DMG_SPIKE_THRESHOLD, 23,973 CC
+// instances): the union set covers **75.7 % of all match seconds** — death
+// windows alone 7.0 %, spike windows 28.4 %, CC look-ahead 66.3 %. So the
+// "critical" set is most of the match, and the CC term dominates it:
+// CC_LOOKAHEAD 10 → 5 drops coverage to 61.3 %, → 15 raises it to 83.6 %;
+// DEATH_LOOKBACK 5/15 moves it by < 1 pp; SPIKE_HALF_WIDTH 3/8 gives
+// 72.8 % / 79.8 %. Consumers (matchTimeline.ts): casts OUTSIDE the set are
+// foldable (F151) and [STATE] ticks are sparser — i.e. these numbers decide
+// how much of the timeline gets the compact treatment. Values unchanged;
+// whether 76 % "critical" is the intended budget is a product call recorded
+// on the issue. Re-run the coverage script before moving any of the three.
 /** Look-back window before a death (seconds). */
 const DEATH_LOOKBACK_S = 10;
 /** Half-width around a DMG SPIKE start (seconds). */
