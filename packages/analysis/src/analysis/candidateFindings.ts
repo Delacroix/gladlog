@@ -410,6 +410,13 @@ export const LEGACY_TOPIC_TYPES: ReadonlySet<string> = new Set([
 ]);
 /** cc-locked: how long a single CC must last to be worth coaching (short CCs
  * are constant background noise). */
+// GH #34 batch 4 (2026-08-28), 300 matches / 1,127 healer rounds / 10,366
+// hard-CC instances on the owner: duration [0,1) 1,408 · [1,2) 1,979 · [2,3)
+// 1,460 · [3,4) 1,962 · [4,5) 1,264 · [5,6) 1,267 · [6,8) 971 · ≥ 8 54 (p50
+// 3.0 s, p90 6.0 s). Share that clears the gate: ≥ 3 s 53.2 % · **≥ 4 s
+// 34.3 %** · ≥ 5 s 22.1 % — no natural break; 4 s is an editorial "worth a
+// coaching line" cut that halves the volume relative to 3 s. Measured, not
+// official; re-run before moving.
 const CC_LOCKED_MIN_S = 4;
 
 /**
@@ -437,6 +444,12 @@ const HEAL_GAP_FREE_MIN_S = 4;
 // (6%)—— 三条 cap 基本惰性,截断可忽略。
 const HEALING_GAP_CAP = 2;
 const POSITION_MISTAKE_CAP = 2;
+// GH #34 batch 4 (2026-08-28), same corpus, 2,328 available windows of the
+// owner's CC majors (944/1,127 rounds have one): [0,30) 1,173 · [30,60) 610 ·
+// [60,90) 270 · [90,120) 112 · [120,180) 102 · [180,240) 57 · ≥ 240 4 (p50
+// 29.8 s, p90 101.8 s). Share that clears the gate: ≥ 60 s 23.4 % · **≥ 90 s
+// 11.8 %** · ≥ 120 s 7.0 % — 90 s sits in the decaying tail (≈ one full CC
+// cooldown of idle time), an editorial cut. Measured, not official.
 const CC_HELD_MIN_S = 90;
 const CC_HELD_CAP = 2;
 
