@@ -40,13 +40,26 @@ export interface IArchetypeClassification {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/** Below this duration, archetype injection is suppressed — too little signal. */
+/** Below this duration, archetype injection is suppressed — too little signal.
+ *
+ * GH #34 batch 4 (2026-08-28), 300 matches / 1,127 rounds: duration [0,30)
+ * 34 · [30,60) 69 · [60,90) 90 · [90,120) 140 · [120,180) 400 · [180,300) 363
+ * · ≥ 300 30 — the 30 s floor suppresses 3.1 % of rounds. Editorial; measured,
+ * not official. */
 const MIN_DURATION_SECONDS_FOR_INJECTION = 30;
 
 /**
  * Distance threshold in Z-Score (SD) space.
  * Matches further than this from their nearest centroid are considered anomalous
  * (outliers) and archetype injection is suppressed to avoid hallucinated narratives.
+ *
+ * GH #34 batch 4 (2026-08-28), same corpus, 1,114 classified rounds (73 in
+ * the noise cluster): distance [0,1) 62 · [1,2) 759 · [2,3) 273 · [3,4) 19 ·
+ * [4,4.5) 0 · [4.5,6) 1 · ≥ 6 0 (p50 1.66, p90 2.35, p99 3.17). Share
+ * suppressed: > 3 1.8 % · **> 4.5 0.1 %** (one round) · > 6 0 %. So the outlier
+ * gate is effectively never exercised on the live model; it only bites on a
+ * genuinely broken feature vector. Measured against extractMatchDynamics's
+ * features (buildMatchContext assembles the same fields from matchArchetype).
  */
 const MAX_DISTANCE_SD = 4.5;
 
