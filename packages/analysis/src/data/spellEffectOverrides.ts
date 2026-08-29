@@ -35,7 +35,11 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
       e("31224", "Cloak of Shadows", 120, 5),
       e("5277", "Evasion", 120, 10),
       e("33206", "Pain Suppression", 180, 8),
-      e("47788", "Guardian Spirit", 180, 12), // GH #34 ①: corpus lifetime 12.0 s (n=210, p10=p90); hand value 10 mis-paired the removal
+      e("47788", "Guardian Spirit", 180, 12),
+      // GH #34 ③ (2026-08-29): official read — the cast spell 97462 has DurationIndex 0 in DB2,
+      // the buff 97463 is SpellDuration 1 = 10000 ms; without this entry the kill-window
+      // builder fell back to DEFAULT_BUFF_DURATION_S = 8 for every Rallying Cry (2 s short).
+      e("97462", "Rallying Cry", 180, 10), // GH #34 ①: corpus lifetime 12.0 s (n=210, p10=p90); hand value 10 mis-paired the removal
       e("62618", "Power Word: Barrier", 180, 10),
       e("98008", "Spirit Link Totem", 180, 6),
       e("102342", "Ironbark", 90, 12),
