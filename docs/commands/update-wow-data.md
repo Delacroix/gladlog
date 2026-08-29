@@ -50,7 +50,7 @@ npx tsx packages/eval/scripts/observedSpellIds.ts \
   --manifest $GLADLOG_EVAL_HOME/corpus/manifest-fullscale.txt \
   --store ~/Library/Application\ Support/gladlog/matches \
   > packages/analysis/src/data/observedSpellIdsGenerated.json
-# 6b-pre-2. Behavior-prior reference table (top-10% healer crisis responses; corpus-driven, NOT DB2).
+# 6b-pre-2. Behavior-prior reference table (all ranked healers' crisis-decision-point responses, split responded/not, with death-within-10s rates; corpus-driven, NOT DB2).
 #   Regenerate at season start and whenever packages/analysis/src/analysis/crisisDecisionPoints.ts changes.
 #   ~1 h over the archive; run ≤3 shards with nice. Health test: packages/analysis/src/data/behaviorPrior.test.ts
 #   ("every bracket star cell n ≥ 50") goes red when the season is too young — wait for more archive, do not lower the floor.
