@@ -14,6 +14,7 @@
 import { LogEvent } from "@gladlog/parser-compat";
 
 import { classMetadata } from "../data/classSpells";
+import { spellClassMap } from "../data/drCategories";
 import spellIdLists from "../data/spellIdLists";
 import {
   ccSpellIds,
@@ -21,6 +22,7 @@ import {
   spells as spellMeta,
 } from "../data/spellTags";
 import { SpellTag } from "../data/spellTypes";
+import { buildFilteredAuraIntervals } from "../utils/utils";
 
 /** A friendly at or below this HP fraction opens a "crisis" (moved here from
  * packages/eval/src/explore/signalSkillGradient.ts, which now re-exports). */
@@ -101,20 +103,37 @@ const OFFENSIVE_CD_IDS = new Set<string>(
       .map((a: any) => String(a.spellId)),
   ),
 );
-/** "stop the damage" tools the owner can point at an enemy */
-const CONTROL_IDS = new Set<string>([
-  ...ccSpellIds,
-  ...rootSpellIds,
-  ...Object.entries(spellMeta)
-    .filter(([, m]) => m.type === "interrupts")
-    .map(([id]) => id),
-]);
-/** silence-type auras also lock the school (typed `interrupts` in spellTags) */
-const SILENCE_IDS = new Set<string>(
+/** hand-typed `interrupts` set (spellTags) — shared by CONTROL_IDS ("owner
+ * used an interrupt on an enemy") and SILENCE_IDS ("owner is silenced") so
+ * the filter is computed once, not twice. */
+const INTERRUPT_IDS = new Set<string>(
   Object.entries(spellMeta)
     .filter(([, m]) => m.type === "interrupts")
     .map(([id]) => id),
 );
+/** "stop the damage" tools the owner can point at an enemy */
+const CONTROL_IDS = new Set<string>([
+  ...ccSpellIds,
+  ...rootSpellIds,
+  ...INTERRUPT_IDS,
+]);
+// C1 (2026-08-29): the hand-typed `interrupts` set alone covered 3/61 of the
+// official DR `silence` category (measured) — Strangulate 47476,
+// Garrote-Silence 1330, 356727, 374776 are all observed in the corpus and
+// were uncovered, so a silenced healer read as `lockedOut=false`. Union in
+// the official category exactly the way spellTags.ts builds
+// `officialHardCcIds`: sourced from data/drCategories (not utils/drAnalysis
+// — that module imports spellTags, which would cycle).
+const OFFICIAL_SILENCE_IDS =
+  (spellClassMap.diminishingReturns as Record<string, { spellId: string }[]>)[
+    "silence"
+  ]?.map((e) => e.spellId) ?? [];
+/** silence-type auras also lock the school: hand `interrupts` type
+ * (spellTags) ∪ official DR `silence` category. */
+const SILENCE_IDS = new Set<string>([
+  ...INTERRUPT_IDS,
+  ...OFFICIAL_SILENCE_IDS,
+]);
 
 interface Sample {
   t: number;
@@ -216,35 +235,16 @@ export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
     .filter((a) => a.logLine?.event === LogEvent.SPELL_INTERRUPT)
     .map((a) => a.timestamp as number);
 
-  // enemy hard-CC and silence intervals on the owner
-  const cc: { from: number; to: number }[] = [];
-  const silence: { from: number; to: number }[] = [];
-  const open = new Map<string, number>();
-  const auras = ((owner.auraEvents ?? []) as any[])
-    .filter(
-      (e) =>
-        e.destUnitId === owner.id &&
-        (ccSpellIds.has(String(e.spellId)) ||
-          SILENCE_IDS.has(String(e.spellId))),
-    )
-    .sort((a, b) => a.timestamp - b.timestamp);
-  for (const e of auras) {
-    const sid = String(e.spellId);
-    const key = `${e.srcUnitId}:${sid}`;
-    const ev = e.logLine?.event;
-    if (ev === "SPELL_AURA_APPLIED") open.set(key, e.timestamp);
-    else if (ev === "SPELL_AURA_REMOVED" && open.has(key)) {
-      (ccSpellIds.has(sid) ? cc : silence).push({
-        from: open.get(key)!,
-        to: e.timestamp,
-      });
-      open.delete(key);
-    }
-  }
-  for (const [key, from] of open) {
-    const sid = key.split(":")[1]!;
-    (ccSpellIds.has(sid) ? cc : silence).push({ from, to: from + 8000 });
-  }
+  // enemy hard-CC and silence intervals on the owner. I2 (2026-08-29): pairing
+  // lives only in auraIntervals.ts's buildAuraIntervals (CLAUDE.md
+  // shared-predicate rule) — it handles APPLIED_DOSE, SPELL_AURA_BROKEN,
+  // orphan REMOVED (aura already up at round start, backdated by official
+  // duration), and the official-duration cap for an aura that never closes,
+  // none of which the old hand-rolled APPLIED/REMOVED pairing here did.
+  // buildFilteredAuraIntervals (utils/utils.ts) is the ms-shaped thin adapter
+  // over it, already used by candidateFindings.ts's burst-ledger path.
+  const cc = buildFilteredAuraIntervals(owner, ccSpellIds, combat);
+  const silence = buildFilteredAuraIntervals(owner, SILENCE_IDS, combat);
 
   const enemyBurstCasts: number[] = [];
   const friendControlCasts: { t: number; dest: string }[] = [];
@@ -316,11 +316,11 @@ export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
       peel: friendControlCasts.some((c) => inWin(c.t) && attackers.has(c.dest)),
       kite,
     };
-    const inCC = cc.some((i) => i.from <= t && i.to >= t);
+    const inCC = cc.some((i) => i.startMs <= t && i.endMs >= t);
     const lockedOut =
       interruptsOnOwner.some(
         (it) => it >= t - LOCKOUT_LOOKBACK_MS && it <= t,
-      ) || silence.some((i) => i.from <= t && i.to >= t);
+      ) || silence.some((i) => i.startMs <= t && i.endMs >= t);
     const diedInWindow = deaths.some((d) => d >= t && d < w1);
     // Table-only outcome (spec §1b): a death strictly after t, within
     // DEATH_LOOKAHEAD_MS. `(t, t+10000]` — t itself is excluded (that's

@@ -106,11 +106,28 @@ describe("crisis-no-response", () => {
     expect(ev.map((e) => e.facts.t)).toEqual(["20", "40"]);
     expect(CRISIS_NO_RESPONSE_CAP).toBe(2);
   });
-  it("emitted events are returned in time order", () => {
+  it("overrides.cap changes how many survive selection (still ranked by danger, still emitted in time order)", () => {
+    const pts = [
+      pt({ tSec: 10, enemyBurst: false, attackers2s: 1, dmg2s: 0.15 }),
+      pt({ tSec: 20, enemyBurst: true, attackers2s: 1, dmg2s: 0.1 }),
+      pt({ tSec: 30, enemyBurst: false, attackers2s: 3, dmg2s: 0.4 }),
+    ];
+    const capped1 = crisisNoResponseEvents(pts, owner, "3v3", probes, {
+      cap: 1,
+    });
+    expect(capped1.map((e) => e.facts.t)).toEqual(["20"]); // enemyBurst outranks attackers2s/dmg2s
+    const capped3 = crisisNoResponseEvents(pts, owner, "3v3", probes, {
+      cap: 3,
+    });
+    expect(capped3.map((e) => e.facts.t)).toEqual(["10", "20", "30"]); // all 3 survive, time order
+  });
+  it("emitted events are returned in time order — discriminating: the earlier point has the LOWER danger, so a danger-sorted (not time-sorted) output would fail this assertion", () => {
     const ev = crisisNoResponseEvents(
       [
-        pt({ tSec: 50, enemyBurst: true }),
-        pt({ tSec: 5, enemyBurst: true, attackers2s: 3 }),
+        // earlier in time, LESS dangerous
+        pt({ tSec: 5, enemyBurst: false, attackers2s: 1, dmg2s: 0.1 }),
+        // later in time, MORE dangerous
+        pt({ tSec: 50, enemyBurst: true, attackers2s: 3, dmg2s: 0.4 }),
       ],
       owner,
       "3v3",

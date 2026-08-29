@@ -186,6 +186,81 @@ describe("crisisDecisionPoints", () => {
     expect(p.feasible).toBe(false);
   });
 
+  it("C1: official DR silence category locks the school — Strangulate 47476 and Garrote-Silence 1330 (only 3/61 of the official category was covered by the hand `interrupts` set before this fix)", () => {
+    for (const sid of ["47476", "1330"]) {
+      const o = unit({
+        auraEvents: [
+          {
+            timestamp: T0 + 1200,
+            spellId: sid,
+            srcUnitId: "E1",
+            destUnitId: "H",
+            auraType: "DEBUFF",
+            logLine: { event: "SPELL_AURA_APPLIED" },
+          },
+          {
+            timestamp: T0 + 6000,
+            spellId: sid,
+            srcUnitId: "E1",
+            destUnitId: "H",
+            auraType: "DEBUFF",
+            logLine: { event: "SPELL_AURA_REMOVED" },
+          },
+        ],
+      });
+      const p = crisisDecisionPoints(o, combat(o))[0]!;
+      expect(p.lockedOut).toBe(true);
+    }
+  });
+
+  it("I2: an orphan REMOVED (aura already up before the round started, no APPLIED seen) still counts as inCC at a crossing before the REMOVED — pairing goes through auraIntervals.ts's official-duration backdating, not a private copy", () => {
+    const o = unit({
+      advancedActions: [hp(0, 100), hp(500, 70), hp(1000, 38), hp(1500, 35)],
+      auraEvents: [
+        {
+          // orphan REMOVED at t+2s (t = combat start) for Kidney Shot (408,
+          // no official duration data) — no matching APPLIED was ever logged
+          timestamp: T0 + 2000,
+          spellId: "408",
+          srcUnitId: "E1",
+          destUnitId: "H",
+          auraType: "DEBUFF",
+          logLine: { event: "SPELL_AURA_REMOVED" },
+        },
+      ],
+    });
+    const p = crisisDecisionPoints(o, combat(o))[0]!;
+    expect(p.tSec).toBe(1); // crossing at t+1s
+    expect(p.inCC).toBe(true);
+  });
+
+  it("I2: a fear (5782) closed by SPELL_AURA_BROKEN does NOT count as inCC after the break — the old hand-rolled pairing only listened for SPELL_AURA_REMOVED and left this aura open until end-of-match+8s, a false positive", () => {
+    const o = unit({
+      advancedActions: [hp(0, 100), hp(500, 70), hp(1000, 38), hp(1500, 35)],
+      auraEvents: [
+        {
+          timestamp: T0 + 200,
+          spellId: "5782",
+          srcUnitId: "E1",
+          destUnitId: "H",
+          auraType: "DEBUFF",
+          logLine: { event: "SPELL_AURA_APPLIED" },
+        },
+        {
+          timestamp: T0 + 700,
+          spellId: "5782",
+          srcUnitId: "E1",
+          destUnitId: "H",
+          auraType: "DEBUFF",
+          logLine: { event: "SPELL_AURA_BROKEN" },
+        },
+      ],
+    });
+    const p = crisisDecisionPoints(o, combat(o))[0]!;
+    expect(p.tSec).toBe(1); // crossing at t+1s, after the break at t+0.7s
+    expect(p.inCC).toBe(false);
+  });
+
   it("gate 2: SPELL_INTERRUPT on the owner ≤1.5s before the crossing → lockedOut", () => {
     const o = unit({
       actionIn: [

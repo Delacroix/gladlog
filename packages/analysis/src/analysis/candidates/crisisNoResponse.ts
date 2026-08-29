@@ -62,8 +62,8 @@ export function crisisNoResponseEvents(
       },
     });
   }
-  // Selection above is by danger; the emitted array is in time order, like
-  // every sibling producer in candidates/ (spec §4) — the danger sort only
-  // decides which ≤cap points survive, not the order they are reported in.
+  // 2026-08-29 ruling: select by danger (cap), emit in time order — like
+  // every sibling producer in candidates/ (spec §4). The danger sort above
+  // only decides which ≤cap points survive; it is not the order reported.
   return out.sort((a, b) => a.t - b.t);
 }

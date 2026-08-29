@@ -10,7 +10,7 @@ import { CombatUnitReaction } from "@gladlog/parser-compat";
 
 import { resolveOwner } from "./analysisInput";
 import { toLegacySafe } from "./legacySource";
-import { type TimeRange,tInRange } from "./timeRange";
+import { type TimeRange, tInRange } from "./timeRange";
 import type { ReportSource } from "./types";
 
 /**
