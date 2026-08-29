@@ -100,6 +100,8 @@ const flag = (f: string): string | undefined => {
   return i >= 0 ? argv[i + 1] : undefined;
 };
 const num = (f: string, d: number): number => Number(flag(f) ?? d);
+/** --role healer (default) | dps : which friendly units become the owner */
+const ROLE = flag("--role") ?? "healer";
 
 interface Opp {
   matchId: string;
@@ -616,28 +618,32 @@ async function scan(): Promise<void> {
       const friends = units.filter(
         (u) => u.info && u.reaction === CombatUnitReaction.Friendly,
       );
-      const owner = friends.find((u) => isHealerSpec(u.spec));
       const mySeq = combats.length > 1 ? seq++ : null;
-      if (!owner) continue;
-      let gateFired = false;
-      try {
-        gateFired = extractCandidateFindings(legacy, owner.id).some(
-          (c: any) => c.type === "death-unused-defensive",
-        );
-      } catch {
-        /* keep false */
-      }
-      for (const o of oppsOf(
-        legacy,
-        owner,
-        meta,
-        pctOf.get(matchId) ?? null,
-        matchId,
-        mySeq,
-        gateFired,
-      )) {
-        lines.push(JSON.stringify(o));
-        opps++;
+      const owners =
+        ROLE === "dps"
+          ? friends.filter((u) => !isHealerSpec(u.spec))
+          : friends.filter((u) => isHealerSpec(u.spec)).slice(0, 1);
+      for (const owner of owners) {
+        let gateFired = false;
+        try {
+          gateFired = extractCandidateFindings(legacy, owner.id).some(
+            (c: any) => c.type === "death-unused-defensive",
+          );
+        } catch {
+          /* keep false */
+        }
+        for (const o of oppsOf(
+          legacy,
+          owner,
+          meta,
+          pctOf.get(matchId) ?? null,
+          matchId,
+          mySeq,
+          gateFired,
+        )) {
+          lines.push(JSON.stringify(o));
+          opps++;
+        }
       }
     }
     // always record the match as done, even with zero opportunities
