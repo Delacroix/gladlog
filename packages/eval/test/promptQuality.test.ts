@@ -368,4 +368,9 @@ describe("checkBehaviorPriorConsistency", () => {
       checkBehaviorPriorConsistency([line({ dmg2sPct: "5" })]).length,
     ).toBeGreaterThan(0);
   });
+  it("rejects a line whose dmg2sPct is missing/non-numeric instead of letting NaN fall through", () => {
+    const out = checkBehaviorPriorConsistency([line({ dmg2sPct: "n/a" })]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatch(/缺 dmg2sPct/);
+  });
 });

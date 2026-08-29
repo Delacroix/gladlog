@@ -603,17 +603,14 @@ export function checkBehaviorPriorConsistency(lines: string[]): string[] {
       failures.push(`line ${i + 1}: crisis-no-response 行无 facts`);
       continue;
     }
-    const f: Record<string, string> = {};
-    for (const kv of m[1]!.split(", ")) {
-      const j = kv.indexOf("=");
-      if (j > 0) f[kv.slice(0, j)] = kv.slice(j + 1);
+    const f = parseFactsBlock(m[1]!);
+    const dmg2s = Number(f.dmg2sPct);
+    if (!Number.isFinite(dmg2s)) {
+      failures.push(`line ${i + 1}: crisis-no-response 行缺 dmg2sPct`);
+      continue;
     }
     const bracket = (f.cellKey ?? "").split("|")[0] ?? "";
-    const ref = lookupBehaviorPrior(
-      bracket,
-      "healer",
-      Number(f.dmg2sPct) / 100,
-    );
+    const ref = lookupBehaviorPrior(bracket, "healer", dmg2s / 100);
     if (!ref) {
       failures.push(
         `line ${i + 1}: crisis-no-response 引用了表里不存在的赛制 ${bracket}`,
