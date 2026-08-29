@@ -89,6 +89,10 @@
       "entries": 5362,
       "producer": "packages/eval/scripts/observedSpellIds.ts"
     },
+    "behaviorPriorGenerated.json": {
+      "entries": 12,
+      "producer": "packages/eval/scripts/behaviorPriorScan.ts emit-table"
+    },
     "usableWhileCcGenerated.ts": {
       "stunned": 642
     },
