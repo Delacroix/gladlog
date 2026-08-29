@@ -52,7 +52,7 @@ const PROMPT = [
   '  <unit id="2" name="Buddy-Realm-US" spec="Arms Warrior" role="teammate">',
   '  <unit id="3" name="Bad-Realm-US" spec="Subtlety Rogue" role="enemy">',
   "0:30  [CC ON TEAM]   1(HPaladin) ← Cheap Shot (by 3(SRogue)) | 4s [DR: Stun Full] | 10.0yd from caster",
-  "  0:40–0:50 you were camped by Bad-Realm-US (closest 10.0yd) — peel or reposition opportunity",
+  "  0:40–0:50 you were camped by Bad-Realm-US (closest 10.0yd) — no CC on the healer during this window",
   "    0:55 [High burst] 10→10yd from Bad-Realm-US — you were the burst target",
 ].join("\n");
 

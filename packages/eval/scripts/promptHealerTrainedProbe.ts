@@ -68,6 +68,23 @@ interface Target {
 
 const ADVICE = " \u2014 peel or reposition opportunity";
 const FACT = " \u2014 no CC on the healer during this window";
+/** --variant legend (2026-08-29, user ruling on #36 item 3): V1 fact wording PLUS
+ * one general rule stated once under the HEALER TRAINED header instead of a
+ * per-line prescription. */
+const LEGEND =
+  "    (rule: a healer camped by melee for this long, with no CC on them, is a peel / reposition opportunity for the team)";
+const VARIANT = arg("--variant", "fact");
+function plant(lines: string[], idx: number): string[] {
+  const out = [...lines];
+  out[idx] = lines[idx]!.replace(ADVICE, FACT);
+  if (VARIANT === "legend") {
+    const h = out.findIndex((l) =>
+      l.includes("HEALER TRAINED (enemy melee camped"),
+    );
+    if (h >= 0) out.splice(h + 1, 0, LEGEND);
+  }
+  return out;
+}
 
 function collect(limit: number): Target[] {
   const files = readFileSync(listPath!, "utf8")
@@ -119,8 +136,7 @@ function collect(limit: number): Target[] {
       if (idx < 0) continue;
       const ts = lines[idx].trim().match(/^(\d+):(\d\d)/);
       if (!ts) continue;
-      const planted = [...lines];
-      planted[idx] = lines[idx].replace(ADVICE, FACT);
+      const planted = plant(lines, idx);
       out.push({
         id: `${f.split("/").pop()?.slice(0, 8)}-${out.length}`,
         prompt,
@@ -259,7 +275,7 @@ const W = (k: "v0" | "v1", f: keyof Side) =>
 const pct = (a: number, b: number) =>
   b ? `${((100 * a) / b).toFixed(0)}%` : "-";
 const lines = [
-  `# [HEALER TRAINED] 处方句 V0/V1 探针(GH #36 第 3 项)`,
+  `# [HEALER TRAINED] 处方句 V0/V1 探针(GH #36 第 3 项)— variant=${VARIANT}`,
   ``,
   `同一局两份:V0 原文(… — peel or reposition opportunity)/ V1 事实化(… — no CC on the healer during this window)。有效对局 ${n}。`,
   ``,

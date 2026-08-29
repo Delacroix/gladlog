@@ -829,6 +829,17 @@ export function formatPositionEventsForContext(
     lines.push(
       `  HEALER TRAINED (enemy melee camped the healer within ${HEALER_TRAINED_YARDS}yd):`,
     );
+    // GH #36 item 3 (user ruling 2026-08-29): the per-line prescription
+    // "peel or reposition opportunity" is replaced by the fact ("no CC on the
+    // healer during this window") plus this ONE general rule under the
+    // header. Probe (agy, 40 matches × 2): the prescription steered a
+    // peel/reposition suggestion in ~1 match in 10; the fact wording alone
+    // lost that (5 → 1 matches), the fact + this rule recovered it
+    // (3 → 5 matches, window discussed 26 → 29) — same steering, one
+    // judgment sentence instead of one per line (line-probe R2).
+    lines.push(
+      "    (rule: a healer camped by melee for this long, with no CC on them, is a peel / reposition opportunity for the team)",
+    );
     for (const e of trained) {
       const subject = e.ownerIsSubject
         ? "you were"
@@ -836,7 +847,7 @@ export function formatPositionEventsForContext(
       // A healer CC-locked through the camp can't self-reposition \u2014 team must peel.
       const advice = e.ownerCcLocked
         ? "CC-locked through this \u2014 team must peel (could not self-reposition)"
-        : "peel or reposition opportunity";
+        : "no CC on the healer during this window";
       lines.push(
         `    ${fmtTime(e.atSeconds)}\u2013${fmtTime(e.toSeconds ?? e.atSeconds)} ${subject} camped by ${e.nearestEnemyName} (closest ${e.startDistanceYards}yd) \u2014 ${advice}`,
       );

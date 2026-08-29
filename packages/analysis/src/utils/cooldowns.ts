@@ -1658,6 +1658,20 @@ export interface IEnemyCDTimelineForTiming {
  * "Early/pre-wall". Exported (2026-08-11, DEFENSIVE-003): candidateFindings'
  * slow-defensive-response counts a cast inside this same grace span as a
  * (pre-wall) reaction — one fact, one predicate; see docs/predicate-index.md. */
+// GH #36 item 1 (measured 2026-08-27, user ruling 2026-08-29: keep 5 / 8 / 3).
+// 300 matches / 4,268 healer-owner defensive casts through annotateDefensiveTimings:
+// Optimal 56.5 % · Unknown 18.6 % · Late 13.4 % · Early 7.3 % · Reactive 3.9 % · Unnecessary 0.4 %.
+// PRE_WALL 5 s — seconds to the next window start (n=1,532): density 0–2 s 80/s ·
+//   2–5 s 57/s · 5–8 s 57/s · 8–12 s 45/s; no break at 5 (cutting at 8 adds 55 % Early).
+// LATE_WINDOW 8 s — seconds since the previous window end (n=1,748): 0–2 s 95/s ·
+//   2–5 s 84/s · 5–8 s 55/s · 8–12 s 53/s; the only edge is at 5 s, 8 sits mid-plateau
+//   (5 s would drop Late by 29 %, 12 s add 213). Kept at 8 as a game-semantics call.
+// TIMING_DAMAGE_WINDOW 3 s / REACTIVE_RATIO 1.75 — before/after damage ratio for
+//   step-3 casts (before > 50 k): ±3 s n=258, p50 2.35, 64 % exceed 1.75; ±2 s 67 %,
+//   ±5 s 54 % — mildly window-sensitive. These labels reach the desktop key-moments
+//   card and two predicates (death.ts Early gate, healerMetrics), NOT the single-shot
+//   prompt (criticalMoments has no consumers; the SPEC BASELINES aggregate line was
+//   measured inert, 120 agy calls). Re-run the distribution script before moving any.
 export const PRE_WALL_SECONDS = 5;
 /** How many seconds after a burst window ends before a defensive is classified "Late" */
 const LATE_WINDOW_SECONDS = 8;
