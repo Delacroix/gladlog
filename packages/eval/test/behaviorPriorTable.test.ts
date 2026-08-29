@@ -26,6 +26,8 @@ const point = (over: Record<string, unknown> = {}) => ({
   responded: true,
   selfHealPct: 30,
   feasible: true,
+  dangerous: true,
+  diedWithin10s: false,
   ...over,
 });
 const meta = {
@@ -34,7 +36,6 @@ const meta = {
   weeks: ["2026-W33"],
   command: "x",
   predicateVersion: 1,
-  topPercentile: 90,
 };
 
 describe("buildBehaviorPriorTable", () => {
@@ -43,39 +44,68 @@ describe("buildBehaviorPriorTable", () => {
     expect(dmgBinOf(0.1)).toBe("10-20%");
     expect(dmgBinOf(0.2)).toBe(">=20%");
   });
-  it("only top-10% feasible rows enter; cell and star cell both written", () => {
+  it("nNoResp/nResp/death10*/top count ALL ranked feasible&dangerous rows split by responded — no rank filter anywhere; a dangerous:false row is excluded from everything", () => {
     const rows = [
-      { bracket: "3v3", pct: 95, point: point() },
+      // no response, died within 10s — counts into nNoResp
       {
         bracket: "3v3",
         pct: 95,
-        point: point({
-          responded: false,
-          responses: {
-            selfHeal: false,
-            wall: false,
-            external: false,
-            control: false,
-            peel: false,
-            kite: false,
-          },
-        }),
+        point: point({ responded: false, diedWithin10s: true }),
       },
-      { bracket: "3v3", pct: 50, point: point() }, // not top10
-      { bracket: "3v3", pct: 95, point: point({ feasible: false }) }, // gated
-      { bracket: "3v3", pct: null, point: point() }, // unranked
+      // ranked, no response, survived — counts into nNoResp
+      {
+        bracket: "3v3",
+        pct: 50,
+        point: point({ responded: false, diedWithin10s: false }),
+      },
+      // ranked, responded, survived — counts into nResp AND top
+      {
+        bracket: "3v3",
+        pct: 20,
+        point: point({ responded: true, diedWithin10s: false }),
+      },
+      // NOT dangerous — must be excluded from nNoResp/nResp/top regardless of pct
+      {
+        bracket: "3v3",
+        pct: 95,
+        point: point({ dangerous: false, responded: false }),
+      },
+      // gated (infeasible) — excluded from everything
+      {
+        bracket: "3v3",
+        pct: 95,
+        point: point({ feasible: false, responded: false }),
+      },
+      // unranked — excluded from everything
+      { bracket: "3v3", pct: null, point: point() },
     ];
     const t = buildBehaviorPriorTable(rows, meta);
-    expect(t.cells["3v3|healer|>=20%"]).toEqual({
-      n: 2,
-      respondRate: 0.5,
-      top: [["selfHeal", 0.5]],
-      selfHealMedianPct: 30,
-    });
-    expect(t.cells["3v3|healer|*"]!.n).toBe(2);
-    expect(t.meta.topPercentile).toBe(90);
+    const cell = t.cells["3v3|healer|>=20%"]!;
+    expect(cell.nNoResp).toBe(2);
+    expect(cell.death10NoResp).toBe(0.5);
+    expect(cell.nResp).toBe(1);
+    expect(cell.death10Resp).toBe(0);
+    expect(cell.top).toEqual([["selfHeal", 1]]); // the single low-pct (20) responder still counts — no rank filter
+    expect(t.cells["3v3|healer|*"]!.nNoResp).toBe(2);
   });
-  it("top lists at most three responses, descending", () => {
+  it("dangerous:false never produces a <10% cell, even when every row is dmg2s<10%", () => {
+    const rows = [
+      {
+        bracket: "3v3",
+        pct: 95,
+        point: point({ dmg2s: 0.05, dangerous: false }),
+      },
+      {
+        bracket: "3v3",
+        pct: 20,
+        point: point({ dmg2s: 0.05, dangerous: false, responded: false }),
+      },
+    ];
+    const t = buildBehaviorPriorTable(rows, meta);
+    expect(t.cells["3v3|healer|<10%"]).toBeUndefined();
+    expect(Object.keys(t.cells)).toEqual([]);
+  });
+  it("top lists at most three responses, descending, computed over ALL responders (nResp) — a pct-20 responder contributes", () => {
     const rows = [
       {
         bracket: "2v2",
@@ -93,7 +123,7 @@ describe("buildBehaviorPriorTable", () => {
       },
       {
         bracket: "2v2",
-        pct: 99,
+        pct: 60,
         point: point({
           responses: {
             selfHeal: true,
@@ -107,7 +137,7 @@ describe("buildBehaviorPriorTable", () => {
       },
       {
         bracket: "2v2",
-        pct: 99,
+        pct: 20,
         point: point({
           responses: {
             selfHeal: true,
@@ -121,6 +151,7 @@ describe("buildBehaviorPriorTable", () => {
       },
     ];
     const t = buildBehaviorPriorTable(rows, meta);
+    expect(t.cells["2v2|healer|>=20%"]!.nResp).toBe(3);
     expect(t.cells["2v2|healer|>=20%"]!.top).toEqual([
       ["selfHeal", 1],
       ["wall", 0.67],

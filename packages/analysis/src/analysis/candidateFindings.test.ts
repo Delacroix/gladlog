@@ -1053,9 +1053,10 @@ describe("crisis-no-response wiring(菜单接线 + death-unused-defensive preced
   });
   // Healer owner "H" (Restoration Druid, spec "105") crosses 40% HP at 2s
   // (100→70→38→35 at 0/1/2/3s) from a single 30-dmg hit by "E1" at 1.5s, with
-  // no casts/CC/self-heal in the response window → an unanswered feasible
-  // crossing. bracket "3v3" matches a real cell in behaviorPriorGenerated.json
-  // (n=179 at dmg2s=0.30, ">=20%" bin) so the reference lookup is non-null.
+  // no casts/CC/self-heal in the response window → an unanswered feasible AND
+  // dangerous (dmg2s=0.30 >= CRISIS_MIN_DMG2S) crossing. bracket "3v3" matches
+  // a real cell in behaviorPriorGenerated.json (dmg2s=0.30 → ">=20%" bin) so
+  // the reference lookup is non-null.
   // pvpTalents: ["22812"] (Barkskin) puts a never-cast Defensive major CD into
   // H's ledger the same way the existing "agy flash 复核采纳" fixture above
   // does for Ultimate Penitence — a baseline ability only enters
@@ -1122,7 +1123,8 @@ describe("crisis-no-response wiring(菜单接线 + death-unused-defensive preced
       (c) => c.type === "crisis-no-response",
     );
     expect(ev).toHaveLength(1);
-    expect(ev[0]!.facts.refRespond).toMatch(/^\d+$/);
+    expect(ev[0]!.facts.refDeathNoResp).toMatch(/^\d+$/);
+    expect(ev[0]!.facts.refDeathResp).toMatch(/^\d+$/);
     expect(ev[0]!.facts.cellKey.startsWith("3v3|healer|")).toBe(true);
   });
 

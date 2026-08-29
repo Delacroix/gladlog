@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   CRISIS_HP_PCT,
+  CRISIS_MIN_DMG2S,
   crisisDecisionPoints,
+  DEATH_LOOKAHEAD_MS,
   RESPONSE_WINDOW_MS,
 } from "./crisisDecisionPoints";
 
@@ -215,6 +217,105 @@ describe("crisisDecisionPoints", () => {
   it("no advanced HP samples → no points", () => {
     const o = unit({ advancedActions: [] });
     expect(crisisDecisionPoints(o, combat(o))).toEqual([]);
+  });
+
+  it("gate 5 (spec §1b): dangerous is false below CRISIS_MIN_DMG2S, true at the boundary (inclusive)", () => {
+    const low = unit({
+      damageIn: [
+        {
+          timestamp: T0 + 1500,
+          srcUnitId: "E1",
+          amount: -5,
+          effectiveAmount: -5,
+        },
+      ],
+    }); // dmg2s = 0.05
+    const boundary = unit({
+      damageIn: [
+        {
+          timestamp: T0 + 1500,
+          srcUnitId: "E1",
+          amount: -10,
+          effectiveAmount: -10,
+        },
+      ],
+    }); // dmg2s = 0.10, exactly CRISIS_MIN_DMG2S
+    expect(CRISIS_MIN_DMG2S).toBe(0.1);
+    expect(
+      crisisDecisionPoints(low, combat(low, [enemy()]))[0]!.dangerous,
+    ).toBe(false);
+    expect(
+      crisisDecisionPoints(boundary, combat(boundary, [enemy()]))[0]!.dangerous,
+    ).toBe(true);
+  });
+
+  it("diedWithin10s (table-only outcome, spec §1b): true when a deathRecords entry lies in (t, t+10000], false otherwise", () => {
+    expect(DEATH_LOOKAHEAD_MS).toBe(10_000);
+    const t = T0 + 2000; // the crossing timestamp for the default unit()
+    const atEdge = unit({ deathRecords: [{ timestamp: t + 10_000 }] });
+    const justPast = unit({ deathRecords: [{ timestamp: t + 10_001 }] });
+    const atCrossing = unit({ deathRecords: [{ timestamp: t }] }); // (t, …] excludes t itself
+    const none = unit({ deathRecords: [] });
+    expect(
+      crisisDecisionPoints(atEdge, combat(atEdge, [enemy()]))[0]!.diedWithin10s,
+    ).toBe(true);
+    expect(
+      crisisDecisionPoints(justPast, combat(justPast, [enemy()]))[0]!
+        .diedWithin10s,
+    ).toBe(false);
+    expect(
+      crisisDecisionPoints(atCrossing, combat(atCrossing, [enemy()]))[0]!
+        .diedWithin10s,
+    ).toBe(false);
+    expect(
+      crisisDecisionPoints(none, combat(none, [enemy()]))[0]!.diedWithin10s,
+    ).toBe(false);
+  });
+
+  it("feasible is unaffected by dangerous — gates 1/2/4 alone decide it", () => {
+    const lowDmgFree = unit({
+      damageIn: [
+        {
+          timestamp: T0 + 1500,
+          srcUnitId: "E1",
+          amount: -5,
+          effectiveAmount: -5,
+        },
+      ],
+    });
+    const p1 = crisisDecisionPoints(
+      lowDmgFree,
+      combat(lowDmgFree, [enemy()]),
+    )[0]!;
+    expect(p1.dangerous).toBe(false);
+    expect(p1.feasible).toBe(true);
+
+    const highDmgCCd = unit({
+      auraEvents: [
+        {
+          timestamp: T0 + 1200,
+          spellId: "408",
+          srcUnitId: "E1",
+          destUnitId: "H",
+          auraType: "DEBUFF",
+          logLine: { event: "SPELL_AURA_APPLIED" },
+        },
+        {
+          timestamp: T0 + 6000,
+          spellId: "408",
+          srcUnitId: "E1",
+          destUnitId: "H",
+          auraType: "DEBUFF",
+          logLine: { event: "SPELL_AURA_REMOVED" },
+        },
+      ],
+    }); // default damageIn → dmg2s 0.3 → dangerous
+    const p2 = crisisDecisionPoints(
+      highDmgCCd,
+      combat(highDmgCCd, [enemy()]),
+    )[0]!;
+    expect(p2.dangerous).toBe(true);
+    expect(p2.feasible).toBe(false);
   });
 
   it("attackers2s resolves pets/guardians to their owning player, ignores sources with no unit (measured 2026-08-29: a 3-enemy round rendered attackers=15, 13 of which were one warlock's imps/hounds)", () => {

@@ -38,6 +38,18 @@ export const ENEMY_BURST_LOOKBACK_MS = 8000;
 export const LOCKOUT_LOOKBACK_MS = 1500;
 export const SELF_HEAL_BIG = 0.15;
 export const KITE_GAIN_YARDS = 8;
+/** Gate 5 (spec §1b, user ruling 2026-08-29): a crossing below this 2s-damage
+ * floor doesn't die at a different rate whether the player responded or not
+ * (measured: <10% dmg2s died 8.8% unresponded vs 7.8% responded — no
+ * gradient; ≥10% died 22–23%). Below the floor, the point is not "dangerous"
+ * and never fires the product candidate, and never enters the reference
+ * table either — both sides apply this gate, same predicate. */
+export const CRISIS_MIN_DMG2S = 0.1;
+/** Table-only outcome window (spec §1b): did the owner die within this many
+ * ms after the crossing? The producer (candidates/crisisNoResponse.ts) must
+ * NEVER read `diedWithin10s` — only the reference-table builder
+ * (packages/eval/src/explore/behaviorPriorTable.ts) does. */
+export const DEATH_LOOKAHEAD_MS = 10_000;
 const POS_TOLERANCE_MS = 1500;
 const ATTACKER_POS_TOLERANCE_MS = 2500;
 
@@ -67,6 +79,13 @@ export interface DecisionPoint {
   /** gates 1, 2 and 4 all pass (gate 3, "has a tool", is trivially true for a
    * healer — v1 is healer-only, spec §2) */
   feasible: boolean;
+  /** gate 5: dmg2s >= CRISIS_MIN_DMG2S (spec §1b). Independent of `feasible`
+   * — a point can be dangerous but infeasible (e.g. CC'd), or feasible but
+   * not dangerous (low damage). The product fires on feasible && dangerous. */
+  dangerous: boolean;
+  /** OUTCOME — for the reference table only (packages/eval's
+   * behaviorPriorTable.ts). The producer must never read this field. */
+  diedWithin10s: boolean;
 }
 
 const PERSONAL_WALL_IDS = new Set<string>(
@@ -252,6 +271,10 @@ export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
         .filter((id): id is string => id != null),
     );
     const dmg2s = recent.reduce((n, d) => n + d.a, 0) / x.max;
+    // Round before comparing against the floor — the rounded value is what
+    // gets rendered (facts.dmg2sPct), so `dangerous` must agree with it.
+    const dmg2sRounded = Math.round(dmg2s * 100) / 100;
+    const dangerous = dmg2sRounded >= CRISIS_MIN_DMG2S;
     const castsIn = ownerCasts.filter((c) => inWin(c.t));
     const selfHeal =
       healIn
@@ -299,6 +322,12 @@ export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
         (it) => it >= t - LOCKOUT_LOOKBACK_MS && it <= t,
       ) || silence.some((i) => i.from <= t && i.to >= t);
     const diedInWindow = deaths.some((d) => d >= t && d < w1);
+    // Table-only outcome (spec §1b): a death strictly after t, within
+    // DEATH_LOOKAHEAD_MS. `(t, t+10000]` — t itself is excluded (that's
+    // diedInWindow's job at a shorter horizon), the far edge is inclusive.
+    const diedWithin10s = deaths.some(
+      (d) => d > t && d <= t + DEATH_LOOKAHEAD_MS,
+    );
     const responded =
       responses.selfHeal ||
       responses.wall ||
@@ -309,7 +338,7 @@ export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
       tMs: t,
       tSec: (t - start) / 1000,
       hpPct: Math.round(x.hp * 100),
-      dmg2s: Math.round(dmg2s * 100) / 100,
+      dmg2s: dmg2sRounded,
       attackers2s: attackers.size,
       enemyBurst: enemyBurstCasts.some(
         (b) => b > t - ENEMY_BURST_LOOKBACK_MS && b <= t,
@@ -317,6 +346,8 @@ export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
       inCC,
       lockedOut,
       diedInWindow,
+      dangerous,
+      diedWithin10s,
       responses,
       responded,
       selfHealPct: Math.round(selfHeal * 100),

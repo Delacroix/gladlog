@@ -27,19 +27,22 @@ const pt = (over: Partial<DecisionPoint> = {}): DecisionPoint => ({
   responded: false,
   selfHealPct: 0,
   feasible: true,
+  dangerous: true,
+  diedWithin10s: false,
   ...over,
 });
 const ref = {
   cellKey: "3v3|healer|>=20%",
-  n: 81,
-  respondPct: 88,
+  fellBack: false,
+  nNoResp: 81,
+  deathNoRespPct: 22,
+  nResp: 62,
+  deathRespPct: 8,
   top: [
     ["selfHeal", 76],
     ["wall", 36],
     ["control", 16],
   ] as [string, number][],
-  selfHealMedianPct: 37,
-  fellBack: false,
 };
 const probes = { lookup: () => ref };
 const owner = { id: "H", name: "Heals-R" };
@@ -57,10 +60,11 @@ describe("crisis-no-response", () => {
       dmg2sPct: "25",
       attackers: "2",
       burst: "yes",
-      refN: "81",
-      refRespond: "88",
+      refNNoResp: "81",
+      refDeathNoResp: "22",
+      refNResp: "62",
+      refDeathResp: "8",
       refTop: "selfHeal 76%; wall 36%; control 16%",
-      refSelfHealMedian: "37",
       cellKey: "3v3|healer|>=20%",
       fellBack: "no",
     });
@@ -75,6 +79,11 @@ describe("crisis-no-response", () => {
       crisisNoResponseEvents([pt({ feasible: false })], owner, "3v3", probes),
     ).toEqual([]);
   });
+  it("silent when dangerous is false (below the gate-5 danger floor, spec §1b)", () => {
+    expect(
+      crisisNoResponseEvents([pt({ dangerous: false })], owner, "3v3", probes),
+    ).toEqual([]);
+  });
   it("silent when no reference exists for the bracket (never accuse without a baseline)", () => {
     expect(
       crisisNoResponseEvents([pt()], owner, "Skirmish", { lookup: () => null }),
@@ -82,7 +91,13 @@ describe("crisis-no-response", () => {
   });
   it("caps at 2 per round selected by danger (never by outcome), emitted in time order", () => {
     const pts = [
-      pt({ tSec: 10, enemyBurst: false, attackers2s: 1, dmg2s: 0.05 }),
+      pt({
+        tSec: 10,
+        enemyBurst: false,
+        attackers2s: 1,
+        dmg2s: 0.05,
+        dangerous: false,
+      }),
       pt({ tSec: 20, enemyBurst: true, attackers2s: 1, dmg2s: 0.1 }),
       pt({ tSec: 30, enemyBurst: false, attackers2s: 3, dmg2s: 0.4 }),
       pt({ tSec: 40, enemyBurst: true, attackers2s: 2, dmg2s: 0.3 }),

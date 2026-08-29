@@ -1,175 +1,124 @@
 {
   "meta": {
     "generatedAt": "2026-08-29",
-    "corpus": "wowarenalogs archive 2026-08 new season, 18,134 matches",
+    "corpus": "TEMP — regenerate after Task 10",
     "weeks": [
       "2026-W33",
       "2026-W34"
     ],
     "command": "npx tsx packages/eval/scripts/behaviorPriorScan.ts emit-table --in <scan.jsonl>",
-    "predicateVersion": 1,
-    "topPercentile": 90
+    "predicateVersion": 1
   },
   "cells": {
     "2v2|healer|*": {
-      "n": 684,
-      "respondRate": 0.68,
+      "nNoResp": 1525,
+      "death10NoResp": 0,
+      "nResp": 3195,
+      "death10Resp": 0,
       "top": [
         [
           "selfHeal",
-          0.47
-        ],
-        [
-          "control",
-          0.15
+          0.7
         ],
         [
           "wall",
-          0.14
+          0.22
+        ],
+        [
+          "control",
+          0.19
         ]
-      ],
-      "selfHealMedianPct": 28
+      ]
     },
     "2v2|healer|10-20%": {
-      "n": 251,
-      "respondRate": 0.69,
+      "nNoResp": 832,
+      "death10NoResp": 0,
+      "nResp": 1332,
+      "death10Resp": 0,
       "top": [
         [
           "selfHeal",
-          0.51
+          0.64
+        ],
+        [
+          "control",
+          0.21
+        ],
+        [
+          "wall",
+          0.19
+        ]
+      ]
+    },
+    "2v2|healer|>=20%": {
+      "nNoResp": 693,
+      "death10NoResp": 0,
+      "nResp": 1863,
+      "death10Resp": 0,
+      "top": [
+        [
+          "selfHeal",
+          0.74
+        ],
+        [
+          "wall",
+          0.24
+        ],
+        [
+          "external",
+          0.17
+        ]
+      ]
+    },
+    "3v3|healer|*": {
+      "nNoResp": 506,
+      "death10NoResp": 0,
+      "nResp": 1311,
+      "death10Resp": 0,
+      "top": [
+        [
+          "selfHeal",
+          0.89
+        ],
+        [
+          "wall",
+          0.19
+        ],
+        [
+          "kite",
+          0.12
+        ]
+      ]
+    },
+    "3v3|healer|10-20%": {
+      "nNoResp": 126,
+      "death10NoResp": 0,
+      "nResp": 332,
+      "death10Resp": 0,
+      "top": [
+        [
+          "selfHeal",
+          0.84
+        ],
+        [
+          "wall",
+          0.16
         ],
         [
           "kite",
           0.16
-        ],
-        [
-          "control",
-          0.13
         ]
-      ],
-      "selfHealMedianPct": 26
-    },
-    "2v2|healer|<10%": {
-      "n": 150,
-      "respondRate": 0.53,
-      "top": [
-        [
-          "selfHeal",
-          0.26
-        ],
-        [
-          "control",
-          0.19
-        ],
-        [
-          "external",
-          0.11
-        ]
-      ],
-      "selfHealMedianPct": 25
-    },
-    "2v2|healer|>=20%": {
-      "n": 283,
-      "respondRate": 0.75,
-      "top": [
-        [
-          "selfHeal",
-          0.54
-        ],
-        [
-          "wall",
-          0.19
-        ],
-        [
-          "kite",
-          0.14
-        ]
-      ],
-      "selfHealMedianPct": 30
-    },
-    "3v3|healer|*": {
-      "n": 238,
-      "respondRate": 0.87,
-      "top": [
-        [
-          "selfHeal",
-          0.8
-        ],
-        [
-          "wall",
-          0.19
-        ],
-        [
-          "kite",
-          0.13
-        ]
-      ],
-      "selfHealMedianPct": 50
-    },
-    "3v3|healer|10-20%": {
-      "n": 43,
-      "respondRate": 0.88,
-      "top": [
-        [
-          "selfHeal",
-          0.77
-        ],
-        [
-          "wall",
-          0.14
-        ],
-        [
-          "control",
-          0.14
-        ]
-      ],
-      "selfHealMedianPct": 49
-    },
-    "3v3|healer|<10%": {
-      "n": 16,
-      "respondRate": 0.81,
-      "top": [
-        [
-          "selfHeal",
-          0.69
-        ],
-        [
-          "kite",
-          0.19
-        ],
-        [
-          "wall",
-          0.13
-        ]
-      ],
-      "selfHealMedianPct": 25
+      ]
     },
     "3v3|healer|>=20%": {
-      "n": 179,
-      "respondRate": 0.87,
+      "nNoResp": 380,
+      "death10NoResp": 0,
+      "nResp": 979,
+      "death10Resp": 0,
       "top": [
         [
           "selfHeal",
-          0.82
-        ],
-        [
-          "wall",
-          0.21
-        ],
-        [
-          "external",
-          0.15
-        ]
-      ],
-      "selfHealMedianPct": 52
-    },
-    "Rated Solo Shuffle|healer|*": {
-      "n": 568,
-      "respondRate": 0.79,
-      "top": [
-        [
-          "selfHeal",
-          0.63
+          0.91
         ],
         [
           "wall",
@@ -177,67 +126,69 @@
         ],
         [
           "external",
-          0.11
+          0.12
         ]
-      ],
-      "selfHealMedianPct": 37
+      ]
+    },
+    "Rated Solo Shuffle|healer|*": {
+      "nNoResp": 733,
+      "death10NoResp": 0,
+      "nResp": 2720,
+      "death10Resp": 0,
+      "top": [
+        [
+          "selfHeal",
+          0.77
+        ],
+        [
+          "wall",
+          0.28
+        ],
+        [
+          "kite",
+          0.15
+        ]
+      ]
     },
     "Rated Solo Shuffle|healer|10-20%": {
-      "n": 146,
-      "respondRate": 0.7,
+      "nNoResp": 365,
+      "death10NoResp": 0,
+      "nResp": 973,
+      "death10Resp": 0,
       "top": [
         [
           "selfHeal",
-          0.58
+          0.7
         ],
         [
           "wall",
-          0.15
+          0.28
         ],
         [
-          "external",
-          0.09
+          "kite",
+          0.19
         ]
-      ],
-      "selfHealMedianPct": 30
-    },
-    "Rated Solo Shuffle|healer|<10%": {
-      "n": 84,
-      "respondRate": 0.58,
-      "top": [
-        [
-          "selfHeal",
-          0.27
-        ],
-        [
-          "wall",
-          0.13
-        ],
-        [
-          "control",
-          0.13
-        ]
-      ],
-      "selfHealMedianPct": 29
+      ]
     },
     "Rated Solo Shuffle|healer|>=20%": {
-      "n": 338,
-      "respondRate": 0.88,
+      "nNoResp": 368,
+      "death10NoResp": 0,
+      "nResp": 1747,
+      "death10Resp": 0,
       "top": [
         [
           "selfHeal",
-          0.75
+          0.82
         ],
         [
           "wall",
-          0.23
+          0.28
         ],
         [
           "external",
           0.14
         ]
-      ],
-      "selfHealMedianPct": 39
+      ]
     }
   }
 }

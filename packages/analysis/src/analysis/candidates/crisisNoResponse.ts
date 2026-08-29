@@ -1,11 +1,14 @@
 /**
- * crisis-no-response — "your HP crossed ≤40%, you were free to act, and you
- * did nothing for 3 s". Replaces the hindsight framing of
- * death-unused-defensive ("the wall was ready") with the one behaviour that
- * actually separates rank brackets in the corpus: acting at all
- * (3v3 free state: <30% rank 32% idle → top10 12%; walls themselves 11→36%
- * only in 3v3, flat in Solo/2v2). Reference numbers come from
- * data/behaviorPrior.ts — the model may cite them, never prescribe from them.
+ * crisis-no-response — "your HP crossed ≤40% while taking dangerous damage
+ * (gate 5: dmg2s >= CRISIS_MIN_DMG2S), you were free to act, and you did
+ * nothing for 3 s". Replaces the hindsight framing of death-unused-defensive
+ * ("the wall was ready") with the one behaviour that actually separates
+ * outcomes in the corpus: acting at all. Task 10 / spec §1b (2026-08-29
+ * amendment, after the value gate): the reference cited is OUTCOME-based
+ * (how often did NOT/DID responders die within 10 s), never rank-based — the
+ * producer must never read `diedWithin10s` itself, only
+ * data/behaviorPrior.ts's pre-aggregated reference. The model may cite these
+ * numbers, never prescribe from them.
  * Spec: docs/superpowers/specs/2026-08-29-crisis-no-response-design.md.
  */
 import type { BehaviorPriorRef } from "../../data/behaviorPrior";
@@ -23,7 +26,9 @@ export function crisisNoResponseEvents(
   overrides?: { cap?: number },
 ): CandidateEvent[] {
   const cap = overrides?.cap ?? CRISIS_NO_RESPONSE_CAP;
-  const eligible = points.filter((p) => p.feasible && !p.responded);
+  const eligible = points.filter(
+    (p) => p.feasible && p.dangerous && !p.responded,
+  );
   // danger order — enemyBurst, then attackers, then damage; NEVER outcome
   const ranked = [...eligible].sort(
     (a, b) =>
@@ -47,10 +52,11 @@ export function crisisNoResponseEvents(
         dmg2sPct: String(Math.round(p.dmg2s * 100)),
         attackers: String(p.attackers2s),
         burst: p.enemyBurst ? "yes" : "no",
-        refN: String(ref.n),
-        refRespond: String(ref.respondPct),
+        refNNoResp: String(ref.nNoResp),
+        refDeathNoResp: String(ref.deathNoRespPct),
+        refNResp: String(ref.nResp),
+        refDeathResp: String(ref.deathRespPct),
         refTop: ref.top.map(([k, v]) => `${k} ${v}%`).join("; "), // "; " — ", " is the facts separator the gate splits on
-        refSelfHealMedian: String(ref.selfHealMedianPct),
         cellKey: ref.cellKey,
         fellBack: ref.fellBack ? "yes" : "no",
       },

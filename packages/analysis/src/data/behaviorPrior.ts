@@ -1,9 +1,10 @@
 /**
- * Behavior-prior reference (corpus-derived, GENERATED json): what top-10%
- * healers actually do at a crisis decision point, per bracket × damage bin.
- * Consumed by candidates/crisisNoResponse.ts (the rendered reference) AND by
- * packages/eval promptQualityCheck's checkBehaviorPriorConsistency (the gate
- * that re-parses the rendered numbers) — one lookup, both sides.
+ * Behavior-prior reference (corpus-derived, GENERATED json): outcome-based
+ * reference for a crisis decision point, per bracket × damage bin (Task 10 /
+ * spec §1b, 2026-08-29 amendment). Consumed by candidates/crisisNoResponse.ts
+ * (the rendered reference) AND by packages/eval promptQualityCheck's
+ * checkBehaviorPriorConsistency (the gate that re-parses the rendered
+ * numbers) — one lookup, both sides.
  *
  * Regenerate (spec §3; REQUIRED after any change to crisisDecisionPoints.ts):
  *   npx tsx packages/eval/scripts/behaviorPriorScan.ts scan … && emit-table …
@@ -18,10 +19,11 @@ export function dmgBinOf(dmg2s: number): DmgBin {
   return dmg2s < 0.1 ? "<10%" : dmg2s < 0.2 ? "10-20%" : ">=20%";
 }
 interface Cell {
-  n: number;
-  respondRate: number;
+  nNoResp: number;
+  death10NoResp: number;
+  nResp: number;
+  death10Resp: number;
   top: [string, number][];
-  selfHealMedianPct: number;
 }
 const CELLS = (raw as unknown as { cells: Record<string, Cell> }).cells;
 export const BEHAVIOR_PRIOR_META = (
@@ -30,11 +32,16 @@ export const BEHAVIOR_PRIOR_META = (
 
 export interface BehaviorPriorRef {
   cellKey: string;
-  n: number;
-  respondPct: number;
-  top: [string, number][];
-  selfHealMedianPct: number;
   fellBack: boolean;
+  /** ALL ranked players who did NOT respond, and their 10s death rate (int %) */
+  nNoResp: number;
+  deathNoRespPct: number;
+  /** ALL ranked players who DID respond, and their 10s death rate (int %) */
+  nResp: number;
+  deathRespPct: number;
+  /** among healers who DID respond, the most common answers, shares as int %
+   * (no rank filter — the rating line is out entirely, 2026-08-29 amendment) */
+  top: [string, number][];
 }
 const pct = (f: number) => Math.round(f * 100);
 
@@ -46,15 +53,17 @@ export function lookupBehaviorPrior(
   const fineKey = `${bracket}|${role}|${dmgBinOf(dmg2s)}`;
   const starKey = `${bracket}|${role}|*`;
   const fine = CELLS[fineKey];
-  const cell = fine && fine.n >= BEHAVIOR_PRIOR_N_FLOOR ? fine : CELLS[starKey];
+  const cell =
+    fine && fine.nNoResp >= BEHAVIOR_PRIOR_N_FLOOR ? fine : CELLS[starKey];
   if (!cell) return null;
   const fellBack = cell !== fine;
   return {
     cellKey: fellBack ? starKey : fineKey,
-    n: cell.n,
-    respondPct: pct(cell.respondRate),
-    top: cell.top.map(([k, f]) => [k, pct(f)] as [string, number]),
-    selfHealMedianPct: cell.selfHealMedianPct,
     fellBack,
+    nNoResp: cell.nNoResp,
+    deathNoRespPct: pct(cell.death10NoResp),
+    nResp: cell.nResp,
+    deathRespPct: pct(cell.death10Resp),
+    top: cell.top.map(([k, f]) => [k, pct(f)] as [string, number]),
   };
 }

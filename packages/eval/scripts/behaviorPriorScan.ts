@@ -459,7 +459,6 @@ async function emitTable(): Promise<void> {
     weeks: [...weeks].sort(),
     command: `npx tsx packages/eval/scripts/behaviorPriorScan.ts emit-table --in <scan.jsonl>`,
     predicateVersion: 1,
-    topPercentile: 90,
   });
   process.stdout.write(JSON.stringify(table, null, 2) + "\n");
 }
