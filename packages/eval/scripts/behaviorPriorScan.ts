@@ -37,7 +37,7 @@ import {
   toLegacyMatch,
   toLegacyShuffle,
 } from "@gladlog/parser-compat";
-import { appendFileSync, existsSync, readdirSync,readFileSync } from "fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "fs";
 import { basename, join } from "path";
 import { gunzipSync } from "zlib";
 
