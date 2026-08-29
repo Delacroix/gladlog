@@ -530,3 +530,29 @@ describe("outsider filter (adjudication #27: CI-less players excluded from legac
     expect(kinds).toContain(1);
   });
 });
+
+describe("mergePetEvents merges by SUMMON relationship (GH #57, user ruling 2026-08-29)", () => {
+  const GHOUL = "Creature-0-3882-980-18134-237409-0000651AAD";
+  const { matches } = parseLines([
+    "ARENA_MATCH_START,1825,41,3v3,1",
+    CI("Player-1-A", 0, 252, 2400),
+    CI("Player-2-B", 1, 71, 2380),
+    // Army of the Dead ghoul: the game flags it NPC / NPC-controlled (0xa28),
+    // no Pet or Guardian bit — only SPELL_SUMMON names the DK as owner.
+    `SPELL_SUMMON,Player-1-A,"Alice-X",0x511,0x80000000,${GHOUL},"次级食尸鬼",0xa28,0x80000000,1282535,"次级食尸鬼",0x20`,
+    `SPELL_DAMAGE,${GHOUL},"次级食尸鬼",0xa28,0x80000000,Player-2-B,"Bob-Y",0x548,0x80000000,91776,"Claw",0x1,Player-2-B,0000000000000000,900000,1000000,0,0,0,-1,0,0,0,0.00,0.00,0,0.0000,0,4321,0,-1,1,0,0,0,nil,nil,nil`,
+    `UNIT_DIED,0000000000000000,nil,0x80000000,0x80000000,Player-2-B,"Bob-Y",0x548,0x80000000,0`,
+    "ARENA_MATCH_END,0,30,1500,1501",
+  ]);
+  const legacy = toLegacyMatch(matches[0]!);
+
+  it("an NPC-typed unit summoned by a player has its damage folded into the summoner", () => {
+    const ghoul = legacy.units[GHOUL]!;
+    expect(ghoul.type).toBe(CombatUnitType.NPC);
+    expect(ghoul.ownerId).toBe("Player-1-A");
+    const owner = legacy.units["Player-1-A"]!;
+    const fromGhoul = owner.damageOut.filter((e) => e.srcUnitId === GHOUL);
+    expect(fromGhoul).toHaveLength(1);
+    expect(Math.abs(fromGhoul[0]!.effectiveAmount)).toBe(4321);
+  });
+});

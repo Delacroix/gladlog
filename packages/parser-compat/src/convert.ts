@@ -649,11 +649,18 @@ function convertUnit(
 
 function mergePetEvents(units: Record<string, ICombatUnit>): void {
   for (const unit of Object.values(units)) {
+    // GH #57 (user ruling 2026-08-29): merge by SUMMON relationship, not by
+    // unit kind. Army of the Dead ghouls are flagged NPC by the game
+    // (0xa28: NPC type, NPC-controlled) yet carry the DK as ownerId from
+    // SPELL_SUMMON; Details-style attribution — and the old parser — credit
+    // them to the summoner. Any non-player unit whose owner is a player unit
+    // in this combat folds in. Measured before the ruling: 1,585 ghouls /
+    // 19.6M damage per 300 matches left on the ghouls.
     if (
-      (unit.type === CombatUnitType.Pet ||
-        unit.type === CombatUnitType.Guardian) &&
+      unit.type !== CombatUnitType.Player &&
       unit.ownerId &&
-      units[unit.ownerId]
+      units[unit.ownerId] &&
+      units[unit.ownerId]!.type === CombatUnitType.Player
     ) {
       const owner = units[unit.ownerId]!;
       owner.damageOut = [...owner.damageOut, ...unit.damageOut].sort(
