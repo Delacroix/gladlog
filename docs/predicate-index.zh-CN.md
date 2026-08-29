@@ -282,20 +282,21 @@
 
 <!-- flag-state:begin -->
 
-| Flag                                                | Expected | Decided    | 说明                                                                             |
-| --------------------------------------------------- | -------- | ---------- | -------------------------------------------------------------------------------- |
-| `CANDIDATE_TYPE_FLAGS.missedSyncWindow`             | `false`  | 2026-08-19 | 下架(GH #13):按机会归一化的转化率持平(胜 26.7% vs 负 27.8%);发生率口径被分母混杂 |
-| `CANDIDATE_TYPE_FLAGS.unsyncedBurst`                | `true`   | 2026-08-15 | 同批;用户知情其审计率后开启                                                      |
-| `CANDIDATE_TYPE_FLAGS.cdHoarded`                    | `true`   | 2026-08-15 | 同批                                                                             |
-| `CANDIDATE_TYPE_FLAGS.cdSpentIdle`                  | `true`   | 2026-08-15 | 同批;B6 威胁分级门限制出面量                                                     |
-| `CANDIDATE_TYPE_FLAGS.attemptIntoTrinket`           | `true`   | 2026-08-18 | 击杀尝试重设计(GH #16):用户当日拍板接线;判据即当日三档验证产物                   |
-| `CANDIDATE_TYPE_FLAGS.mdCycloneWindow`              | `true`   | 2026-08-21 | MD 特例(GH #25):四门判据用户当日拍板;仅进菜单(失误卡豁免),红线=默认静默          |
-| `DISPEL_FEATURE_FLAGS.F18_FATAL_DISPEL`             | `true`   | shipped    | 早已上线,分支即唯一行为                                                          |
-| `DISPEL_FEATURE_FLAGS.F124_ENHANCED_CC_ANNOTATIONS` | `true`   | shipped    | 同上                                                                             |
-| `DISPEL_FEATURE_FLAGS.F131_F132_CLEANSE_COOLDOWNS`  | `true`   | shipped    | 同上                                                                             |
-| `DISPEL_FEATURE_FLAGS.F152_MISSED_PURGES_TIMELINE`  | `true`   | shipped    | 同上                                                                             |
-| `HEALER_OFFENSE_FLAGS.V1_SLACK_GATED`               | `true`   | shipped    | 同上                                                                             |
-| `HEALER_OFFENSE_FLAGS.V2_CONTESTED_TRADES`          | `true`   | shipped    | F193 V2,2026-07-11 prompt feature backlog 已结项                                 |
+| Flag                                                | Expected | Decided    | 说明                                                                                                                                                                                                                  |
+| --------------------------------------------------- | -------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CANDIDATE_TYPE_FLAGS.missedSyncWindow`             | `false`  | 2026-08-19 | 下架(GH #13):按机会归一化的转化率持平(胜 26.7% vs 负 27.8%);发生率口径被分母混杂                                                                                                                                      |
+| `CANDIDATE_TYPE_FLAGS.unsyncedBurst`                | `false`  | 2026-08-29 | 降级为上下文事实(GH #50 (a),用户裁定 2026-08-29):每个进攻冷却触发 62–66%,梯度 +0.1(描述常态);被指控队伍整轮从未控过敌方治疗的占 0%,平均差 13–18s,可行性门只解释 9.5%。事实留时间线;`unsyncedBurstEvents` 与测试保留。 |
+| `CANDIDATE_TYPE_FLAGS.missedPurge`                  | `false`  | 2026-08-29 | 降级为上下文事实(GH #50 (a),用户裁定):有高价值可偷增益的回合触发 63–79%,分段梯度 +4.0 非单调,可行性门已齐全——缺的是判据里没有的价值判断。`[PURGEABLE]` 事实照旧进驱散上下文;`missedPurgeEvents` 与测试保留。          |
+| `CANDIDATE_TYPE_FLAGS.cdHoarded`                    | `true`   | 2026-08-15 | 同批                                                                                                                                                                                                                  |
+| `CANDIDATE_TYPE_FLAGS.cdSpentIdle`                  | `true`   | 2026-08-15 | 同批;B6 威胁分级门限制出面量                                                                                                                                                                                          |
+| `CANDIDATE_TYPE_FLAGS.attemptIntoTrinket`           | `true`   | 2026-08-18 | 击杀尝试重设计(GH #16):用户当日拍板接线;判据即当日三档验证产物                                                                                                                                                        |
+| `CANDIDATE_TYPE_FLAGS.mdCycloneWindow`              | `true`   | 2026-08-21 | MD 特例(GH #25):四门判据用户当日拍板;仅进菜单(失误卡豁免),红线=默认静默                                                                                                                                               |
+| `DISPEL_FEATURE_FLAGS.F18_FATAL_DISPEL`             | `true`   | shipped    | 早已上线,分支即唯一行为                                                                                                                                                                                               |
+| `DISPEL_FEATURE_FLAGS.F124_ENHANCED_CC_ANNOTATIONS` | `true`   | shipped    | 同上                                                                                                                                                                                                                  |
+| `DISPEL_FEATURE_FLAGS.F131_F132_CLEANSE_COOLDOWNS`  | `true`   | shipped    | 同上                                                                                                                                                                                                                  |
+| `DISPEL_FEATURE_FLAGS.F152_MISSED_PURGES_TIMELINE`  | `true`   | shipped    | 同上                                                                                                                                                                                                                  |
+| `HEALER_OFFENSE_FLAGS.V1_SLACK_GATED`               | `true`   | shipped    | 同上                                                                                                                                                                                                                  |
+| `HEALER_OFFENSE_FLAGS.V2_CONTESTED_TRADES`          | `true`   | shipped    | F193 V2,2026-07-11 prompt feature backlog 已结项                                                                                                                                                                      |
 
 <!-- flag-state:end -->
 

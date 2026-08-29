@@ -1665,13 +1665,15 @@ function teamPlayEvents(
           : undefined,
       ),
     );
-    out.push(
-      ...missedPurgeEvents(
-        ds.missedPurgeWindows.filter((w) =>
-          CORPUS_OBSERVED_DISPEL_IDS.has(w.spellId),
+    if (CANDIDATE_TYPE_FLAGS.missedPurge) {
+      out.push(
+        ...missedPurgeEvents(
+          ds.missedPurgeWindows.filter((w) =>
+            CORPUS_OBSERVED_DISPEL_IDS.has(w.spellId),
+          ),
         ),
-      ),
-    );
+      );
+    }
   } catch {
     /* dispel summary not computable → both types absent */
   }

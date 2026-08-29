@@ -359,7 +359,7 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线;Task 9 �
       expect(p).not.toMatch(/"cd-spent-idle"/);
     } finally {
       CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
-      CANDIDATE_TYPE_FLAGS.unsyncedBurst = true;
+      CANDIDATE_TYPE_FLAGS.unsyncedBurst = false; // default since 2026-08-29 (GH #50)
       CANDIDATE_TYPE_FLAGS.cdHoarded = true;
       CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
     }
@@ -382,7 +382,7 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线;Task 9 �
       expect(p).not.toMatch(/"cd-spent-idle"/);
     } finally {
       CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
-      CANDIDATE_TYPE_FLAGS.unsyncedBurst = true;
+      CANDIDATE_TYPE_FLAGS.unsyncedBurst = false; // default since 2026-08-29 (GH #50)
       CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
     }
   });
