@@ -99,9 +99,10 @@ export const DENOMINATOR_OF: Record<string, keyof RoundExposure> = {
   "unsynced-burst": "teamOffensiveCdCasts", // per offensive cooldown the team pressed
   "healing-gap": "crisisWindows", // a gap only matters where healing was needed
   "md-cyclone-window": "enemyCyclones", // per Cyclone the enemy actually cast
-  // added 2026-08-29 (SDD crisis-no-response): per feasible crisis decision
-  // point — the same predicate the candidate itself gates on (a point in CC,
-  // locked out, or where the friendly died in-window is not an opportunity).
+  // added 2026-08-29 (SDD crisis-no-response): per feasible AND dangerous
+  // crisis decision point — the same predicate the candidate itself gates on
+  // (a point in CC, locked out, where the friendly died in-window, or below
+  // the dmg2s danger floor is not an opportunity).
   "crisis-no-response": "crisisDecisionPoints",
   // Still no honest denominator (kept on `rounds` and flagged, not guessed):
   //   cc-held          — needs "offensive windows where a CC was worth pressing"
@@ -128,7 +129,7 @@ export interface RoundExposure {
   ownerExternalCasts: number;
   teamOffensiveCdCasts: number;
   enemyCyclones: number;
-  /** feasible crisis decision points (`crisisDecisionPoints(owner, legacy).filter((p) => p.feasible).length`) */
+  /** feasible AND dangerous crisis decision points (`crisisDecisionPoints(owner, legacy).filter((p) => p.feasible && p.dangerous).length`) — the candidate's own opportunity gate */
   crisisDecisionPoints: number;
 }
 

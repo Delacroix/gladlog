@@ -20,7 +20,6 @@
  * excludes them from an accusation.
  */
 import type { DecisionPoint } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
-import { CRISIS_MIN_DMG2S } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
 import { dmgBinOf } from "@gladlog/analysis/src/data/behaviorPrior";
 
 export interface BehaviorPriorRow {
@@ -59,21 +58,9 @@ const RESPONSE_KEYS = [
 export { dmgBinOf };
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
-/** Transitional (Task 10, spec §1b): older scan rows (v5 jsonl) predate the
- * `dangerous`/`diedWithin10s` fields — treat a missing `dangerous` as
- * `dmg2s >= CRISIS_MIN_DMG2S` and a missing `diedWithin10s` as `false`, so a
- * temp table can be regenerated from existing scan output before the next
- * corpus re-scan lands. */
-function isDangerous(p: DecisionPoint): boolean {
-  return p.dangerous ?? p.dmg2s >= CRISIS_MIN_DMG2S;
-}
-function diedWithin10s(p: DecisionPoint): boolean {
-  return p.diedWithin10s ?? false;
-}
-
 function deathRate(points: DecisionPoint[]): number {
   if (!points.length) return 0;
-  return r2(points.filter(diedWithin10s).length / points.length);
+  return r2(points.filter((p) => p.diedWithin10s).length / points.length);
 }
 
 function cellOf(all: DecisionPoint[]): BehaviorPriorCell {
@@ -101,7 +88,7 @@ export function buildBehaviorPriorTable(
 ): BehaviorPriorTable {
   const groups = new Map<string, DecisionPoint[]>();
   for (const r of rows) {
-    if (r.pct == null || !r.point.feasible || !isDangerous(r.point)) continue;
+    if (r.pct == null || !r.point.feasible || !r.point.dangerous) continue;
     for (const key of [
       `${r.bracket}|healer|${dmgBinOf(r.point.dmg2s)}`,
       `${r.bracket}|healer|*`,

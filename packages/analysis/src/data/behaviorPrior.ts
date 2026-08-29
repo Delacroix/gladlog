@@ -25,7 +25,11 @@ interface Cell {
   death10Resp: number;
   top: [string, number][];
 }
-const CELLS = (raw as unknown as { cells: Record<string, Cell> }).cells;
+// I5: a cell key existing in the JSON is not proof the cell itself is well
+// formed — index access can still miss (unknown key) or hit a malformed
+// entry, so the static type admits both.
+const CELLS = (raw as unknown as { cells: Record<string, Cell | undefined> })
+  .cells;
 export const BEHAVIOR_PRIOR_META = (
   raw as unknown as { meta: Record<string, unknown> }
 ).meta;
@@ -56,6 +60,15 @@ export function lookupBehaviorPrior(
   const cell =
     fine && fine.nNoResp >= BEHAVIOR_PRIOR_N_FLOOR ? fine : CELLS[starKey];
   if (!cell) return null;
+  // I5: a malformed cell (non-finite counts) must fail closed, not render
+  // NaN/Infinity into the prompt.
+  if (
+    !Number.isFinite(cell.nNoResp) ||
+    !Number.isFinite(cell.death10NoResp) ||
+    !Number.isFinite(cell.nResp) ||
+    !Number.isFinite(cell.death10Resp)
+  )
+    return null;
   const fellBack = cell !== fine;
   return {
     cellKey: fellBack ? starKey : fineKey,

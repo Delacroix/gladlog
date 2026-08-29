@@ -227,8 +227,11 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
       }
     }
   }
+  // I3: the candidate fires on feasible && dangerous (gate 5, spec §1b) — a
+  // feasible-but-not-dangerous point is never an opportunity for it, so
+  // counting `feasible` alone inflates the denominator.
   e.crisisDecisionPoints = crisisDecisionPoints(owner, legacy).filter(
-    (p) => p.feasible,
+    (p) => p.feasible && p.dangerous,
   ).length;
   return e;
 }

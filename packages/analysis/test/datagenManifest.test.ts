@@ -158,4 +158,16 @@ describe("datagen-manifest.json 生成物覆盖", () => {
       expect(isCoveredByManifest(relPath, artifactKeys)).toBe(false);
     }
   });
+
+  // I6: the manifest said "entries": 12 while the shipped table had 9 cells
+  // — a stale hand-typed count nobody would notice again without this pin.
+  it("behaviorPriorGenerated.json 的 entries 计数与真实 cell 数一致", () => {
+    const behaviorPrior = JSON.parse(
+      readFileSync(path.join(DATA_DIR, "behaviorPriorGenerated.json"), "utf-8"),
+    ) as { cells: Record<string, unknown> };
+    const declared = (
+      manifest.artifacts as Record<string, { entries: number }>
+    )["behaviorPriorGenerated.json"]!.entries;
+    expect(declared).toBe(Object.keys(behaviorPrior.cells).length);
+  });
 });
