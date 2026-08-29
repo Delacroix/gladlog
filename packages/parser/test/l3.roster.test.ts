@@ -130,4 +130,25 @@ describe("SPELL_SUMMON owner linkage (adjudication #18: totems/guardians)", () =
     expect(totem.kind).toBe("Guardian");
     expect(totem.ownerId).toBe("Player-1-A");
   });
+
+  // GH #57: a Creature- GUID whose flags carry the PET bit (0x1000, e.g. the
+  // Primal Fire Elemental's 0x1112) must be a Pet, not an NPC — otherwise
+  // mergePetEvents never folds its damage into the owner (old parser credited
+  // it; measured 54.0M un-credited damage in 240/1,127 rounds).
+  it("summoned Creature- with the Pet flag is a Pet, not an NPC (GH #57)", () => {
+    const records = [
+      L(
+        'SPELL_SUMMON,Player-1-A,"Alice-X",0x511,0x80000000,Creature-0-4232-980-10449-61029-00003CB7FA,"Primal Fire Elemental",0x1112,0x80000000,198067,"Fire Elemental",0x4',
+        1,
+      ),
+      L(
+        'SPELL_DAMAGE,Creature-0-4232-980-10449-61029-00003CB7FA,"Primal Fire Elemental",0x1112,0x80000000,Player-1-B,"Bob-X",0x548,0x80000000,117588,"Meteor",0x4,Player-1-B,0000000000000000,100,100,0,0,0,-1,0,0,0,0.00,0.00,0,0.0000,0,49756,0,-1,4,0,0,0,nil,nil,nil',
+        2,
+      ),
+    ];
+    const r = buildRoster(records);
+    const ele = r.units.get("Creature-0-4232-980-10449-61029-00003CB7FA")!;
+    expect(ele.kind).toBe("Pet");
+    expect(ele.ownerId).toBe("Player-1-A");
+  });
 });

@@ -160,10 +160,18 @@ export function buildRoster(records: ParsedLine[]): {
     } else if (id.startsWith("Pet-")) {
       kind = "Pet";
     } else if (id.startsWith("Creature-")) {
-      const hasGuardianFlag = unit.flagsSeen.some(
-        (f) => decodeFlags(f).kind === "Guardian",
-      );
-      kind = hasGuardianFlag ? "Guardian" : "NPC";
+      // GH #57 (2026-08-29): player-summoned Creature- units carry the PET
+      // bit (0x1000) in their flags — Primal Fire Elemental 0x1112, Army of
+      // the Dead ghouls — and the old parser classified them by flags. Before
+      // this they fell to NPC here, so mergePetEvents (Pet/Guardian only) never
+      // folded their damage into the owner: 54.0M un-credited damage in
+      // 240/1,127 rounds (300-match measurement on the issue).
+      const kinds = unit.flagsSeen.map((f) => decodeFlags(f).kind);
+      kind = kinds.includes("Guardian")
+        ? "Guardian"
+        : kinds.includes("Pet")
+          ? "Pet"
+          : "NPC";
     } else {
       let decodedKind:
         "Player" | "NPC" | "Pet" | "Guardian" | "Object" | "Unknown" =
