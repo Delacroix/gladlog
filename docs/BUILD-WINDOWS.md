@@ -47,6 +47,11 @@ Find the artifacts in `packages/desktop/dist-app/`:
 
 ## Notes
 
+- **Effective config lives in `packages/desktop/package.json`'s `build` block**
+  — a stale, drifted `electron-builder.yml` (different `appId`, no `afterSign`)
+  used to sit alongside it and was deleted 2026-08-05. `npmRebuild` and `files`
+  are deliberately left at electron-builder's defaults — there was never a
+  reason to override either, so don't reintroduce them from the old yml.
 - **Unsigned:** without a code-signing certificate, Windows SmartScreen will
   warn on first run ("More info" → "Run anyway"). Signing is optional and needs
   a cert; add it under `build.win.certificateFile` / env vars when you have one.

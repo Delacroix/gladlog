@@ -25,12 +25,13 @@ import {
 import type { UpdaterService } from "./updater";
 
 type CoachChatService = ReturnType<typeof createCoachChatService>;
-import { vodUrl } from "../shared/vod";
 import {
   authUnknownHint,
   detectObsWebsocket,
   resolveAutoConfigPassword,
 } from "./obsAutoConfig";
+import { vodUrl } from "../shared/vod";
+import type { ObsInstallProgress } from "./obsAssets";
 
 export function registerIpc(deps: {
   store: MatchStore;
@@ -38,6 +39,33 @@ export function registerIpc(deps: {
   getStatus: () => LogsStatusSnapshot | null;
   getWindow: () => BrowserWindow | null;
   onWowDirectoryChanged: (settings: GladlogSettings) => void;
+  /** Task-5b runtime toggle (复核 NEW-3): called after every settings:save
+   * with the settings before/after the patch, so index.ts can compare
+   * isManagedActive() and run assembly/teardown without an app restart.
+   * Awaited before settings:save resolves, but (task 8 review fix) the
+   * enable direction is itself fire-and-forget inside index.ts's
+   * `onManagedActiveMaybeChanged` -- awaiting THIS callback no longer means
+   * awaiting the full ~30s assembly readiness sequence, only the (fast)
+   * decision of which direction to kick off. The disable direction is still
+   * genuinely awaited end-to-end; see `reactToManagedToggle`
+   * (managedAssembly.ts) for the full rationale. Optional so tests that
+   * don't care about managed recording can omit it. */
+  onSettingsSaved?: (
+    prev: GladlogSettings,
+    next: GladlogSettings,
+  ) => void | Promise<void>;
+  /** Task-5b: the renderer's "下载并启用" action (recorder:installObs IPC).
+   * Wraps assets.ensureInstalled() + a post-install assembly run; index.ts
+   * owns both the ObsAssets instance and the assembly re-run so this module
+   * stays electron-and-OBS-agnostic like every other IPC handler here. */
+  installObs: (onProgress: (p: ObsInstallProgress) => void) => Promise<void>;
+  /** 复核 I4 (task-5b review round 2): a durable, pollable "is managed OBS
+   * installed" query the settings row can call ON MOUNT — the push-only
+   * `gladlog:recorder:status` channel only announces 待安装 at whatever
+   * moment assembly happens to run (typically before the renderer has even
+   * subscribed), so a fresh launch with OBS not yet installed showed 未连接
+   * forever, never 待安装. */
+  getObsInstallState: () => { installed: boolean; platformSupported: boolean };
   compare: CompareService;
   analysis: AnalysisService;
   learning: LearningService;
@@ -179,10 +207,15 @@ export function registerIpc(deps: {
   );
   ipcMain.handle(
     "gladlog:settings:save",
-    (_e, rawPartial: Partial<GladlogSettings>) => {
+    async (_e, rawPartial: Partial<GladlogSettings>) => {
       const partial = sanitizeSettingsPatch(rawPartial);
+      const prev = deps.settings.get();
       const next = deps.settings.save(partial);
       if ("wowDirectory" in partial) deps.onWowDirectoryChanged(next);
+      // Task-5b runtime toggle (复核 NEW-3): awaited, but (task 8 review fix)
+      // an enable no longer blocks this on the full assembly sequence -- see
+      // the `onSettingsSaved` doc comment above.
+      await deps.onSettingsSaved?.(prev, next);
       return redactSettings(next);
     },
   );
@@ -296,6 +329,28 @@ export function registerIpc(deps: {
     const error = hint ? (r.error ? `${r.error};${hint}` : hint) : r.error;
     return { found: true, enabled: true, ok: r.ok, error };
   });
+  // Task-5b: the renderer's "下载并启用" action. Progress is pushed on a
+  // separate emit channel (same pattern as logs:importProgress /
+  // matches:rebuildProgress above) since a 179MB download takes real time
+  // and the settings page wants live x/total, not a single alert at the end.
+  ipcMain.handle("gladlog:recorder:installObs", async () => {
+    try {
+      await deps.installObs((p) => {
+        deps
+          .getWindow()
+          ?.webContents.send("gladlog:recorder:installProgress", p);
+      });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+  // 复核 I4: durable query, callable on mount (unlike the push-only status
+  // channel) so the settings row can render 待安装 immediately instead of
+  // waiting for a status push that may have already fired before it mounted.
+  ipcMain.handle("gladlog:recorder:obsInstallState", () =>
+    deps.getObsInstallState(),
+  );
   ipcMain.handle("gladlog:recorder:getForMatch", (_e, matchId: string) => {
     const r = deps.recorder.getForMatch(String(matchId));
     return r

@@ -76,6 +76,10 @@ describe("换算(设计文档 §9.2 的判据)", () => {
     expect(toVideoSeconds(60, win(-8).offsetS)).toBe(68);
   });
 
+  it("lag === 0 时(录像与开场同时开始)必须是恒等 -- 不能只靠往返恒等测出来,那对任意 offsetS 都成立", () => {
+    expect(toVideoSeconds(60, win(0).offsetS)).toBe(60);
+  });
+
   it("往返恒等", () => {
     for (const lag of [-8, 0, 12]) {
       const w = win(lag);

@@ -34,6 +34,8 @@ function minimalDeps(readRawText: (id: string) => Promise<string | null>) {
     recorder: {} as never,
     updater: {} as never,
     chat: {} as never,
+    installObs: vi.fn(),
+    getObsInstallState: () => ({ installed: false, platformSupported: false }),
     icons: { get: vi.fn() },
     exportImage: vi.fn(),
   };

@@ -39,9 +39,33 @@ export interface GladlogSettings {
   /** null -> use DEFAULT_OBS_WS_URL for connecting / as the placeholder. */
   obsWebsocketUrl: string | null;
   obsWebsocketPassword: string | null;
-  /** Keep the most recent N recordings (anything beyond is deleted together
-   * with its video file); 0 = never clean up. */
+  /** Keep the most recent N MATCHES, not recordings/chunks (review Important
+   * #5, 2026-08-03: a chunk carrying several matches -- design doc 4.3 --
+   * consumes several slots, so "recordings" here was the wrong unit; the UI
+   * copy already says "最近 N 场" correctly). Anything beyond is deleted
+   * together with its video file; 0 = count gate off -- the byte fuse
+   * (recordingMaxBytes) and the orphan cap still apply (a fuse you can switch
+   * off is not a fuse; design doc 4.2, behaviour change 2026-08-02). */
   recordingKeepCount: number;
+  /** Hard disk fuse for the recordings directory. Deliberately looser than the
+   * worst case of recordingKeepCount (15Mbps x 10min ~= 1.1GB/match x 50 ~=
+   * 55GB), so the count gate is what normally bites and this only catches
+   * unusually large chunks. Design doc 4.2 -- user decision 2026-08-02. */
+  recordingMaxBytes: number;
+  /** "managed"(默认)| "external"。非 win32 上 UI 禁用 managed 并说明,
+   * 解析谓词(isManagedActive)恒判 external 语义 —— 即 mac 用户仍可用一期的
+   * 自有 OBS 外控。这与设计 §8 的「非 win32 强制 recordingEnabled=false」是
+   * 【有意偏离】:保留 mac 的旁路能力更合理,偏离在此声明(task-6 复核 I15)。
+   * 存储默认值始终是 "managed"(即便当前机器是 mac)—— 这样同一份 settings.json
+   * 换到 Windows 机器上就自动获得托管录像,不需要用户重新选一次。 */
+  recordingMode: "managed" | "external";
+  /** 托管 OBS 实例自己的 websocket 密码(与 obsWebsocketPassword ——
+   * 用户自己 OBS 的密码 —— 是两个不同字段)。默认 null,首次启用托管录像时
+   * 随机生成(index.ts 的 resolveManagedWsPassword)。三件套(复核 I14):
+   * SECRET_FIELDS / redactSettings / sanitizeSettingsPatch 三处都要照
+   * obsWebsocketPassword 的既有形状处理,一条都不能少 —— 否则明文落盘 /
+   * 明文过 IPC 进 renderer / 哨兵被当真密码回写。 */
+  managedWsPassword: string | null;
   // -- Auto-update (2026-08-02, Windows NSIS installs only) --
   /** Escape hatch for the 30s/4h background check. Turning it off only stops
    * the scheduled polling: the "check for updates" button in settings still
@@ -75,6 +99,9 @@ const DEFAULTS: GladlogSettings = {
   obsWebsocketUrl: null,
   obsWebsocketPassword: null,
   recordingKeepCount: 50,
+  recordingMaxBytes: 80 * 1024 ** 3,
+  recordingMode: "managed",
+  managedWsPassword: null,
   autoCheckUpdates: true,
   lastSeenVersion: null,
   uiZoom: UI_ZOOM_DEFAULT,
@@ -103,11 +130,13 @@ export {
   API_KEY_REDACTED,
   DEEPSEEK_KEY_REDACTED,
   OBS_PASSWORD_REDACTED,
+  MANAGED_WS_PASSWORD_REDACTED,
 } from "../shared/protocol";
 import {
   API_KEY_REDACTED,
   DEEPSEEK_KEY_REDACTED,
   OBS_PASSWORD_REDACTED,
+  MANAGED_WS_PASSWORD_REDACTED,
 } from "../shared/protocol";
 
 export function redactSettings(s: GladlogSettings): GladlogSettings {
@@ -116,6 +145,9 @@ export function redactSettings(s: GladlogSettings): GladlogSettings {
     anthropicApiKey: s.anthropicApiKey ? API_KEY_REDACTED : null,
     deepseekApiKey: s.deepseekApiKey ? DEEPSEEK_KEY_REDACTED : null,
     obsWebsocketPassword: s.obsWebsocketPassword ? OBS_PASSWORD_REDACTED : null,
+    managedWsPassword: s.managedWsPassword
+      ? MANAGED_WS_PASSWORD_REDACTED
+      : null,
   };
 }
 
@@ -131,6 +163,10 @@ export function sanitizeSettingsPatch(
     const { obsWebsocketPassword: _redacted, ...rest } = out;
     out = rest;
   }
+  if (out.managedWsPassword === MANAGED_WS_PASSWORD_REDACTED) {
+    const { managedWsPassword: _redacted, ...rest } = out;
+    out = rest;
+  }
   if (out.deepseekApiKey === DEEPSEEK_KEY_REDACTED) {
     const { deepseekApiKey: _redacted, ...rest } = out;
     out = rest;
@@ -140,6 +176,18 @@ export function sanitizeSettingsPatch(
     (!Number.isFinite(out.recordingKeepCount) || out.recordingKeepCount < 0)
   ) {
     const { recordingKeepCount: _bad, ...rest } = out;
+    out = rest;
+  }
+  // <= 0 (not < 0): unlike recordingKeepCount, 0 is not a legal "gate off"
+  // value here -- prune() treats a non-positive/non-finite maxBytes as "byte
+  // gate off" defensively (fail-safe against a hand-edited settings.json
+  // bypassing this sanitizer entirely on read), but the UI/IPC save path must
+  // still reject 0 outright so it can never be set through the product.
+  if (
+    out.recordingMaxBytes !== undefined &&
+    (!Number.isFinite(out.recordingMaxBytes) || out.recordingMaxBytes <= 0)
+  ) {
+    const { recordingMaxBytes: _bad, ...rest } = out;
     out = rest;
   }
   // Reject an unknown aiBackend value rather than persisting garbage.
@@ -227,6 +275,7 @@ const SECRET_FIELDS = [
   "anthropicApiKey",
   "deepseekApiKey",
   "obsWebsocketPassword",
+  "managedWsPassword",
 ] as const;
 type SecretField = (typeof SECRET_FIELDS)[number];
 

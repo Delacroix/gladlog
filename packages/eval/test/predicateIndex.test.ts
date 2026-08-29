@@ -90,6 +90,10 @@ import * as ownLogArchive from "../../corpus-tools/src/ownLogArchive";
 // naming relation between the two is asserted below instead.
 import * as collectLogs from "../../log-pipeline/src/collectLogs";
 import * as dashboard from "../../desktop/src/renderer/src/components/dashboard";
+// desktop's package.json also restricts deep imports via `exports`, so this
+// goes by relative path too, same as corpus-tools above.
+import * as obsAsset from "../../desktop/src/shared/obsAsset";
+import * as videoTime from "../../desktop/src/shared/videoTime";
 import * as analysisInput from "../../desktop/src/renderer/src/report/derive/analysisInput";
 import * as flowSeries from "../../desktop/src/renderer/src/report/derive/flowSeries";
 import * as meterRows from "../../desktop/src/renderer/src/report/derive/meterRows";
@@ -127,6 +131,7 @@ const A = "packages/analysis/src";
 const E = "packages/eval/src";
 const C = "packages/corpus-tools/src";
 const D = "packages/desktop/src/renderer/src/report";
+const DS = "packages/desktop/src";
 
 /**
  * Machine-readable copy of the index table. Changing it requires the same
@@ -702,6 +707,42 @@ const INDEX: PredicateRow[] = [
     symbol: "selectOwnLogsToArchive",
     mod: ownLogArchive,
   },
+  // Recording playback and managed OBS (packages/desktop)
+  { file: `${DS}/shared/obsAsset.ts`, symbol: "OBS_VERSION", mod: obsAsset },
+  { file: `${DS}/shared/obsAsset.ts`, symbol: "OBS_ZIP_URL", mod: obsAsset },
+  {
+    file: `${DS}/shared/obsAsset.ts`,
+    symbol: "OBS_ZIP_SHA256",
+    mod: obsAsset,
+  },
+  { file: `${DS}/shared/obsAsset.ts`, symbol: "OBS_ZIP_BYTES", mod: obsAsset },
+  {
+    file: `${DS}/shared/obsAsset.ts`,
+    symbol: "MANAGED_WS_PORT",
+    mod: obsAsset,
+  },
+  { file: `${DS}/shared/obsAsset.ts`, symbol: "shouldExtract", mod: obsAsset },
+  {
+    file: `${DS}/shared/obsAsset.ts`,
+    symbol: "PINNED_ENCODER",
+    mod: obsAsset,
+  },
+  {
+    file: `${DS}/shared/videoTime.ts`,
+    symbol: "computeVideoWindow",
+    mod: videoTime,
+  },
+  {
+    file: `${DS}/shared/videoTime.ts`,
+    symbol: "toBattleSeconds",
+    mod: videoTime,
+  },
+  {
+    file: `${DS}/shared/videoTime.ts`,
+    symbol: "toVideoSeconds",
+    mod: videoTime,
+  },
+  { file: `${DS}/shared/videoTime.ts`, symbol: "seekTargetS", mod: videoTime },
   // Report UI (desktop renderer) — two consumers inside one screen rather than
   // an analysis/gate pair; see the doc's Scope note.
   {

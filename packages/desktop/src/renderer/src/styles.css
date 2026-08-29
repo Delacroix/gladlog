@@ -123,6 +123,16 @@ pre {
   background: var(--accent);
   margin: 0 0 4px 10px;
 }
+/* 主界面「录像未连接」横幅(任务 5):启用了自动录像但没连上 OBS 且当前没在
+ * 录 —— 一期最容易静默漏录的组合,警示色沿用 dev-statusbar.warn 的 --gold。 */
+.app-rec-warn {
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
+  border-bottom: 1px solid var(--gold-dim);
+}
+
 /* 更新提示位:挂在 topbar 右端,不做成 .app-container 的兄弟横幅。
  *
  * 兄弟横幅是 flex item,默认 flex-shrink:1 会被 .app-layout(flex:1)挤扁,
@@ -3781,6 +3791,52 @@ pre {
 .settings-seg {
   width: fit-content;
 }
+/* 链接样式的内联按钮(任务 6:托管 OBS 下载文案里的 obsproject 链接) --
+   Electron 会拦截 <a target=_blank>(setWindowOpenHandler deny),所以用
+   按钮 + bridge().app.openExternal(),外观照抄 .dash-rebuild-inline。 */
+.settings-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+/* 下载进度条(任务 6) */
+.settings-install-progress {
+  width: 160px;
+  vertical-align: middle;
+}
+
+/* 录像状态行(设置页,任务 5):跨 settings-grid 的三列铺满一整行 */
+.set-rec-status {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.set-rec-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--mute);
+}
+.set-rec-dot--ok {
+  background: var(--win);
+}
+.set-rec-dot--rec {
+  background: var(--loss);
+}
+.set-rec-dot--off {
+  background: var(--gold);
+}
+.set-rec-error {
+  color: var(--loss);
+}
 
 /* ── 首启引导(phase3 #2b)── */
 .onboard {
@@ -5206,20 +5262,6 @@ button.rpt-mistakes-showminor:hover {
   font-style: italic;
 }
 
-/* ── 录像 dock(OBS 外控一期)── */
-.rpt-video-dock {
-  margin: 4px 0;
-}
-.rpt-video-dock video {
-  width: 100%;
-  max-height: 300px;
-  background: #000;
-  border-radius: 6px;
-}
-.rpt-video-toggle {
-  font-size: 12px;
-}
-
 /* ── 录像独立 tab(真机反馈:回放小窗太小)── */
 /* 这里曾有一条 `max-height: calc(100vh - 200px)`,2026-08-03 删除:它是 2a 改版
    之前的遗留(那时 video 不是 flex 子项,需要自己限高)。改版后 video 是
@@ -5247,6 +5289,20 @@ button.rpt-mistakes-showminor:hover {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
   text-align: center;
+}
+/* 缺头 / 播放失败提示条(二期):不是黑屏也不是静默,给出可见文案 */
+.rpt-video-note {
+  margin-bottom: 4px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  color: var(--gold);
+  font-size: 12px;
+}
+.rpt-video-note--error {
+  color: var(--loss);
+  border-color: color-mix(in srgb, var(--loss) 45%, transparent);
 }
 
 /* ── 录像 tab:自定义控制条(进度按轮 clamp,原生 controls 会露出整段录像)── */
@@ -5383,6 +5439,11 @@ button.rpt-mistakes-showminor:hover {
 .rpt-video-strip-ai {
   color: var(--accent-soft);
   font-size: 13px;
+}
+/* 缺头段被钉在左端的标记(二期):标灰而不是消失 —— 凭空消失比没做还糟 */
+.rpt-video-strip-mark--unreachable {
+  color: var(--mute);
+  opacity: 0.7;
 }
 .rpt-video-feed {
   width: 280px;
@@ -5859,6 +5920,11 @@ button.rpt-kpi:hover {
 .rpt-video-moment-row.cur {
   background: var(--surface-2);
   outline: 1px solid var(--gold);
+}
+/* 缺头段内的行(二期):标灰而不是当成普通可达时刻——点击仍会 seek(落到
+   windowStartS,即最早可放的位置),故不改 cursor。 */
+.rpt-video-moment-row.unreachable {
+  color: var(--mute);
 }
 .rpt-video-moment-icon.death {
   color: var(--loss);

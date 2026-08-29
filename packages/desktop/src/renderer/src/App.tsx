@@ -69,6 +69,27 @@ export default function App({
     }
   }, []);
 
+  const [recWarn, setRecWarn] = useState(false);
+
+  useEffect(() => {
+    // The recorder thinks it's armed but isn't actually connected to OBS —— the
+    // exact combination that previously meant "no video, and nobody finds out
+    // until after the match". The test stub may not have a recorder surface.
+    const apply = (s: {
+      enabled: boolean;
+      connected: boolean;
+      recording: boolean;
+    }) => setRecWarn(s.enabled && !s.connected && !s.recording);
+    try {
+      const api = bridge().recorder;
+      if (!api?.getStatus) return;
+      void api.getStatus().then(apply);
+      return api.onStatus?.(apply);
+    } catch {
+      /* the test stub may not have a recorder surface */
+    }
+  }, []);
+
   useEffect(() => {
     // Auto-analyze new matches (2026-08-01): subscribe on mount, unsubscribe on
     // unmount. When the stub lacks a logs surface, the bridge().logs.onMatchStored
@@ -272,6 +293,9 @@ export default function App({
         </div>
         <UpdateBanner />
       </header>
+      {recWarn && (
+        <div className="app-rec-warn">录像未连接:这一场不会被录下</div>
+      )}
       {appView === "dev" ? (
         <DevPanel initialZone={initialDevZone} />
       ) : appView === "settings" ? (

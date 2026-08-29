@@ -4,6 +4,7 @@ import { join } from "path";
 import {
   SettingsStore,
   API_KEY_REDACTED,
+  MANAGED_WS_PASSWORD_REDACTED,
   redactSettings,
   sanitizeSettingsPatch,
 } from "../src/main/settingsStore";
@@ -26,6 +27,9 @@ describe("SettingsStore", () => {
       obsWebsocketUrl: null,
       obsWebsocketPassword: null,
       recordingKeepCount: 50,
+      recordingMaxBytes: 80 * 1024 ** 3,
+      recordingMode: "managed",
+      managedWsPassword: null,
       autoCheckUpdates: true,
       lastSeenVersion: null,
       uiZoom: 1,
@@ -152,6 +156,9 @@ describe("settings 脱敏(key 永不出主进程)", () => {
       obsWebsocketUrl: null,
       obsWebsocketPassword: null,
       recordingKeepCount: 50,
+      recordingMaxBytes: 80 * 1024 ** 3,
+      recordingMode: "managed" as const,
+      managedWsPassword: null,
       autoCheckUpdates: true,
       lastSeenVersion: null,
       uiZoom: 1,
@@ -175,6 +182,47 @@ describe("settings 脱敏(key 永不出主进程)", () => {
     ).toEqual({ wowDirectory: "/x" });
     expect(sanitizeSettingsPatch({ anthropicApiKey: "sk-new" })).toEqual({
       anthropicApiKey: "sk-new",
+    });
+  });
+  // task-6 三件套之二/三(复核 I14):managedWsPassword 照 obsWebsocketPassword
+  // 的既有形状处理 —— redact 遮成哨兵,sanitize 剥离哨兵回写。
+  it("redactSettings:managedWsPassword 有值 → 哨兵(保真值);无值 → null", () => {
+    const base = {
+      wowDirectory: null,
+      anthropicApiKey: null,
+      deepseekApiKey: null,
+      aiModels: {},
+      aiBackend: "anthropic" as const,
+      aiBackendCommand: null,
+      aiLanguage: "zh" as const,
+      autoAnalyzeNew: false,
+      recordingEnabled: false,
+      obsWebsocketUrl: null,
+      obsWebsocketPassword: null,
+      recordingKeepCount: 50,
+      recordingMaxBytes: 80 * 1024 ** 3,
+      recordingMode: "managed" as const,
+      managedWsPassword: "genpw-hex",
+      autoCheckUpdates: true,
+      lastSeenVersion: null,
+      deepDiveSnapshot: false,
+    };
+    const redacted = redactSettings(base);
+    expect(redacted.managedWsPassword).toBe(MANAGED_WS_PASSWORD_REDACTED);
+    expect(redacted.managedWsPassword).not.toContain("genpw-hex");
+    expect(
+      redactSettings({ ...base, managedWsPassword: null }).managedWsPassword,
+    ).toBeNull();
+  });
+  it("sanitizeSettingsPatch:managedWsPassword 哨兵回写被丢弃,真值保留", () => {
+    expect(
+      sanitizeSettingsPatch({
+        managedWsPassword: MANAGED_WS_PASSWORD_REDACTED,
+        wowDirectory: "/x",
+      }),
+    ).toEqual({ wowDirectory: "/x" });
+    expect(sanitizeSettingsPatch({ managedWsPassword: "genpw-hex" })).toEqual({
+      managedWsPassword: "genpw-hex",
     });
   });
   it("sanitizeSettingsPatch:模型逐格按后端白名单校验,非法格丢弃", () => {

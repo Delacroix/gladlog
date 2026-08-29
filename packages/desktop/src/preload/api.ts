@@ -5,6 +5,7 @@ import type { ChatSendResult, ChatState } from "../main/coachChat";
 import type { LearningState } from "../main/learning";
 import type { StoredMatchMeta } from "../main/matchStore";
 import type { RecorderStatus } from "../main/recorder";
+import type { ObsInstallProgress } from "../main/obsAssets";
 import type { GladlogSettings } from "../main/settingsStore";
 import type { UpdateState } from "../main/updater";
 import type { AiBackend } from "../shared/aiModels";
@@ -392,10 +393,27 @@ export interface GladlogApi {
     /** The recording associated with this match; none → null. url is a vod://
      * address; startedAt is the playback anchor (epoch ms, = the StartRecord
      * wall clock). */
-    getForMatch(
-      matchId: string,
-    ): Promise<{ url: string; startedAt: number; stoppedAt: number } | null>;
+    getForMatch(matchId: string): Promise<{
+      url: string;
+      startedAt: number;
+      stoppedAt: number | null;
+    } | null>;
     onStatus(cb: (s: RecorderStatus) => void): () => void;
+    /** Task-5b: the settings page's "下载并启用" action for managed OBS.
+     * Progress is pushed separately on onInstallProgress (a 179MB download
+     * takes real time); the resolved promise here only reports pass/fail of
+     * the whole install(+post-install assembly) sequence. */
+    installObs(): Promise<{ ok: boolean; error?: string }>;
+    onInstallProgress(cb: (p: ObsInstallProgress) => void): () => void;
+    /** 复核 I4: durable, pollable install-state query — callable on mount, so
+     * the settings row can render 待安装 immediately instead of depending on
+     * a status push that may have already fired before it subscribed.
+     * `platformSupported` (task 6, NEW-7): false on non-win32 -- the settings
+     * page uses it to render the managed radio disabled-with-explanation. */
+    getObsInstallState(): Promise<{
+      installed: boolean;
+      platformSupported: boolean;
+    }>;
   };
   icon: {
     get(name: string): Promise<string | null>;

@@ -63,7 +63,7 @@ The coaching-correctness release. Two GitHub issues (#28, #29) drove a month of 
 - `4b2306ea` Three offensive facts — hits enemies / is AoE / deals damage — answered by official effect data instead of a hand list
 - `357a9c27` Big-cooldown cast records name their target via official targeting data: the "who got the buff" line was missing in 59/59 prompts, now 0
 - `b4ba5749` `073a5a8d` A self-only defensive can no longer be held against you as "you could have saved your teammate": official targeting says whether a spell can reach someone else. The decode table was reworked the same day after 18/87 entries turned out to be "destination" rather than "ally" (405/965 false positives), and a hole that let runtime-injected tags bypass the check was closed
-- `a8ed9acb` "Slow defensive response" asks "did *you* have a tool for the unit under pressure" instead of assuming
+- `a8ed9acb` "Slow defensive response" asks "did _you_ have a tool for the unit under pressure" instead of assuming
 - `a5fa1597` `11243630` `4daf30ac` `214d4724` `c476c702` `5101fd50` Mitigation verdicts signed by the user: the 20% party-wide paladin wall and Blur → never a "damage into a wall" mistake; Shield Wall → only when a kill was live; Power Word: Barrier's entry retracted by the judge; two register entries corrected (one rule I had invented, one built on a disproved premise); "cd spent while idle" now uses the signed criteria. The register is complete — 32/32 resolved
 - `3ad24bbb` `14a9712a` "Unsynced burst" only fires when your team actually had hard CC ready at that moment
 - `9a2ae2d8` "Avoidable CC" only fires on CC you could have reacted to — ~75% of the old accusations were instant casts
@@ -130,14 +130,14 @@ The grounding release: **every accusation the coach makes was re-audited against
 
 Each retirement follows the same ruler: conversion = seized ÷ opportunities, winners vs losers. A signal that doesn't separate them has no business blaming you. The facts behind each retired signal stay in the timeline for the model to reason over; only the accusation is gone. Extraction functions and tests are kept in every case.
 
-- `16f0de4e` "CC-locked" retired — after normalizing by opportunity, players who actually broke CC when they could won *less* often (23.2% vs 27.9%); 98.5% of accusations landed in the two no-evidence buckets
+- `16f0de4e` "CC-locked" retired — after normalizing by opportunity, players who actually broke CC when they could won _less_ often (23.2% vs 27.9%); 98.5% of accusations landed in the two no-evidence buckets
 - `90c26008` "Wasted trinket" retired — ~94% of accusations were healers cleansing CC off themselves, judged by a predicate structurally blind to the owner; normalized rates were backwards
 - `68253b48` "DR-clipped CC" retired, plus two aura-interval phantom fixes found along the way
 - `2ae31e63` "Burst into immunity" retired; "missed purge" survived its final review and stays
 - `5820eed3` "Off-target in window" retired along with the CAPITALISED vulnerability verdicts
 - `0e4c8357` "Unconverted burst" retired — replaced by per-attempt outcomes in the new [KILL ATTEMPTS] block
 - `22779c10` "Missed sync window" and "juked kick" retired (win/loss conversion flat once the opportunity denominator was cleaned)
-- `0a37d5ee` `14b8a124` The reverse side of the same audit: "slow defensive response" and "unsynced burst" were *cleared* — their negative discrimination was a denominator artifact; slow-defensive-response is in fact the strongest positive signal in the library (+15.3pp)
+- `0a37d5ee` `14b8a124` The reverse side of the same audit: "slow defensive response" and "unsynced burst" were _cleared_ — their negative discrimination was a denominator artifact; slow-defensive-response is in fact the strongest positive signal in the library (+15.3pp)
 - `67a6d3be` `f06ed5c8` The discrimination scanner and a per-type candidate health check are now permanent eval tools, so the next signal gets this audit before it ships
 
 ### AI coaching — thresholds grounded and rulings signed
@@ -177,9 +177,9 @@ Each retirement follows the same ruler: conversion = seized ÷ opportunities, wi
 - `591be70f` `d9f18bbe` `1895a494` `c861ece3` `5c4ff884` `1640e980` `4ec58994` Four new candidate types built behind flags: missed-sync-window and unsynced-burst (sync with a healer lock is the trigger — no HP gate), cd-hoarded and cd-spent-idle (threat-tier gated)
 - `a64b44e5` `b2ace67a` `69a37039` `07bdccd4` `6fd4de62` `bac89057` `df1db220` Thresholds calibrated on 1,028 matches / 3,441 rounds, then each type A/B'd independently (n=30 per type) with a shared production-predicate harness
 - `d08992ea` `39e88b34` `0b0db430` `8c4ea6f9` All four launched by ruling; the selection-layer topic gate widened ≤2→≤3 (+55 clean findings, 0 mechanism errors, n=48); a dual-healer mislabel was fixed before launch
-- `f1a9acb9` `ab4581e4` `1df54bb2` A raw-log stream layer now reads mana values and SPELL_CAST_FAILED directly from raw.txt — powering the intent guard: a cooldown you *pressed* but the game rejected no longer counts as hoarding (968/2,720 accusations were this)
+- `f1a9acb9` `ab4581e4` `1df54bb2` A raw-log stream layer now reads mana values and SPELL_CAST_FAILED directly from raw.txt — powering the intent guard: a cooldown you _pressed_ but the game rejected no longer counts as hoarding (968/2,720 accusations were this)
 - `85f9d0e1` `6e89a975` Mid-match log rotation no longer drops a finished Solo Shuffle round's callback (parser EOF flush, #21.8)
-- `a2a6421c` `11a13af0` `1baf83ce` `cf66034d` `33c66839` `80869dd0` `06110543` `e3e210e2` `7e188495` `02323b75` `9afc6ef7` `34a9ad3c` `3ec0f68e` `e11025ab` `dd8de24c` Two mana candidates (OOM-window pressure, whole-match mana efficiency) were built, calibrated, and A/B'd — then ruled *not* to ship: mana advice without forced-vs-unforced attribution is meaningless. The successor (#33, a deterministic attribution engine) is specced; a Solo Shuffle cross-round contamination bug found on the way (87% of windows) was fixed for good measure
+- `a2a6421c` `11a13af0` `1baf83ce` `cf66034d` `33c66839` `80869dd0` `06110543` `e3e210e2` `7e188495` `02323b75` `9afc6ef7` `34a9ad3c` `3ec0f68e` `e11025ab` `dd8de24c` Two mana candidates (OOM-window pressure, whole-match mana efficiency) were built, calibrated, and A/B'd — then ruled _not_ to ship: mana advice without forced-vs-unforced attribution is meaningless. The successor (#33, a deterministic attribution engine) is specced; a Solo Shuffle cross-round contamination bug found on the way (87% of windows) was fixed for good measure
 
 ### Skill-facts foundation (what the coach may assert about abilities)
 
@@ -216,6 +216,21 @@ Each retirement follows the same ruler: conversion = seized ÷ opportunities, wi
 - Handoffs, audit ledgers, issue filings and design docs: `eea82b28` `113cea55` `d777b660` `75ad3bf9` `3e113506` `1cb0094f` `959e0c11` `8b453a7c` `2845bacd` `12b46474` `c5456378` `4211c13a` `2ddff0f0` `75c51981` `d471d5cd` `e347cca2` `bdb82bc1` `eb000406` `a17d9e45` `e2de2fcd` `8c25079d` `6e361936` `2b3c3e35` `ccb4d1ac` `40e67946` `566f5d98` `45b08375` `3b6109f7` `611dc54d` `a4358d38` `f24f9e9a` `64f6891e` `0fe31552` `a6a68274`
 - English translation of the internal docs corpus (14 batches) and the corpus-tools README, plus a stale-base restore: `27b665b3` `be9b9eb4` `b3ab4bf9` `48ea4004` `48b531fb` `d2c3fa97` `a144ce1e` `9fcab15a` `cff326d2` `bab5439a` `211ce215` `8b2a2e48` `c545b68b` `dab2bba8` `f0749fae` `b4e3517c` `379be45d` `0e91fd0b` `7906b175`
 - Visual baselines (CI-generated, human-reviewed) and repo hygiene: `11a5859f` `e3659f6e` `02a4720d` `089f13da` `7cfc3fee` `8ebfa516` `e52761ab` `aee39e0c`
+
+## v0.1.26-obs2.2 (2026-08-15, test build)
+
+**Functional test pre-release of OBS recording phase 2**, from the `worktree-obs-phase2` branch and not merged to main. It carries everything on main through v0.1.26, plus the managed-OBS recording work (stages 0 and 1). The point is automatic arena recording with no OBS install or setup by the user; the connection path has been root-caused and fixed on a real Windows machine (`npm run recorder:gatecheck` passes), and the full product end-to-end (auto-record a real match, retention, click-to-seek) is what this build is for testing.
+
+### Recording (managed OBS)
+
+- `1d3cd4e` `aa401e7` `96d8660` `fb9d4c7` gladlog now manages its own portable OBS: on first use it downloads a pinned, SHA-verified OBS build from the official release, extracts only what it needs, generates a portable config, and drives it over obs-websocket — the user never installs or configures OBS. Windows only; on other platforms the "point at your own OBS" path from phase 1 is unchanged.
+- `bf799dc` `0a62c0c` `4136a3e` While WoW runs it records continuously and splits per match, keeping the chunks that carry a match and reclaiming idle ones under a dual quota (count + 80 GB). Because a chunk always starts before the next match opens, the opening seconds are never missing.
+- `13fe39d` The managed OBS is launched with `--disable-shutdown-check`. Without it, an OBS that was hard-killed on the previous quit pops a "start in safe mode?" dialog on the next launch that silently blocks the websocket from ever coming up — recording would fail every run after the first. Root-caused on the real machine via netstat + log A/B; the earlier `--websocket_ipv4_only` flag was a misdiagnosis of this same symptom and has been removed (OBS binds dual-stack, `127.0.0.1` connects).
+
+### Recording playback
+
+- `f6a80b2` `7efe296` Clicking a death, a finding or a burst window jumps to the event itself instead of landing several seconds late — the offset that expresses "the recording starts after the match opens" was being clamped to zero and no longer is.
+- `ea2a63b` `1e228b1` One recording can be linked to several matches, so back-to-back matches that share one recording no longer lose the second.
 
 ## v0.1.26 (2026-08-13)
 

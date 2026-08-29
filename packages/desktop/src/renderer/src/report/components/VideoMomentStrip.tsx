@@ -30,6 +30,7 @@ export function VideoMomentStrip({
   onSeek,
   windowStartS,
   windowEndS,
+  unreachableBeforeBattleS = 0,
 }: {
   marks: StripMark[];
   durationS: number;
@@ -41,12 +42,21 @@ export function VideoMomentStrip({
    * outright, never drawn past the strip or crammed against its edge. */
   windowStartS?: number;
   windowEndS?: number;
+  /** Combat seconds before this value have no footage (missing head). 0 = none.
+   * When set, point markers before windowStartS are no longer dropped: they are
+   * pinned at the strip's left edge with an "unreachable" class instead of
+   * vanishing (design doc §4.1 — vanishing is worse than not doing it at all,
+   * it looks like the moment never happened). Defaulting to 0 preserves the
+   * existing drop behaviour verbatim. */
+  unreachableBeforeBattleS?: number;
 }) {
   if (!Number.isFinite(durationS) || durationS <= 0) return null;
   const winStart = windowStartS ?? 0;
   const winEnd = windowEndS ?? durationS;
   const span = Math.max(0.001, winEnd - winStart);
   const inWindow = (s: number) => s >= winStart && s <= winEnd;
+  const isUnreachable = (s: number) =>
+    unreachableBeforeBattleS > 0 && s < winStart;
   const pct = (s: number) =>
     Math.min(100, Math.max(0, ((s - winStart) / span) * 100));
   const bands = marks.filter(
@@ -56,7 +66,7 @@ export function VideoMomentStrip({
     (m) =>
       m.moment.kind !== "burst-band" &&
       (m.moment.weight === "major" || m.moment.kind === "mistake") &&
-      inWindow(m.videoS),
+      (inWindow(m.videoS) || isUnreachable(m.videoS)),
   );
   return (
     <div className="rpt-video-strip" data-testid="video-strip">
@@ -74,12 +84,20 @@ export function VideoMomentStrip({
       ))}
       {points.map((m, i) => {
         const style = MARK_STYLE[m.moment.kind];
+        const unreachable = isUnreachable(m.videoS);
         return (
           <button
             key={`p${i}`}
-            className={`rpt-video-strip-mark rpt-video-strip-${style?.cls ?? "other"}`}
+            className={
+              `rpt-video-strip-mark rpt-video-strip-${style?.cls ?? "other"}` +
+              (unreachable ? " rpt-video-strip-mark--unreachable" : "")
+            }
             style={{ left: `${pct(m.videoS)}%` }}
-            title={`${m.moment.label}(点击定位)`}
+            title={
+              unreachable
+                ? "该时刻在录像开始之前"
+                : `${m.moment.label}(点击定位)`
+            }
             onClick={() => onSeek(m.videoS)}
           >
             {style?.glyph ?? "•"}

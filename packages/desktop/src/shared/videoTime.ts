@@ -1,9 +1,18 @@
 /**
- * Playback-time arithmetic for the recording tab. Pure and electron-free so the
- * renderer, the Windows gate-check script and the phase-2 baseline stats all
- * consume the SAME predicate (CLAUDE.md shared-predicate rule) -- the phase-1
- * bug was exactly a second, divergent copy of this arithmetic inline in a
- * component.
+ * Playback-time arithmetic for the recording tab. Pure and electron-free so
+ * every consumer shares the SAME predicate (CLAUDE.md shared-predicate rule)
+ * -- the phase-1 bug was exactly a second, divergent copy of this arithmetic
+ * inline in a component.
+ *
+ * Two consumers today: the renderer (VideoTab.tsx and the components it
+ * drives), and `scripts/headroomBaseline.ts` (the KEPT §9.1 baseline script,
+ * task 7) -- it computes the acceptance number through this same
+ * `computeVideoWindow`, not a hand-rolled recomputation. Do not restate an "N
+ * consumers" claim here without checking first -- the Windows gate-check
+ * script's headroom row was once planned/present and is gone for good (human
+ * ruling, 2026-08-03; it printed a fake constant, not real data): a stale
+ * single-sourcing claim inside the single-source module is the wrong comment
+ * to leave standing.
  */
 
 /** How far to roll back before a clicked combat moment, so the viewer sees the

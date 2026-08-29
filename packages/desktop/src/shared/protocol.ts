@@ -56,8 +56,17 @@ export type WorkerToMain =
 export const API_KEY_REDACTED = "__gladlog_api_key_set__";
 
 /** Read-back sentinel for the OBS websocket password (same pattern as
- * API_KEY_REDACTED). */
+ * API_KEY_REDACTED). This is the USER'S OWN OBS instance's password
+ * (external/bypass mode, obsWebsocketPassword) -- see
+ * MANAGED_WS_PASSWORD_REDACTED for the managed instance's own, separate,
+ * auto-generated password. */
 export const OBS_PASSWORD_REDACTED = "__gladlog_obs_password_set__";
+/** Read-back sentinel for the managed OBS instance's auto-generated
+ * websocket password (task-6 secret three-piece; same pattern as
+ * OBS_PASSWORD_REDACTED but a different field: managedWsPassword, generated
+ * on first managed enable, never typed by the user). */
+export const MANAGED_WS_PASSWORD_REDACTED =
+  "__gladlog_managed_ws_password_set__";
 /** Read-back sentinel for the DeepSeek API key (same pattern as
  * API_KEY_REDACTED). */
 export const DEEPSEEK_KEY_REDACTED = "__gladlog_deepseek_key_set__";

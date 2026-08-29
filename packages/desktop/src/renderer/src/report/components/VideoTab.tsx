@@ -12,6 +12,12 @@ import {
 import type { TimelineData } from "../derive/timeline";
 import type { VulnBand } from "../derive/vulnWindows";
 import {
+  computeVideoWindow,
+  seekTargetS,
+  toBattleSeconds,
+  toVideoSeconds,
+} from "../../../../shared/videoTime";
+import {
   advanceFeed,
   fmtClock,
   FEED_CAPACITY_FALLBACK,
@@ -95,6 +101,10 @@ export function VideoTab({
   // clamping back and forth in an infinite loop that pegs the CPU — the exact
   // lesson learned back when the replay page had the small recording window).
   const [noFootage, setNoFootage] = useState(false);
+  // Playback failure (e.g. the OBS mux the file was recorded with is not one
+  // this browser's <video> can decode): surfaced as a visible note rather than
+  // a silent black frame.
+  const [playbackFailed, setPlaybackFailed] = useState(false);
   // Feed capacity (derived from the measured container height, written by
   // VideoFeed's ResizeObserver callback). A ref, not state: capacity changes
   // with window size and must not, via a useEffect dependency array, remount
@@ -116,14 +126,17 @@ export function VideoTab({
       : null;
   }, [source, matchId]);
 
-  // Offset of this match's start inside the video (seconds);
-  // battleS (relative to this match) + offset = videoS
-  const offsetS = Math.max(0, (source.startTime - startedAt) / 1000);
-  // Where this match ends inside the video; clamped again once duration is
-  // measured (the recording may end before the match does, e.g. a manual stop)
-  // so the scrubber/timeline never extends past footage the player really has.
-  const rawEndS = Math.max(offsetS, (source.endTime - startedAt) / 1000);
-  const endS = durationS > 0 ? Math.min(rawEndS, durationS) : rawEndS;
+  // Single source for all playback-time arithmetic (shared/videoTime.ts) --
+  // the phase-1 bug was a divergent inline copy that clamped offsetS to 0.
+  const win = computeVideoWindow({
+    matchStartMs: source.startTime,
+    matchEndMs: source.endTime,
+    recordingStartedAtMs: startedAt,
+    durationS,
+  });
+  const offsetS = win.offsetS; // conversion constant only; may be negative
+  const endS = win.windowEndS;
+  const startBoundS = win.windowStartS; // playback / scrubber lower bound
 
   const moments: VideoMoment[] = useMemo(
     () => deriveVideoMoments(source, aiChips),
@@ -135,8 +148,8 @@ export function VideoTab({
   const marks: StripMark[] = useMemo(
     () =>
       moments.map((m) => ({
-        videoS: m.tS + offsetS,
-        toVideoS: m.toS != null ? m.toS + offsetS : undefined,
+        videoS: toVideoSeconds(m.tS, offsetS),
+        toVideoS: m.toS != null ? toVideoSeconds(m.toS, offsetS) : undefined,
         moment: m,
       })),
     [moments, offsetS],
@@ -227,6 +240,19 @@ export function VideoTab({
     // New match/round: assume footage exists, then re-check in onReady against
     // the measured duration
     setNoFootage(false);
+    // playbackFailed is deliberately NOT reset here (re-review, 2026-08-03,
+    // reverting a same-day "cheap cleanup" fix that rested on a false
+    // premise). That fix assumed MatchReport reuses this same VideoTab
+    // instance across DIFFERENT matches with no React key -- untrue: App.tsx
+    // keys both ShuffleReport and MatchReport by selectedId, so switching
+    // matches always remounts this component from scratch (playbackFailed
+    // starts fresh regardless). The only case this effect re-runs on a LIVE
+    // instance is a shuffle ROUND switch, where every round shares one lobby
+    // recording: <video src={url}> keeps the same DOM node and the same url,
+    // so nothing reloads and no new `error` event fires. Resetting
+    // playbackFailed here would silently clear a still-valid "无法播放该录像"
+    // banner, and with no reload to ever refire `error`, it would never come
+    // back for the rest of that shuffle session on this tab.
     const onTime = () => {
       // Clamp to the round: anything outside this round's range (scrubbing, or
       // playback spilling over from the previous round) snaps back to the
@@ -234,14 +260,14 @@ export function VideoTab({
       // the next round's footage on the user's behalf. The start side gets
       // 0.25s of slack (timeupdate samples discretely, so sitting a few frames
       // off the boundary is normal jitter).
-      if (v.currentTime < offsetS - 0.25) {
-        v.currentTime = offsetS;
+      if (v.currentTime < startBoundS - 0.25) {
+        v.currentTime = startBoundS;
       } else if (v.currentTime >= endS) {
         v.pause();
         v.currentTime = endS;
       }
       setCurS(v.currentTime);
-      const battleS = v.currentTime - offsetS;
+      const battleS = toBattleSeconds(v.currentTime, offsetS);
       setFeed((prev) =>
         advanceFeed(
           prev,
@@ -275,7 +301,16 @@ export function VideoTab({
     const onReady = () => {
       const dur = v.duration;
       setDurationS(dur);
-      if (Number.isFinite(dur) && dur > 0 && offsetS >= dur) {
+      // Decide on the duration we JUST read -- durationS state has not
+      // committed yet, so a noFootage computed from the outer `win` (closed
+      // over the stale durationS = 0) would be wrong here every time.
+      const readyWin = computeVideoWindow({
+        matchStartMs: source.startTime,
+        matchEndMs: source.endTime,
+        recordingStartedAtMs: startedAt,
+        durationS: dur,
+      });
+      if (readyWin.noFootage) {
         // The recording is shorter than this round's start (e.g. OBS stopped
         // early, so this shuffle round was never captured): do not seek to an
         // out-of-range position — the browser clamps currentTime to duration,
@@ -306,7 +341,7 @@ export function VideoTab({
     // snaps playback back to offsetS, and neither input has anything to do
     // with which second the player should be at.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source, startedAt, offsetS, endS]);
+  }, [source, startedAt, offsetS, endS, startBoundS]);
 
   // Feed eviction heartbeat: an item pushed out is first marked `out` to play
   // the FEED_OUT_MS fade, then actually removed from the array — this step must
@@ -367,12 +402,23 @@ export function VideoTab({
     capacityRef.current = c;
   }, []);
 
-  const clampedCurS = Math.min(Math.max(curS, offsetS), endS);
+  const clampedCurS = Math.min(Math.max(curS, startBoundS), endS);
 
   return (
     <div className="rpt-video-tab">
       <div className="rpt-video-tab-row">
         <div className="rpt-video-tab-main">
+          {win.missingHeadS > 0.5 && (
+            <div className="rpt-video-note">
+              缺头 {Math.round(win.missingHeadS)} 秒 ——
+              录像比开场晚,这段没有画面
+            </div>
+          )}
+          {playbackFailed && (
+            <div className="rpt-video-note rpt-video-note--error">
+              无法播放该录像(建议 OBS 录制格式设为 Hybrid MP4)
+            </div>
+          )}
           {/* The video element stays mounted across the noFootage state (the
               same ref instance) — it is not unmounted/rebuilt when the empty
               state toggles, which would trigger another load. */}
@@ -381,6 +427,7 @@ export function VideoTab({
             src={url}
             playsInline
             style={noFootage ? { display: "none" } : undefined}
+            onError={() => setPlaybackFailed(true)}
           />
           {noFootage ? (
             <p className="rpt-dim rpt-video-tab-empty">
@@ -403,8 +450,8 @@ export function VideoTab({
                   {playing ? "⏸" : "▶"}
                 </button>
                 <span className="rpt-video-ctrl-time" aria-hidden="true">
-                  {fmtClock(Math.max(0, clampedCurS - offsetS))} /{" "}
-                  {fmtClock(Math.max(0, endS - offsetS))}
+                  {fmtClock(Math.max(0, toBattleSeconds(clampedCurS, offsetS)))}{" "}
+                  / {fmtClock(Math.max(0, toBattleSeconds(endS, offsetS)))}
                 </span>
                 {/* The range input and the mark strip are wrapped in one
                     column (spec 3-1, decided by the user): the gold bands and
@@ -417,7 +464,7 @@ export function VideoTab({
                     type="range"
                     className="rpt-video-ctrl-range"
                     aria-label="播放进度(本轮范围内)"
-                    min={offsetS}
+                    min={startBoundS}
                     max={endS}
                     step={0.1}
                     value={clampedCurS}
@@ -431,11 +478,25 @@ export function VideoTab({
                   <VideoMomentStrip
                     marks={marks}
                     durationS={durationS}
-                    windowStartS={offsetS}
+                    windowStartS={startBoundS}
                     windowEndS={endS}
+                    unreachableBeforeBattleS={win.missingHeadS}
                     onSeek={(videoS) => {
                       const v = ref.current;
-                      if (v) v.currentTime = videoS;
+                      if (!v) return;
+                      // Route through seekTargetS, same as the other three
+                      // onSeek call sites (review Important #3, 2026-08-03):
+                      // a bare `v.currentTime = videoS` skipped both pre-roll
+                      // (design doc §4.1) and window clamping. This branch
+                      // matters more than it looks -- this task made
+                      // unreachable marks clickable for the first time, and an
+                      // unreachable mark's videoS is negative; only a real
+                      // browser's clamp-to-0 hid a negative currentTime here,
+                      // jsdom does not clamp.
+                      v.currentTime = seekTargetS(
+                        toBattleSeconds(videoS, offsetS),
+                        win,
+                      );
                     }}
                   />
                 </span>
@@ -474,15 +535,14 @@ export function VideoTab({
                 data={timeline}
                 bands={bands ?? []}
                 playerTeamId={source.playerTeamId ?? null}
-                curBattleS={noFootage ? null : clampedCurS - offsetS}
+                curBattleS={
+                  noFootage ? null : toBattleSeconds(clampedCurS, offsetS)
+                }
                 disabled={noFootage}
                 onSeek={(battleS) => {
                   const v = ref.current;
                   if (!v) return;
-                  const videoS = Math.min(
-                    Math.max(battleS + offsetS, offsetS),
-                    endS,
-                  );
+                  const videoS = seekTargetS(battleS, win);
                   v.currentTime = videoS;
                   setCurS(videoS);
                 }}
@@ -532,17 +592,17 @@ export function VideoTab({
           {sideTab === "all" && (
             <VideoMomentList
               moments={moments}
-              curBattleS={noFootage ? null : clampedCurS - offsetS}
+              curBattleS={
+                noFootage ? null : toBattleSeconds(clampedCurS, offsetS)
+              }
+              unreachableBeforeBattleS={win.missingHeadS}
               onSeek={
                 noFootage
                   ? undefined
                   : (battleS) => {
                       const v = ref.current;
                       if (!v) return;
-                      v.currentTime = Math.min(
-                        Math.max(battleS + offsetS, offsetS),
-                        endS,
-                      );
+                      v.currentTime = seekTargetS(battleS, win);
                     }
               }
               emptyText={
@@ -553,17 +613,17 @@ export function VideoTab({
           {sideTab === "ai" && (
             <VideoMomentList
               moments={moments.filter((m) => m.kind === "ai")}
-              curBattleS={noFootage ? null : clampedCurS - offsetS}
+              curBattleS={
+                noFootage ? null : toBattleSeconds(clampedCurS, offsetS)
+              }
+              unreachableBeforeBattleS={win.missingHeadS}
               onSeek={
                 noFootage
                   ? undefined
                   : (battleS) => {
                       const v = ref.current;
                       if (!v) return;
-                      v.currentTime = Math.min(
-                        Math.max(battleS + offsetS, offsetS),
-                        endS,
-                      );
+                      v.currentTime = seekTargetS(battleS, win);
                     }
               }
               emptyText="尚无 AI 发现 —— 跑一次 AI 分析后,时间轴 finding 会出现在这里。"

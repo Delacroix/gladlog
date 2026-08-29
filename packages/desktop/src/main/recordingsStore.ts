@@ -27,12 +27,67 @@ export const TOLERANCE_MS = 60_000;
  * associate() message". More than that just burns disk for no benefit. */
 const ORPHAN_KEEP_CAP = 2;
 
+/** task-5 brief 复核 B4: managed mode cuts a fresh chunk every match AND every
+ * idle 10 minutes, so orphans (chunks not yet claimed by an associate())
+ * accumulate far faster than in bypass mode -- a chunk that just finished and
+ * is still waiting for its match's meta to arrive would otherwise blow past
+ * ORPHAN_KEEP_CAP=2 and get pruned before associate() ever gets to it. Any
+ * orphan whose stoppedAt is within this grace window is ALWAYS kept and does
+ * NOT consume an ORPHAN_KEEP_CAP slot -- only orphans that have been sitting
+ * unclaimed longer than this compete for the fixed cap. 10 minutes mirrors
+ * the managed idle-split cadence (recorder.ts's IDLE_SPLIT_MS) -- long enough
+ * to comfortably outlast normal associate() latency, short enough that a
+ * truly abandoned orphan still ages out and falls under the cap eventually. */
+export const ORPHAN_GRACE_MS = 10 * 60_000;
+
+/** Current on-disk schema version for a recordings.ndjson line. */
+export const RECORDING_SCHEMA = 2 as const;
+
 export interface RecordingEntry {
+  schema: typeof RECORDING_SCHEMA;
   videoPath: string;
-  /** StartRecord wall-clock epoch ms — the replay side's alignment anchor. */
+  /** Wall-clock epoch ms of this chunk's FIRST FRAME -- the replay side's
+   * alignment anchor (shared/videoTime.ts consumes it). */
+  startedAt: number;
+  /** null while the chunk is still being written. */
+  stoppedAt: number | null;
+  /**
+   * Every match carried by this chunk. Schema 1 had a scalar matchId, so a
+   * chunk could only ever be claimed once -- back-to-back matches sharing one
+   * recording left the second with nothing. Phase 2 records continuously and
+   * splits on match boundaries, so one chunk legitimately carries several
+   * matches (design doc 4.3).
+   */
+  matchIds: string[];
+}
+
+/** Schema 1 shape, kept only so migration can read it. */
+interface LegacyEntryV1 {
+  videoPath: string;
   startedAt: number;
   stoppedAt: number;
   matchId: string | null;
+}
+
+function upgrade(raw: unknown): RecordingEntry | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const o = raw as Partial<RecordingEntry> & Partial<LegacyEntryV1>;
+  if (typeof o.videoPath !== "string" || typeof o.startedAt !== "number") {
+    return null;
+  }
+  const stoppedAt = typeof o.stoppedAt === "number" ? o.stoppedAt : null;
+  const matchIds = Array.isArray(o.matchIds)
+    ? o.matchIds.filter((m): m is string => typeof m === "string")
+    : typeof o.matchId === "string"
+      ? [o.matchId]
+      : [];
+  return {
+    schema: RECORDING_SCHEMA,
+    videoPath: o.videoPath,
+    startedAt: o.startedAt,
+    stoppedAt,
+    matchIds,
+  };
 }
 
 /** Overlap in milliseconds between [e.startedAt, e.stoppedAt] and
@@ -47,7 +102,7 @@ function overlapMs(
   e: RecordingEntry,
   meta: { startTime: number; endTime: number },
 ): number | null {
-  if (typeof e.stoppedAt !== "number") return null;
+  if (e.stoppedAt === null) return null;
   const start = Math.max(e.startedAt, meta.startTime);
   const end = Math.min(e.stoppedAt, meta.endTime);
   return Math.max(0, end - start);
@@ -87,7 +142,8 @@ export class RecordingsStore {
     for (const l of raw.split("\n")) {
       if (l.trim() === "") continue;
       try {
-        out.push(JSON.parse(l) as RecordingEntry);
+        const up = upgrade(JSON.parse(l));
+        if (up) out.push(up);
       } catch {
         /* skip corrupt line */
       }
@@ -109,6 +165,51 @@ export class RecordingsStore {
     appendFileSync(this.indexPath(), JSON.stringify(entry) + "\n");
   }
 
+  /** Upsert by videoPath (task-5 brief 5a, 复核 B3): `add()` is a bare
+   * append with no dedup, so calling it twice for the same chunk (e.g. a
+   * retried/duplicate chunk-open event from the managed backend) would
+   * produce two rows pointing at the same file -- prune would then
+   * double-count that file's bytes against the byte fuse, and evicting
+   * either row would unlink a file the OTHER row still references. This
+   * REPLACES any existing row for videoPath wholesale (fresh matchIds too --
+   * open always means "a brand-new chunk just started"), never duplicates. */
+  openChunk(videoPath: string, startedAt: number): void {
+    const entries = this.list().filter((e) => e.videoPath !== videoPath);
+    entries.push({
+      schema: RECORDING_SCHEMA,
+      videoPath,
+      startedAt,
+      stoppedAt: null,
+      matchIds: [],
+    });
+    this.rewrite(entries);
+  }
+
+  /** Sets stoppedAt on the row matching videoPath. Missing row -> creates a
+   * closed row (crash-recovery path: an openChunk that should have landed on
+   * disk never made it there in this process's lifetime -- e.g. an app crash
+   * between the chunk-open event and its write). startedAt is unknown in that
+   * case, so it is set equal to stoppedAt rather than invented -- a reader
+   * can tell startedAt===stoppedAt apart from a real (however short)
+   * measurement, which is the "如实记录不许静默" standard applied to the data
+   * itself, not just to logging. */
+  closeChunk(videoPath: string, stoppedAt: number): void {
+    const entries = this.list();
+    const row = entries.find((e) => e.videoPath === videoPath);
+    if (row) {
+      row.stoppedAt = stoppedAt;
+    } else {
+      entries.push({
+        schema: RECORDING_SCHEMA,
+        videoPath,
+        startedAt: stoppedAt,
+        stoppedAt,
+        matchIds: [],
+      });
+    }
+    this.rewrite(entries);
+  }
+
   /** Time-window overlap association; writes back on a hit. With multiple
    * candidates, the one COVERING MORE of the match's time window wins (I1 fix,
    * audit Important #1) — in a quit-and-relaunch scenario, the truncated
@@ -119,21 +220,49 @@ export class RecordingsStore {
    * criterion reliably picked the useless A and left the useful B in the orphan
    * pile. Only when overlap durations tie (including both 0, or both missing
    * stoppedAt so overlapMs returns null) does it fall back to the old
-   * "closest startedAt" criterion.
-   * When back-to-back DOUBLE_START matches share one recording, the first meta
-   * to arrive wins and the second gets nothing — accepted for phase 1. */
+   * "closest startedAt" criterion. */
   associate(meta: {
     id: string;
     startTime: number;
     endTime: number;
   }): RecordingEntry | null {
     const entries = this.list();
-    const candidates = entries.filter(
-      (e) =>
-        e.matchId === null &&
+    // Idempotent: a chunk already carrying this match needs no write.
+    const already = entries.find((e) => e.matchIds.includes(meta.id));
+    if (already) return already;
+    const candidates = entries.filter((e) => {
+      if (!(
         e.startedAt <= meta.endTime + TOLERANCE_MS &&
-        e.stoppedAt >= meta.startTime - TOLERANCE_MS,
-    );
+        (e.stoppedAt === null || e.stoppedAt >= meta.startTime - TOLERANCE_MS)
+      )) {
+        return false;
+      }
+      // Guard against premature zero-overlap claims of an ALREADY-CLAIMED
+      // neighbour (task-3 review, Important finding): the ±TOLERANCE_MS
+      // window above exists to absorb log lag for a chunk that has no match
+      // yet. But once a chunk already carries a match, a zero-overlap "hit"
+      // almost always means meta's own chunk (recorder.ts splits a new one at
+      // the match boundary) just hasn't been added to the index yet --
+      // segmentClose can race behind the match meta arriving (recorder.ts
+      // ~:305-306) -- and this NEIGHBOURING already-claimed chunk merely sits
+      // within TOLERANCE_MS of meta's edge. Appending here would permanently
+      // misattribute meta to the WRONG video and starve the real,
+      // not-yet-added chunk down to orphan status, where ORPHAN_KEEP_CAP
+      // deletes it shortly after. So an already-claimed chunk is only
+      // eligible for a SECOND match on genuine overlap (> 0ms); a chunk with
+      // matchIds.length === 0 keeps the lenient behavior above unchanged, since
+      // back-to-back matches sharing one still-unclaimed chunk (the whole
+      // point of schema 2) really do overlap it.
+      // Do NOT simplify this away: overlapMs returns null while the chunk is
+      // still recording (stoppedAt === null) -- "unknown", not "zero" -- so a
+      // growing chunk that already carries a match stays eligible; only a
+      // MEASURED overlap <= 0 disqualifies it.
+      if (e.matchIds.length > 0) {
+        const overlap = overlapMs(e, meta);
+        if (overlap !== null && overlap <= 0) return false;
+      }
+      return true;
+    });
     if (candidates.length === 0) return null;
     const hit = candidates
       .map((e) => ({ e, overlap: overlapMs(e, meta) }))
@@ -146,13 +275,13 @@ export class RecordingsStore {
           Math.abs(b.e.startedAt - meta.startTime)
         );
       })[0]!.e;
-    hit.matchId = meta.id;
+    hit.matchIds.push(meta.id);
     this.rewrite(entries);
     return hit;
   }
 
   getForMatch(matchId: string): RecordingEntry | null {
-    return this.list().find((e) => e.matchId === matchId) ?? null;
+    return this.list().find((e) => e.matchIds.includes(matchId)) ?? null;
   }
 
   /** I3: scan the recordings directory and report, at info level, the count
@@ -202,10 +331,25 @@ export class RecordingsStore {
     }
   }
 
-  /** Retention policy (I2/I4 fixes, audit Important #2/#4):
-   * - matched entries (matchId set) and orphans (matchId === null) get
-   *   SEPARATE quotas — orphans never squeeze out matched entries' keepCount
-   *   slots, and their own quota is the fixed ORPHAN_KEEP_CAP.
+  /** Retention: TWO gates, whichever bites first.
+   * - count gate: keep the most recent `keepCount` MATCHES (not chunks -- one
+   *   chunk can carry several, design doc 4.3). keepCount <= 0 disables THIS
+   *   GATE ONLY; the byte fuse and the orphan cap still apply (behaviour change
+   *   2026-08-02 -- a fuse you can switch off is not a fuse).
+   * - byte gate: keep total on-disk size under `maxBytes`.
+   * A chunk is deleted only when NONE of its matches is in the keep set, so a
+   * chunk is admitted whole (its extra matches may push past keepCount).
+   * Chunks still being written (stoppedAt === null) are never evicted.
+   *
+   * Carried over from the count-only version (I2/I4 fixes, audit Important
+   * #2/#4):
+   * - orphans (matchIds empty) get a SEPARATE, fixed quota (ORPHAN_KEEP_CAP) --
+   *   they never squeeze out a matched chunk's keep slot. Orphans still within
+   *   ORPHAN_GRACE_MS of their stoppedAt are exempt from the cap entirely
+   *   (task-5 brief 复核 B4): managed mode's every-match-plus-idle-10min
+   *   splitting produces orphans far faster than they can be claimed by
+   *   associate(), and without this grace window a chunk still waiting on its
+   *   own match's meta could be pruned before it ever gets claimed.
    * - a line is removed from the index only when unlink actually succeeded (or
    *   the file was already gone); lines whose deletion failed (e.g. the file is
    *   held open by vod:// playback on Windows) are kept in the index verbatim
@@ -214,40 +358,185 @@ export class RecordingsStore {
    *   occupying disk forever because its index line was dropped (I4: the old
    *   code swallowed the failure in catch {} and still dropped the line outside
    *   keep — a deliberately left leak). */
-  prune(keepCount: number): { deleted: number } {
+  prune(opts: {
+    keepCount: number;
+    maxBytes: number;
+    /** Injected clock for the ORPHAN_GRACE_MS window; defaults to Date.now. */
+    now?: () => number;
+  }): {
+    deleted: number;
+    freedBytes: number;
+  } {
     const entries = this.list();
     this.reportUnindexedFiles(entries);
-    if (keepCount <= 0) return { deleted: 0 };
+    const nowFn = opts.now ?? Date.now;
 
-    const matched = entries
-      .filter((e) => e.matchId !== null)
-      .sort((a, b) => b.startedAt - a.startedAt);
-    const orphans = entries
-      .filter((e) => e.matchId === null)
-      .sort((a, b) => b.startedAt - a.startedAt);
-    const keepMatched = matched.slice(0, keepCount);
-    const keepOrphans = orphans.slice(0, ORPHAN_KEEP_CAP);
-    const candidateDrop = [
-      ...matched.slice(keepCount),
-      ...orphans.slice(ORPHAN_KEEP_CAP),
-    ];
-    if (candidateDrop.length === 0) return { deleted: 0 };
+    // 复核 I2 (post-review Important fix): a `stoppedAt: null` row used to be
+    // immortal -- prune() never evicted it, and every quit while the managed
+    // backend was mid-chunk (recorder.ts's `stop()` has no managed teardown
+    // yet) left a PERMANENT null row whose bytes are still summed into
+    // `running` below before the byte-fuse check runs, silently and
+    // irreversibly shrinking the effective budget by that row's size forever.
+    // Reclaim: a null row whose file hasn't been touched in ORPHAN_GRACE_MS
+    // (or is outright missing) cannot possibly still be an active recording
+    // -- a real in-progress chunk is written to continuously -- so it is
+    // converted into an ordinary CLOSED row (stoppedAt = the file's own
+    // mtime, the best available truth; startedAt if the file is gone
+    // entirely) and folded into `closed`, where the normal grace/cap/byte
+    // logic below applies to it exactly like any other orphan or matched
+    // chunk. A row still within the grace window is left alone -- it may
+    // genuinely be recording right now.
+    const nowMs = nowFn();
+    const stillLive: RecordingEntry[] = [];
+    const reclaimed: RecordingEntry[] = [];
+    for (const e of entries.filter((row) => row.stoppedAt === null)) {
+      let mtimeMs: number | null;
+      try {
+        mtimeMs = statSync(e.videoPath).mtimeMs;
+      } catch {
+        mtimeMs = null; // file missing -- definitely stale, nothing left to write to
+      }
+      const stale = mtimeMs === null || nowMs - mtimeMs >= ORPHAN_GRACE_MS;
+      if (stale) {
+        reclaimed.push({ ...e, stoppedAt: mtimeMs ?? e.startedAt });
+      } else {
+        stillLive.push(e);
+      }
+    }
+    const live = stillLive;
+    const closed = [
+      ...entries.filter((e) => e.stoppedAt !== null),
+      ...reclaimed,
+    ].sort((a, b) => b.startedAt - a.startedAt);
+
+    // Fail-safe count gate (mirrors the maxBytes treatment below, CRITICAL
+    // fix, review 2026-08-03): a keepCount that is not a finite number must
+    // mean "count gate off", never "admit nothing". "abc" / {} / undefined all
+    // fail `<= 0` (NaN comparisons are false), so the OLD gate looked "on" --
+    // yet `keptMatches.size < opts.keepCount` is ALSO NaN-false forever, so
+    // nothing is ever admitted and every closed entry with a non-empty
+    // matchIds gets unlinked. Worse, the byte loop further down only walks the
+    // (now-empty) keep set, so the maxBytes fuse never even runs -- a bad
+    // keepCount silently bypassed both gates and wiped the library. Coerce up
+    // front so countGateOff and the admits comparison agree on the same safe
+    // value (0 -> gate off), exactly like maxBytes's Number.isFinite guard.
+    const keepCount = Number.isFinite(opts.keepCount) ? opts.keepCount : 0;
+    const countGateOff = keepCount <= 0;
+    const keptMatches = new Set<string>();
+    const keep = new Set<RecordingEntry>();
+    const orphans: RecordingEntry[] = [];
+    for (const e of closed) {
+      if (e.matchIds.length === 0) {
+        orphans.push(e);
+        continue;
+      }
+      const admits =
+        countGateOff ||
+        e.matchIds.some(
+          (m) => keptMatches.has(m) || keptMatches.size < keepCount,
+        );
+      if (admits) {
+        for (const m of e.matchIds) keptMatches.add(m);
+        keep.add(e);
+      }
+    }
+    // Grace-window orphans are always kept and never touch the fixed cap;
+    // `closed` (and therefore `orphans`, filtered from it) is already sorted
+    // newest-first, so `.slice(0, ORPHAN_KEEP_CAP)` on the remainder still
+    // keeps the newest non-grace orphans, exactly as before this split.
+    // (`nowMs` is the same clock reading captured above for the stale-null
+    // reclaim pass -- one `now()` call per prune(), not one per phase.)
+    const graceOrphans = orphans.filter(
+      (e) => e.stoppedAt !== null && nowMs - e.stoppedAt < ORPHAN_GRACE_MS,
+    );
+    const agedOrphans = orphans.filter((e) => !graceOrphans.includes(e));
+    for (const e of graceOrphans) keep.add(e);
+    for (const e of agedOrphans.slice(0, ORPHAN_KEEP_CAP)) keep.add(e);
+
+    const sizeOf = (e: RecordingEntry): number => {
+      try {
+        return statSync(e.videoPath).size;
+      } catch {
+        return 0;
+      }
+    };
+    // Fail-safe byte gate: a maxBytes that is not a finite number > 0 must
+    // mean "byte gate off", never "evict everything". This guard lives HERE,
+    // not only in settingsStore's sanitizer, because SettingsStore.get() is a
+    // plain {...DEFAULTS, ...raw} merge with no sanitize pass on READ -- a
+    // hand-edited settings.json (or any other value that slips past the
+    // sanitizer on the write side) reaches prune() unvalidated. Without this,
+    // maxBytes: 0 or maxBytes: null both make `running + sz > maxBytes` true
+    // for every entry (0 > null coerces the same way), silently deleting the
+    // user's entire library on the very next prune (review finding,
+    // 2026-08-03).
+    const maxBytes =
+      Number.isFinite(opts.maxBytes) && opts.maxBytes > 0
+        ? opts.maxBytes
+        : Number.POSITIVE_INFINITY;
+    let running = live.reduce((n, e) => n + sizeOf(e), 0);
+    for (const e of closed) {
+      if (!keep.has(e)) continue;
+      const sz = sizeOf(e);
+      if (running + sz > maxBytes) {
+        // `continue`, not `break`, is deliberate: `closed` is sorted newest
+        // first, so a single oversized entry near the front must not stop the
+        // scan and spare every OLDER (smaller / already-under-budget) entry
+        // behind it from being counted into `running`. The intended failure
+        // mode is "the newest oversized chunk gets evicted, older ones
+        // survive" (retention favors recency, not insertion order) -- do not
+        // "fix" this to `break` later, that would make one big chunk block
+        // eviction of everything after it and let the byte fuse quietly stop
+        // working.
+        keep.delete(e);
+        continue;
+      }
+      running += sz;
+    }
 
     let deleted = 0;
+    let freedBytes = 0;
     const survivors: RecordingEntry[] = [];
-    for (const e of candidateDrop) {
+    for (const e of closed) {
+      if (keep.has(e)) continue;
+      const sz = sizeOf(e);
       let removed = true;
       try {
         if (existsSync(e.videoPath)) unlinkSync(e.videoPath);
       } catch {
-        // File in use, etc. — keep the index line and retry on the next
-        // prune (I4)
+        // Held open by vod:// playback on Windows -- keep the line and retry
+        // next prune, so the file never becomes unreachable-but-on-disk (I4).
         removed = false;
       }
-      if (removed) deleted++;
-      else survivors.push(e);
+      if (removed) {
+        deleted++;
+        freedBytes += sz;
+      } else {
+        survivors.push(e);
+      }
     }
-    this.rewrite([...keepMatched, ...keepOrphans, ...survivors]);
-    return { deleted };
+    // 复核 I2: a reclaimed stale-null row (see above) must still be flushed to
+    // disk even when this particular call evicts nothing -- otherwise the
+    // conversion is pure in-memory bookkeeping for this one call, `list()`
+    // keeps handing every OTHER caller (associate(), getForMatch()) the stale
+    // `stoppedAt: null` shape forever, and the row is stuck re-deriving
+    // "stale" from a stat() on every future prune() instead of the cheap
+    // stoppedAt!==null check the rest of the codebase already assumes.
+    if (deleted === 0 && survivors.length === 0 && reclaimed.length === 0) {
+      return { deleted: 0, freedBytes: 0 };
+    }
+    this.rewrite([...live, ...closed.filter((e) => keep.has(e)), ...survivors]);
+    // Visibility for an otherwise-silent deletion (review finding, 2026-08-03):
+    // prune() now runs from failure paths and at every app startup, not just
+    // the one success-path call site it used to have -- so a no-log delete
+    // would mean the first launch after upgrade silently frees disk with no
+    // trace anywhere. Deliberately only when deleted > 0: a no-op sweep (the
+    // common case, called on every segment close) must not spam the log.
+    if (deleted > 0) {
+      this.log(
+        `[recordings] 清理 ${deleted} 个过期录像,释放 ${(freedBytes / 1_000_000).toFixed(1)}MB`,
+      );
+    }
+    return { deleted, freedBytes };
   }
 }

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, safeStorage, screen } from "electron";
 import log from "electron-log/main";
+import { randomBytes } from "node:crypto";
 import { dirname, join } from "path";
 import type { WorkerConfig } from "../shared/protocol";
 import type { LogsStatusSnapshot } from "../preload/api";
@@ -24,7 +25,11 @@ import { createCompareService } from "./compare";
 import { createAnalysisService } from "./analysis";
 import { createCoachChatService } from "./coachChat";
 import { createLearningService } from "./learning";
-import { createRecorderService, type RecorderService } from "./recorder";
+import {
+  createRecorderService,
+  isManagedActive,
+  type RecorderService,
+} from "./recorder";
 import { realObsClient } from "./obsClient";
 import { RecordingsStore } from "./recordingsStore";
 import { createQuitLifecycleHandler } from "./quitLifecycle";
@@ -34,6 +39,18 @@ import { loadBundledCorpus, gameBuildFromManifest } from "./corpusLoader";
 import datagenManifest from "@gladlog/analysis/src/data/datagen-manifest.json";
 import { e2eUserDataDir } from "./e2eEnv";
 import { readdirSync } from "fs";
+import { createObsAssets, type ObsInstallProgress } from "./obsAssets";
+import { clearSentinels, writeObsConfig } from "./obsConfigWriter";
+import { spawnManagedObs } from "./managedObsProcess";
+import { createManagedObsBackend } from "./managedObsBackend";
+import { createWowProcessWatch } from "./wowProcessWatch";
+import {
+  assembleManagedRecording,
+  createManagedAssemblyState,
+  reactToManagedToggle,
+  teardownManagedRecording,
+} from "./managedAssembly";
+import type { CaptureBackend } from "./captureBackend";
 import {
   createUpdaterService,
   evaluateGate,
@@ -75,6 +92,19 @@ let store: MatchStore;
 let host: WorkerHost | null = null;
 let recorder: RecorderService | null = null;
 
+// Task-5b: mutable box recorder.ts's `managedBackend`/`managedProcessStop`
+// deps read from on every access (getters below, never cached) -- lets the
+// assembly layer (managedAssembly.ts) inject/clear them across repeated
+// runtime toggles without recorder.ts needing to know assembly exists.
+const managedRefs: {
+  backend?: CaptureBackend;
+  processStop?: () => Promise<void>;
+} = {};
+// Task-5b: the one piece of cross-call assembly state (handle/backend/watch/
+// running) that survives app-lifetime settings toggles; see
+// managedAssembly.ts's own doc comment.
+const managedAssemblyState = createManagedAssemblyState();
+
 // C2 fix: on exit we must wait for recorder.stop() (StopRecord's async round
 // trip) to finish before actually calling app.quit(), or OBS will very likely
 // keep recording forever after the process dies. See the semantics comment in
@@ -87,8 +117,162 @@ const quitLifecycle = createQuitLifecycleHandler({
   // naturally once the host exits anyway).
   stopAiActivity: () => stopAllAiActivity(),
   quit: () => app.quit(),
+  // Task-5b exit sequence point 2: the deps object above is constructed once,
+  // at module scope, well before whenReady decides which mode is active --
+  // a static number could never reflect that. Managed teardown stacks
+  // stopContinuous + backend.shutdown + the OBS process's own graceful
+  // stop()/GRACE_STOP_MS, so it needs more headroom (8s) than bypass's plain
+  // StopRecord/disconnect round trip (4s, the existing default).
+  //
+  // 复核 I5 (review round 2, shared-predicate rule): this used to read
+  // `isManagedActive(settings.get())`, but recorder.stop()'s managed branch
+  // is gated on `deps.managedBackend` presence ALONE (deliberately, so a
+  // settings flicker right before quit still tears down a live process --
+  // see that branch's own comment). Those two predicates can disagree: a
+  // settings flicker between "still managed" and "no longer managed" while
+  // a managedBackend is still injected would make this getter pick the 4s
+  // bypass cap while stop() still runs the (longer) managed teardown --
+  // `app.quit()` could then fire mid-StopRecord, and will-quit's killSync
+  // would kill OBS with the tail mp4 unfinalized. Reading `managedRefs.backend`
+  // directly is the SAME fact `deps.managedBackend` resolves to (via the
+  // getter below), not a second, independently-derived approximation of it.
+  timeoutMs: () => (managedRefs.backend ? 8000 : 4000),
 });
 app.on("before-quit", (event) => quitLifecycle.onBeforeQuit(event));
+// Task-5b exit sequence point 3: will-quit and process.on("exit") are the
+// last-resort SYNCHRONOUS fallback if the graceful before-quit chain above
+// never ran to completion (e.g. the process is being torn down by the OS
+// rather than a normal app.quit()) -- handle.killSync() only, no async work,
+// matching managedObsProcess.ts's own killSync() contract.
+app.on("will-quit", () => managedAssemblyState.handle?.killSync());
+process.on("exit", () => managedAssemblyState.handle?.killSync());
+
+// managedAssets.installed()/ensureInstalled() need only userDataDir --
+// app.getPath("userData") is already called at module scope above (the
+// SettingsStore construction), so this is equally safe pre-whenReady.
+const managedAssets = createObsAssets({ userDataDir: userData() });
+
+/** Task-5b brief step 2: `settings.managedWsPassword ?? generate 32 hex
+ * random → save`. Task 6 landed `managedWsPassword` as a real (secret,
+ * three-piece-protected) `GladlogSettings` field, so this reads/writes it
+ * directly -- no more structural cast. */
+function resolveManagedWsPassword(): string {
+  const s = settings.get();
+  if (s.managedWsPassword) return s.managedWsPassword;
+  const generated = randomBytes(16).toString("hex"); // 32 hex chars
+  settings.save({ managedWsPassword: generated });
+  return generated;
+}
+
+/** Runs (or no-ops if already running / not managed-active) the task-5b
+ * startup sequence. Called once at app launch and again on every
+ * false→true runtime settings toggle (复核 NEW-3) and after a successful
+ * install — assembleManagedRecording itself re-checks isManagedActive() and
+ * state.running, so calling this liberally is always safe. */
+async function ensureManagedAssembly(): Promise<void> {
+  await assembleManagedRecording({
+    state: managedAssemblyState,
+    getSettings: () => settings.get(),
+    getWsPassword: resolveManagedWsPassword,
+    recDir: join(userData(), "recordings"),
+    assets: managedAssets,
+    writeObsConfig,
+    clearSentinels,
+    spawnManagedObs,
+    createManagedObsBackend,
+    createWowProcessWatch,
+    setRecorderManagedBackend: (b) => {
+      managedRefs.backend = b ?? undefined;
+    },
+    setRecorderManagedProcessStop: (fn) => {
+      managedRefs.processStop = fn ?? undefined;
+    },
+    onWowUp: () => recorder?.onWowUp(),
+    onWowDown: () => recorder?.onWowDown(),
+    emitStatus: (status) =>
+      win?.webContents.send("gladlog:recorder:status", status),
+  });
+}
+
+/** true→false runtime settings toggle counterpart (复核 NEW-3). No-ops if
+ * assembly was never running. */
+async function ensureManagedTeardown(): Promise<void> {
+  await teardownManagedRecording({
+    state: managedAssemblyState,
+    stopRecorder: () => recorder?.stop() ?? Promise.resolve(),
+    setRecorderManagedBackend: (b) => {
+      managedRefs.backend = b ?? undefined;
+    },
+    setRecorderManagedProcessStop: (fn) => {
+      managedRefs.processStop = fn ?? undefined;
+    },
+    recordingEnabled: settings.get().recordingEnabled,
+    emitStatus: (status) =>
+      win?.webContents.send("gladlog:recorder:status", status),
+  });
+}
+
+/** IPC surface (recorder:installObs): the renderer's "下载并启用" action is
+ * the ONLY thing that ever calls assets.ensureInstalled() -- task-5b
+ * user-approved deviation, 179MB must be a visible user action, never a
+ * silent background download. Re-runs the same runtime-toggle assembly path
+ * on success so recording starts without an app restart. */
+async function installObs(
+  onProgress: (p: ObsInstallProgress) => void,
+): Promise<void> {
+  await managedAssets.ensureInstalled(onProgress);
+  await ensureManagedAssembly();
+}
+
+/** 复核 I4 (review round 2): "not installed" only ever got announced via a
+ * one-shot `emitStatus` push at whatever moment `ensureManagedAssembly()`
+ * happened to run (app launch, before the renderer's status subscription
+ * even mounts) -- a managed-enabled + OBS-not-installed + fresh-launch user
+ * would see 未启用/未连接 forever, never 待安装, since the durable
+ * `recorder:getStatus` query (which the settings row DOES call on mount)
+ * knows nothing about install state at all. This is a synchronous,
+ * pollable fact (unlike recording status, no in-flight session to
+ * describe), so it gets its own tiny durable query rather than trying to
+ * retrofit it into RecorderStatus's push-only shape. Renders it is Task 6's
+ * job; this is the data plumbing Task 6 needs.
+ *
+ * `platformSupported` (task-6 addition, NEW-7): managed recording is
+ * win32-only (isManagedActive's third term) -- the settings page needs this
+ * to render the managed radio disabled-with-explanation on mac/linux rather
+ * than re-deriving `process.platform === "win32"` itself in the renderer
+ * (which has no direct access to `process.platform` in the first place). */
+function getObsInstallState(): {
+  installed: boolean;
+  platformSupported: boolean;
+} {
+  return {
+    installed: managedAssets.installed(),
+    platformSupported: process.platform === "win32",
+  };
+}
+
+/** settings:save hook (复核 NEW-3): compares isManagedActive() before/after
+ * the save and runs assembly or teardown accordingly, so a managed toggle
+ * takes effect immediately instead of needing an app restart.
+ *
+ * Task 8 review fix: delegates the actual await-or-not decision to
+ * `reactToManagedToggle` (managedAssembly.ts) -- the false→true (enable)
+ * branch is fire-and-forget (matches startup's `void ensureManagedAssembly()`
+ * below), so this settings:save hook -- and therefore the IPC reply -- no
+ * longer blocks on the full assembly sequence's ~30s readiness timeout. The
+ * true→false (disable) branch stays awaited; see that function's doc comment
+ * for the full rationale. */
+async function onManagedActiveMaybeChanged(
+  prev: GladlogSettings,
+  next: GladlogSettings,
+): Promise<void> {
+  const before = isManagedActive(prev);
+  const after = isManagedActive(next);
+  await reactToManagedToggle(before, after, {
+    assemble: ensureManagedAssembly,
+    teardown: ensureManagedTeardown,
+  });
+}
 
 // Auto-update wiring (design doc §4.2/§4.4). The gate is evaluated
 // synchronously right here so getState() can answer correctly from the very
@@ -410,7 +594,29 @@ else {
       recordings,
       clientFactory: realObsClient,
       emit: (ch, payload) => win?.webContents.send(ch, payload),
+      // Task-5b: read fresh from managedRefs on every access (never cached)
+      // -- the assembly layer mutates managedRefs across repeated runtime
+      // toggles, and recorder.ts's own doc comment on this field already
+      // documents that every read is a live property access, never a
+      // captured local, so a getter here is exactly what it expects.
+      get managedBackend() {
+        return managedRefs.backend;
+      },
+      get managedProcessStop() {
+        return managedRefs.processStop;
+      },
     });
+    recorder.pruneNow();
+    // Review Important #2: connect once at startup so a healthy setup does
+    // not show "未连接" until the first match opens. Fire-and-forget -- it
+    // never throws (degrades to lastError + pushStatus internally) and window
+    // creation must not wait on OBS being reachable.
+    void recorder.connectAtStartup();
+    // Task-5b startup sequence: gated end-to-end by isManagedActive() inside
+    // assembleManagedRecording itself -- on non-win32/external/disabled this
+    // is a zero-cost no-op (no downloads, no spawns, no timers; this is what
+    // the ubuntu E2E suite enforces by running the real main process).
+    void ensureManagedAssembly();
     handleVodProtocol((p) => recordings.list().some((r) => r.videoPath === p));
     registerIpc({
       recorder,
@@ -420,6 +626,9 @@ else {
       getStatus: () => lastStatus,
       getWindow: () => win,
       onWowDirectoryChanged: (s) => startMonitoring(s),
+      onSettingsSaved: (prev, next) => onManagedActiveMaybeChanged(prev, next),
+      installObs,
+      getObsInstallState,
       compare,
       analysis,
       learning,
