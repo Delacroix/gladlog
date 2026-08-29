@@ -20,11 +20,14 @@
  */
 import {
   ccSpellIds,
+  classMetadata,
   ensureAnalysisData,
   extractCandidateFindings,
   isHealerSpec,
   specToString,
+  spellIdLists,
 } from "@gladlog/analysis";
+import { SpellTag } from "@gladlog/analysis/src/data/spellTypes";
 import {
   cdAvailableAt,
   extractMajorCooldowns,
@@ -50,6 +53,21 @@ const ACTION_WINDOW_MS = 3000;
 const ACTION_PRE_MS = 1500; // a wall pressed just before the crossing counts too
 const DEATH_LOOKAHEAD_MS = 10000;
 const DMG_WINDOW_MS = 2000;
+// context windows (v3, 2026-08-29)
+const ENEMY_BURST_LOOKBACK_MS = 8000;
+const EXTERNAL_LOOKBACK_MS = 5000;
+
+/** enemy offensive cooldowns — same derivation as signalSkillGradientScan */
+const OFFENSIVE_CD_IDS = new Set<string>(
+  classMetadata.flatMap((c: any) =>
+    (c.abilities ?? [])
+      .filter((a: any) => (a.tags ?? []).includes(SpellTag.Offensive))
+      .map((a: any) => String(a.spellId)),
+  ),
+);
+const EXTERNAL_IDS = new Set<string>(
+  (spellIdLists as any).externalDefensiveSpellIds.map(String),
+);
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
@@ -82,6 +100,15 @@ interface Opp {
    * ready or not); null = never cast one yet. A small value with wallsReady=0
    * means "walled pre-emptively before the HP ever got here". */
   lastWallCastAgoMs: number | null;
+  // ---- context (v3) ----
+  /** an enemy cast an offensive major CD within the last 8s */
+  enemyBurst: boolean;
+  /** distinct enemy sources that damaged the owner in the prior 2s */
+  attackers2s: number;
+  /** a teammate cast an external defensive ON the owner within the last 5s */
+  externalRecent: boolean;
+  /** lowest teammate (not owner) HP% at the crossing, null if unknown */
+  lowestAllyHp: number | null;
 }
 
 function isoWeek(ms: number): string {
@@ -226,6 +253,59 @@ function oppsOf(
   }
   for (const [, from] of open) cc.push({ from, to: from + 8000 });
 
+  // ---- context sources ----
+  const units: any[] = Object.values(legacy.units ?? {});
+  const friendIds = new Set(
+    units
+      .filter((u) => u.info && u.reaction === CombatUnitReaction.Friendly)
+      .map((u) => u.id),
+  );
+  const enemyBurstCasts: number[] = [];
+  const externalsOnOwner: number[] = [];
+  for (const u of units) {
+    if (!u.info) continue;
+    for (const c of (u.spellCastEvents ?? []) as any[]) {
+      const sid = String(c.spellId ?? "");
+      if (!friendIds.has(u.id) && OFFENSIVE_CD_IDS.has(sid))
+        enemyBurstCasts.push(c.timestamp);
+      if (
+        friendIds.has(u.id) &&
+        u.id !== owner.id &&
+        EXTERNAL_IDS.has(sid) &&
+        c.destUnitId === owner.id
+      )
+        externalsOnOwner.push(c.timestamp);
+    }
+  }
+  enemyBurstCasts.sort((a, b) => a - b);
+  externalsOnOwner.sort((a, b) => a - b);
+  const dmgSrc = ((owner.damageIn ?? []) as any[]).map((d) => ({
+    t: d.timestamp,
+    src: d.srcUnitId,
+  }));
+  const allySamples = units
+    .filter((u) => friendIds.has(u.id) && u.id !== owner.id)
+    .map((u) =>
+      ((u.advancedActions ?? []) as any[])
+        .filter((a) => (a.advancedActorMaxHp ?? 0) > 0)
+        .map((a) => ({
+          t: a.timestamp,
+          hp: a.advancedActorCurrentHp / a.advancedActorMaxHp,
+        })),
+    );
+  const lowestAllyAt = (t: number): number | null => {
+    let low: number | null = null;
+    for (const arr of allySamples) {
+      let best: { t: number; hp: number } | null = null;
+      for (const a of arr) {
+        if (Math.abs(a.t - t) > 3000) continue;
+        if (!best || Math.abs(a.t - t) < Math.abs(best.t - t)) best = a;
+      }
+      if (best && (low === null || best.hp < low)) low = best.hp;
+    }
+    return low === null ? null : Math.round(low * 100);
+  };
+
   const out: Opp[] = [];
   for (const x of crossings) {
     const tSec = (x.t - start) / 1000;
@@ -264,6 +344,18 @@ function oppsOf(
       diedIn10s: deaths.some((d) => d >= x.t && d <= x.t + DEATH_LOOKAHEAD_MS),
       gateFiredThisRound: gateFired,
       lastWallCastAgoMs: lastAgo,
+      enemyBurst: enemyBurstCasts.some(
+        (t) => t > x.t - ENEMY_BURST_LOOKBACK_MS && t <= x.t,
+      ),
+      attackers2s: new Set(
+        dmgSrc
+          .filter((d) => d.t > x.t - DMG_WINDOW_MS && d.t <= x.t)
+          .map((d) => d.src),
+      ).size,
+      externalRecent: externalsOnOwner.some(
+        (t) => t > x.t - EXTERNAL_LOOKBACK_MS && t <= x.t + ACTION_WINDOW_MS,
+      ),
+      lowestAllyHp: lowestAllyAt(x.t),
     });
   }
   return out;
@@ -485,6 +577,58 @@ function report(): void {
           `| ${cn} | ${dn} | ${cell("top10")} | ${cell("60-90")} | ${cell("<30")} |`,
         );
       }
+
+    // context cells (v3): free, wall ready
+    lines.push(
+      `\n### context cells (not in CC) — press rate top10 vs 60-90 vs <30\n`,
+    );
+    lines.push(`| context | top10 | 60-90 | <30 |`);
+    lines.push(`|---|---|---|---|`);
+    const ctx: [string, (r: Opp) => boolean][] = [
+      ["enemy burst CD in last 8s", (r) => r.enemyBurst],
+      ["no enemy burst CD", (r) => !r.enemyBurst],
+      ["≥2 attackers on you (2s)", (r) => r.attackers2s >= 2],
+      ["≤1 attacker (2s)", (r) => r.attackers2s <= 1],
+      ["teammate external on you (−5s..+3s)", (r) => r.externalRecent],
+      ["no external", (r) => !r.externalRecent],
+      [
+        "a teammate also ≤40%",
+        (r) => r.lowestAllyHp != null && r.lowestAllyHp <= 40,
+      ],
+      [
+        "teammates all >40%",
+        (r) => r.lowestAllyHp != null && r.lowestAllyHp > 40,
+      ],
+      [
+        "burst + ≥2 attackers + no external",
+        (r) => r.enemyBurst && r.attackers2s >= 2 && !r.externalRecent,
+      ],
+      ["no burst + ≤1 attacker", (r) => !r.enemyBurst && r.attackers2s <= 1],
+    ];
+    for (const [name, f] of ctx) {
+      const cell = (b: string) => {
+        const sub = rs.filter(
+          (r) => !r.inCC && bucketOfPct(r.pct!) === b && f(r),
+        );
+        return pctStr(sub.filter((r) => r.pressed).length, sub.length);
+      };
+      lines.push(
+        `| ${name} | ${cell("top10")} | ${cell("60-90")} | ${cell("<30")} |`,
+      );
+    }
+    // death rate by context, top10 — does the context predict lethality?
+    lines.push(`\n### died ≤10s by context (not in CC), top10 vs <30\n`);
+    lines.push(`| context | top10 | <30 |`);
+    lines.push(`|---|---|---|`);
+    for (const [name, f] of ctx) {
+      const cell = (b: string) => {
+        const sub = rs.filter(
+          (r) => !r.inCC && bucketOfPct(r.pct!) === b && f(r),
+        );
+        return pctStr(sub.filter((r) => r.diedIn10s).length, sub.length);
+      };
+      lines.push(`| ${name} | ${cell("top10")} | ${cell("<30")} |`);
+    }
 
     // pre-emptive walls: every crossing in this bracket (wall ready or not),
     // how often had a wall been pressed in the 10s BEFORE the HP got here?
