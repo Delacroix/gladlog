@@ -95,7 +95,7 @@ export function buildMatchContext(
 用一个真实例子(`juked-kick` finding 类型)顺藤摸瓜出来的:
 
 1. **纯检测函数** —— 写在 `src/utils/<name>.ts`。例:`src/utils/kickAudit.ts` 里的 `analyzeKickAudit`。
-2. **转成一个 `CandidateEvent`**,在 `src/analysis/candidateFindings.ts` —— 定一个新的、唯一的 `type: "..."` 字符串,一个确定性 `id`(模式:`` `${type}:${owner.id}:${Math.round(t)}` ``),和一个 `facts: Record<string,string>`(只放模型能引用的值)。这里已经有 16 个 `type` 值了(`cd-waste`、`death`、`missed-cleanse`、`missed-purge`、`cc-locked`、`kick-eaten`、`wasted-trinket`、`death-setup`、`death-unused-defensive`、`external-unused`、`questionable-external`、`unconverted-burst`、`burst-into-immunity`、`off-target-in-window`、`juked-kick`、`dr-clipped-cc`)—— 照着这些的样子写。
+2. **转成一个 `CandidateEvent`**,在 `src/analysis/candidateFindings.ts` —— 定一个新的、唯一的 `type: "..."` 字符串,一个确定性 `id`(模式:`` `${type}:${owner.id}:${Math.round(t)}` ``),和一个 `facts: Record<string,string>`(只放模型能引用的值)。这里已经有 17 个 `type` 值了(`cd-waste`、`death`、`missed-cleanse`、`missed-purge`、`cc-locked`、`kick-eaten`、`wasted-trinket`、`death-setup`、`death-unused-defensive`、`external-unused`、`questionable-external`、`unconverted-burst`、`burst-into-immunity`、`off-target-in-window`、`juked-kick`、`dr-clipped-cc`、`crisis-no-response`)—— 照着这些的样子写。
 3. **加一行图例**,在 `src/analysis/buildFindingsPrompt.ts` —— 新 `type` 需要在 `DPS_LEGENDS` 或 `CHAIN_LEGENDS` 里加一条(两者都以 `type` 字符串本身为键),告诉模型这个事件是什么意思。漏掉这步不会造成机制上的错误,但模型会看到一个没解释过的事件。
 4. **`findingCategories.ts` 通常不用改** —— 它的 8 值枚举很粗,由模型自己赋值;新 finding 类型只要能合理归进某个既有类别就行。
 5. **`auditFindings.ts` 不需要按类型改** —— 它的溯源/占位符/lint 逻辑对所有候选类型都是通用的。

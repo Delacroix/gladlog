@@ -40,6 +40,7 @@ const rec = (
     ownerExternalCasts: 0,
     teamOffensiveCdCasts: 0,
     enemyCyclones: 0,
+    crisisDecisionPoints: 0,
     ...exposure,
   },
 });

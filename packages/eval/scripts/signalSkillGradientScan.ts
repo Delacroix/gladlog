@@ -30,6 +30,7 @@ import {
   spellIdLists,
   specToString,
 } from "@gladlog/analysis";
+import { crisisDecisionPoints } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
 import { extractMajorCooldowns } from "@gladlog/analysis/src/utils/cooldowns";
 import {
   getDispelType,
@@ -113,6 +114,7 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
     ownerExternalCasts: 0,
     teamOffensiveCdCasts: 0,
     enemyCyclones: 0,
+    crisisDecisionPoints: 0,
   };
   const friendIds = new Set(friends.map((u) => u.id));
   for (const u of Object.values(legacy.units ?? {}) as any[]) {
@@ -225,6 +227,9 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
       }
     }
   }
+  e.crisisDecisionPoints = crisisDecisionPoints(owner, legacy).filter(
+    (p) => p.feasible,
+  ).length;
   return e;
 }
 

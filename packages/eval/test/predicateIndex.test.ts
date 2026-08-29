@@ -68,6 +68,8 @@ import * as talentBehaviors from "@gladlog/analysis/src/utils/talentBehaviors";
 import * as talentOwnership from "@gladlog/analysis/src/utils/talentOwnership";
 import * as talents from "@gladlog/analysis/src/utils/talents";
 import * as threatAssessment from "@gladlog/analysis/src/utils/threatAssessment";
+import * as crisisDecisionPoints from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
+import * as behaviorPrior from "@gladlog/analysis/src/data/behaviorPrior";
 import {
   decodeAdvanced as parserDecodeAdvanced,
   parseTimestamp as parserParseTimestamp,
@@ -549,6 +551,26 @@ const INDEX: PredicateRow[] = [
     file: `${A}/utils/dpsMetrics.ts`,
     symbol: "isBurstConverted",
     mod: dpsMetrics,
+  },
+  {
+    file: `${A}/analysis/crisisDecisionPoints.ts`,
+    symbol: "crisisDecisionPoints",
+    mod: crisisDecisionPoints,
+  },
+  {
+    file: `${A}/analysis/crisisDecisionPoints.ts`,
+    symbol: "CRISIS_HP_PCT",
+    mod: crisisDecisionPoints,
+  },
+  {
+    file: `${A}/data/behaviorPrior.ts`,
+    symbol: "lookupBehaviorPrior",
+    mod: behaviorPrior,
+  },
+  {
+    file: `${A}/data/behaviorPrior.ts`,
+    symbol: "BEHAVIOR_PRIOR_N_FLOOR",
+    mod: behaviorPrior,
   },
   // Formatting and notation
   {
@@ -1330,6 +1352,49 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
         renderGrid.fmtTime(renderGrid.toRenderSecond(t)),
       );
     }
+  });
+
+  it("crisis-no-response 渲染出的参照数字,门规零违规;改动 refRespond 会被抓住(反向对照)", () => {
+    // Same lookup the product renders from and the gate re-derives from —
+    // one call, both sides consume its output (CLAUDE.md shared-predicate
+    // rule; docs/predicate-index.md's crisisDecisionPoints/behaviorPrior rows).
+    const ref = behaviorPrior.lookupBehaviorPrior("3v3", "healer", 0.25);
+    expect(ref).not.toBeNull();
+    const facts: Record<string, string> = {
+      t: "42",
+      unit: "Healer-Realm-US",
+      hpPct: "35",
+      dmg2sPct: "25",
+      attackers: "2",
+      burst: "yes",
+      refN: String(ref!.n),
+      refRespond: String(ref!.respondPct),
+      refTop: ref!.top.map(([k, v]) => `${k} ${v}%`).join("; "),
+      refSelfHealMedian: String(ref!.selfHealMedianPct),
+      cellKey: ref!.cellKey,
+      fellBack: ref!.fellBack ? "yes" : "no",
+    };
+    const factsStr = Object.entries(facts)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ");
+    const line = `  - id=crisis-no-response:1:42 type=crisis-no-response t=42s units=Healer-Realm-US facts={${factsStr}}`;
+    expect(promptQualityCheck.checkBehaviorPriorConsistency([line])).toEqual(
+      [],
+    );
+
+    // Negative control: mutate refRespond only — must be exactly one failure,
+    // proof the case above is not a no-op.
+    const mutatedFacts = {
+      ...facts,
+      refRespond: String(Number(facts.refRespond) + 1),
+    };
+    const mutatedFactsStr = Object.entries(mutatedFacts)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ");
+    const mutatedLine = `  - id=crisis-no-response:1:42 type=crisis-no-response t=42s units=Healer-Realm-US facts={${mutatedFactsStr}}`;
+    expect(
+      promptQualityCheck.checkBehaviorPriorConsistency([mutatedLine]),
+    ).toHaveLength(1);
   });
 });
 

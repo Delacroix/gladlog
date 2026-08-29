@@ -50,6 +50,20 @@ npx tsx packages/eval/scripts/observedSpellIds.ts \
   --manifest $GLADLOG_EVAL_HOME/corpus/manifest-fullscale.txt \
   --store ~/Library/Application\ Support/gladlog/matches \
   > packages/analysis/src/data/observedSpellIdsGenerated.json
+# 6b-pre-2. Behavior-prior reference table (top-10% healer crisis responses; corpus-driven, NOT DB2).
+#   Regenerate at season start and whenever packages/analysis/src/analysis/crisisDecisionPoints.ts changes.
+#   ~1 h over the archive; run ≤3 shards with nice. Health test: packages/analysis/src/data/behaviorPrior.test.ts
+#   ("every bracket star cell n ≥ 50") goes red when the season is too young — wait for more archive, do not lower the floor.
+E=$GLADLOG_EVAL_HOME; R=$E/reports/behavior-prior-$(date +%F); mkdir -p $R
+find $E/corpus/archive-gz -name '*.txt.gz' | sort > $R/manifest.txt
+for i in 0 1 2; do nice -n 10 npx tsx packages/eval/scripts/behaviorPriorScan.ts scan \
+  --manifest $R/manifest.txt --ledger $E/archive/ledger --out $R/shard$i.jsonl \
+  --offset $((i*7000)) --limit 7000 > $R/shard$i.log 2>&1 & done; wait
+cat $R/shard*.jsonl > $R/opportunities.jsonl
+npx tsx packages/eval/scripts/behaviorPriorScan.ts emit-table --in $R/opportunities.jsonl \
+  --corpus "wowarenalogs archive $(date +%F)" > packages/analysis/src/data/behaviorPriorGenerated.json
+#   (the scan itself already filters to startTime >= PATCH_121_GOLIVE_EPOCH_MS; when the next
+#   season ships, update that epoch first — it is the season gate.)
 # 6b. Spell icon names (desktop swimlane/replay icons; SpellMisc -> ManifestInterfaceData;
 #     universe = observed ∪ SpellCooldowns ∪ candidates; do not revert to full table — 13.8MB busts initial render budget)
 npx tsx packages/analysis/scripts/datagen/genSpellIcons.ts
