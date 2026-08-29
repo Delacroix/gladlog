@@ -80,7 +80,7 @@ describe("crisis-no-response", () => {
       crisisNoResponseEvents([pt()], owner, "Skirmish", { lookup: () => null }),
     ).toEqual([]);
   });
-  it("caps at 2 per round ordered by danger, never by outcome", () => {
+  it("caps at 2 per round selected by danger (never by outcome), emitted in time order", () => {
     const pts = [
       pt({ tSec: 10, enemyBurst: false, attackers2s: 1, dmg2s: 0.05 }),
       pt({ tSec: 20, enemyBurst: true, attackers2s: 1, dmg2s: 0.1 }),
@@ -88,7 +88,7 @@ describe("crisis-no-response", () => {
       pt({ tSec: 40, enemyBurst: true, attackers2s: 2, dmg2s: 0.3 }),
     ];
     const ev = crisisNoResponseEvents(pts, owner, "3v3", probes);
-    expect(ev.map((e) => e.facts.t)).toEqual(["40", "20"]);
+    expect(ev.map((e) => e.facts.t)).toEqual(["20", "40"]);
     expect(CRISIS_NO_RESPONSE_CAP).toBe(2);
   });
   it("emitted events are returned in time order", () => {

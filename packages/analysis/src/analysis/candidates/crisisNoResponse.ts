@@ -56,8 +56,8 @@ export function crisisNoResponseEvents(
       },
     });
   }
-  // NOT re-sorted by time: the cap must keep the danger-first order it was
-  // selected in, so a capped round still surfaces its worst crossings first
-  // rather than silently reordering back to chronological.
-  return out;
+  // Selection above is by danger; the emitted array is in time order, like
+  // every sibling producer in candidates/ (spec §4) — the danger sort only
+  // decides which ≤cap points survive, not the order they are reported in.
+  return out.sort((a, b) => a.t - b.t);
 }
