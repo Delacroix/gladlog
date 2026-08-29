@@ -436,6 +436,8 @@ export function StructuredAnalysisPanel({
                   // never emitted even at a 5 s wait, and this guard is the one
                   // silent exit on the path. console.info (not warn — the test
                   // spies on warn) so a CI log shows who moved the ref.
+                  // eslint-disable-next-line no-console -- GH #26 diagnostic; must not be warn (spied by the test)
+                  // eslint-disable-next-line no-console -- GH #26 diagnostic; must not be warn (spied by the test)
                   console.info(
                     `[analysis] onDone/getState resolved after a match switch: resultFor=${String(resultForRef.current)} matchId=${matchId} slotKey=${String(d.slotKey)} activeKey=${String(ak)}`,
                   );
@@ -460,6 +462,7 @@ export function StructuredAnalysisPanel({
             .catch((e: unknown) => {
               // GH #26 diagnostic: a swallowed getState failure is the other
               // way the mismatch warn can silently never fire.
+              // eslint-disable-next-line no-console -- GH #26 diagnostic; must not be warn (spied by the test)
               console.info(
                 `[analysis] onDone getState failed: ${e instanceof Error ? e.message : String(e)}`,
               );
