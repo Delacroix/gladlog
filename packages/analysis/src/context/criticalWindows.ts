@@ -37,9 +37,13 @@ export interface CriticalWindowInputs {
 // DEATH_LOOKBACK 5/15 moves it by < 1 pp; SPIKE_HALF_WIDTH 3/8 gives
 // 72.8 % / 79.8 %. Consumers (matchTimeline.ts): casts OUTSIDE the set are
 // foldable (F151) and [STATE] ticks are sparser — i.e. these numbers decide
-// how much of the timeline gets the compact treatment. Values unchanged;
-// whether 76 % "critical" is the intended budget is a product call recorded
-// on the issue. Re-run the coverage script before moving any of the three.
+// how much of the timeline gets the compact treatment. Token effect measured
+// 2026-08-29 (same 300 matches): CC_LOOKAHEAD 10 → 5 shrinks the match
+// context by only 2.3 % (32,471 → 31,736 chars, ≈ 230 tokens of ~10k),
+// −9 [STATE] ticks and −8 lines per prompt, cast folding unchanged (4.4
+// markers either way — folding rides on the death/spike terms). User ruling
+// 2026-08-29: keep 10 — the "critical" set is not where prompt size lives.
+// Re-run the coverage script before moving any of the three.
 /** Look-back window before a death (seconds). */
 const DEATH_LOOKBACK_S = 10;
 /** Half-width around a DMG SPIKE start (seconds). */
