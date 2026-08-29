@@ -126,10 +126,13 @@ export interface RoundExposure {
   enemyCyclones: number;
 }
 
-/** A friendly at or below this HP fraction opens a "crisis" window. */
-export const CRISIS_HP_PCT = 0.4;
-/** Two crisis samples closer than this belong to the same window. */
-export const CRISIS_WINDOW_GAP_MS = 5000;
+/** Single-source (spec 2026-08-29): the crisis threshold and merge gap live
+ * with the decision-point predicate in analysis; re-exported so existing
+ * importers (signalSkillGradientScan.ts, behaviorPriorScan.ts) keep working. */
+export {
+  CRISIS_HP_PCT,
+  CRISIS_WINDOW_GAP_MS,
+} from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
 
 /**
  * Types whose rate is "events ÷ units of exposure", not "rounds that fired ÷
