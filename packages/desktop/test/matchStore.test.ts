@@ -1,15 +1,16 @@
+import type { GladMatch, GladShuffle } from "@gladlog/parser";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
-  mkdirSync,
   writeFileSync,
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
-import type { GladMatch, GladShuffle } from "@gladlog/parser";
+
 import { MatchStore } from "../src/main/matchStore";
 
 const dir = () => mkdtempSync(join(tmpdir(), "gl-store-"));
@@ -257,5 +258,48 @@ describe("富行 meta 字段(backlog #7)", () => {
 
     const res1_third = await s.get("m1");
     expect(res1_third).not.toBe(res1);
+  });
+});
+
+describe("结构完整性 meta.structuralIssues", () => {
+  const withUnits = (id: string): GladMatch =>
+    ({
+      ...(fakeMatch(id) as unknown as Record<string, unknown>),
+      playerTeamId: 0,
+      units: {
+        a: { kind: "Player", specId: 105, classId: 11, info: { teamId: 0 } },
+        b: { kind: "Player", specId: 71, classId: 1, info: { teamId: 0 } },
+        c: { kind: "Player", specId: 64, classId: 8, info: { teamId: 1 } },
+      },
+    }) as unknown as GladMatch;
+
+  it("3v3 名单只有 3 人 → store 时记 roster-size", () => {
+    const s = new MatchStore(dir());
+    const { meta } = s.store(withUnits("partial1"));
+    expect(meta!.structuralIssues).toEqual(["roster-size"]);
+  });
+
+  it("单轮 shuffle → shuffle-round-count + roster-size(去重,按首现顺序)", () => {
+    const s = new MatchStore(dir());
+    const { meta } = s.store(fakeShuffle("partialShuf"));
+    expect(meta!.structuralIssues).toEqual([
+      "shuffle-round-count",
+      "roster-size",
+    ]);
+  });
+
+  it("rebuildIndex 给缺 structuralIssues 的旧行回填", async () => {
+    const s = new MatchStore(dir());
+    const { meta } = s.store(withUnits("partial2"));
+    const stripped = { ...meta! };
+    delete stripped.structuralIssues;
+    (s as unknown as { index: Map<string, unknown> }).index.set(
+      "partial2",
+      stripped,
+    );
+    const r = await s.rebuildIndex();
+    expect(r.updated).toBe(1);
+    const after = s.list().find((m) => m.id === "partial2")!;
+    expect(after.structuralIssues).toEqual(["roster-size"]);
   });
 });

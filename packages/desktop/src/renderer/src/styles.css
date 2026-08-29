@@ -2346,6 +2346,18 @@ pre {
   font-size: 11px;
   color: var(--mute);
 }
+/* Structural-completeness badge (meta.structuralIssues non-empty): the match
+   was stored but the log did not contain the whole game. */
+.mlr-partial {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--mute);
+  color: var(--mute);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 .mlr-rating.up {
   color: var(--accent-soft);
 }

@@ -1,4 +1,9 @@
-import type { GladMatch, GladShuffle } from "@gladlog/parser";
+import {
+  checkStructuralCompleteness,
+  type CompletenessCode,
+  type GladMatch,
+  type GladShuffle,
+} from "@gladlog/parser";
 import {
   appendFileSync,
   existsSync,
@@ -252,6 +257,25 @@ export interface StoredMatchMeta {
    * meta.teams only holds the R1 roster).
    * Old rows lack it → backfilled by rebuildIndex. */
   roundStats?: Array<{ win: boolean; enemySpecIds: number[] }>;
+  /** Structural completeness codes from the parser's
+   * checkStructuralCompleteness (shuffle not 6 rounds, a round with no
+   * decisive death, roster size off for the bracket, match with no result),
+   * deduplicated. `[]` = checked and complete; missing = an old row that was
+   * never checked (rebuildIndex backfills). Measured 2026-08-29 over the
+   * 1245-match corpus: 15/494 docs flagged (14 partial shuffles, 1 2v2 with a
+   * 3-player roster). The list row shows a "partial" badge when non-empty. */
+  structuralIssues?: CompletenessCode[];
+}
+
+/** Distinct completeness codes for a doc (order of first occurrence). */
+function structuralIssueCodes(
+  doc: GladMatch | GladShuffle,
+): CompletenessCode[] {
+  const out: CompletenessCode[] = [];
+  for (const i of checkStructuralCompleteness(doc)) {
+    if (!out.includes(i.code)) out.push(i.code);
+  }
+  return out;
 }
 
 const safeName = (id: string): string => id.replace(/[^A-Za-z0-9._-]/g, "_");
@@ -515,6 +539,7 @@ export class MatchStore {
         roundStats: shuffleRoundStats(
           item.rounds as unknown as Parameters<typeof shuffleRoundStats>[0],
         ),
+        structuralIssues: structuralIssueCodes(item),
       };
       data = {
         ...item,
@@ -534,6 +559,7 @@ export class MatchStore {
         storedAt: this.now(),
         ...metaExtras(item as unknown as Parameters<typeof metaExtras>[0]),
         slimmed: true, // slim at write time (compose already trimmed params)
+        structuralIssues: structuralIssueCodes(item),
       };
       data = { ...item, rawLines: undefined };
     }
@@ -657,6 +683,11 @@ export class MatchStore {
       const next: StoredMatchMeta = {
         ...meta,
         ...metaExtras(src as Parameters<typeof metaExtras>[0]),
+        // The stored doc is the parsed doc minus rawLines, which the
+        // completeness predicate never reads.
+        structuralIssues: structuralIssueCodes(
+          doc.data as unknown as GladMatch | GladShuffle,
+        ),
       };
       if (doc.kind === "shuffle") {
         next.durationS = Math.max(

@@ -40,4 +40,5 @@ export type {
   GladShuffle,
 } from "./l3/model";
 export * from "./invariants";
+export * from "./completeness";
 export { slimMatchParams, SLIM_PARAMS_KEEP } from "./slim";

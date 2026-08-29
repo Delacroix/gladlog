@@ -104,6 +104,7 @@ gladlog 已经站在第二层,而且是第二层里分析深度最深的(事件�
 
 2. **`ZONE_CHANGE` 出竞技场兜底收尾 + shuffle 6 轮完整性校验**(高,小改)
    依据:Recorder/ArenaCoach 用 zone change 防掉线/强退没有 END;WAL `validateRounds` 恰 6 轮。gladlog 目前异常只打 `DOUBLE_START`。可量化:扫归档里「有 START 无 END」的场次数作为前后数字。
+   **2026-08-29 读源码后修正**:ArenaCoach 的 zone change 只是「兜底清状态」不是「收尾」—— `MatchChunker.shouldExtractChunk()` 对所有 early-end 触发一律 `return false`,没 END 的场直接丢弃,不产出对局;gladlog 的 segmenter 在 EOF/轮转时会 flush 已完成的 shuffle 轮(`UNCLOSED_SEGMENT`),已比它多做。前半条前提不成立。上文 §2 表里「最少 200 行防误判」实际是 `minMatchLines ?? 20`。后半条(6 轮/有赢家/名单人数)已落地为 `packages/parser/src/completeness.ts` + `structuralCompletenessScan`,1245 场语料基线 15/494 文档不完整(shuffle 14/159 不足 6 轮,2v2 一场名单 3 人)。
 
 3. ~~治疗量低估缺陷入谓词体检~~ —— **已做(2026-08-23)**:核查结论是不成立,已登记为排除项(审计台账 D8);真正需要修的是核查中发现的 `absorbsIn` 语义错位(D7,18.7% 回合判错「承伤最多的队友」,未修)。
 
