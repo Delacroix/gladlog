@@ -80,6 +80,13 @@ const CHAIN_LEGENDS: Record<string, string> = {
   // reaction timing; "responding faster would have prevented the damage" is
   // the banned inference — the wording below must not cross that line.
   "slow-defensive-response": `- "slow-defensive-response": the enemy opened offensive cooldown(s) facts.enemyCds at facts.t and real pressure followed (facts.damageK k team damage over facts.t–facts.windowEndT, facts.dmgRatio× the match-average rate) while the player had a defensive off cooldown and was not CC'd. facts.reacted="none" means no defensive, external, trinket, mobility, or CC response came inside that window; otherwise facts.delayS is the seconds until the first response (facts.reactSpell). Coach recognizing the enemy opener and answering sooner — a wall, an external, a reposition, or CC on the attacker — or note that holding may have been deliberate; never assert a faster response would certainly have changed what followed.`,
+  // crisis-no-response (spec 2026-08-29, GH #58): the reference numbers cite
+  // what top-10% healers do at the same danger level — a distribution, not a
+  // prescription. The wording below repeats that boundary twice on purpose
+  // (once for the general "don't prescribe an ability" rule, once naming the
+  // wall specifically) because the corpus finding it is grounded in is that
+  // walls do NOT separate ranks — acting at all does.
+  "crisis-no-response": `- "crisis-no-response": at facts.t the player's own HP fell to facts.hpPct% (took facts.dmg2sPct% of max HP in the prior 2 s from facts.attackers attacker(s); enemy burst cooldown active: facts.burst) and for the next 3 seconds did NOTHING to answer it — no self-heal ≥15%, no personal wall, no external, no CC/root/interrupt on an enemy, no kiting. The player was free (not CC'd, not locked out, alive through the window). Reference: among top-10% healers in this bracket at the same damage level (n=facts.refN, cell facts.cellKey; fellBack=yes means a coarser bracket-wide cell), facts.refRespond% act within 3 s; their most common answers are facts.refTop (median self-heal among self-healers facts.refSelfHealMedian% of max HP). CITE these numbers as what strong players do; do NOT turn them into "you should have pressed <ability>" — the reference is a distribution, not a prescription, and the wall specifically is NOT what separates ranks.`,
 };
 
 function legendLines(

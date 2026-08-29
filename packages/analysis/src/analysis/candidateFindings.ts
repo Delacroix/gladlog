@@ -1,21 +1,18 @@
+import type { ICombatUnit } from "@gladlog/parser-compat";
 import {
   CombatUnitClass,
   CombatUnitReaction,
   LogEvent,
 } from "@gladlog/parser-compat";
 
-import type { ICombatUnit } from "@gladlog/parser-compat";
-
+import { lookupBehaviorPrior } from "../data/behaviorPrior";
 import { CANDIDATE_TYPE_FLAGS } from "../data/candidateTypeFlags";
-import {
-  attemptIntoTrinketEvents,
-  extractKillAttempts,
-} from "../utils/killAttempts";
 import { costNormPhrase } from "../data/curatedAbilityFacts";
 import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
 import { MITIGATION_TABLE } from "../data/mitigationData";
 import { spellEffectData } from "../data/spellEffectData";
 import { ccSpellIds, trinketSpellIds } from "../data/spellTags";
+import { buildAuraIntervals } from "../utils/auraIntervals";
 import { analyzeBurstLedger } from "../utils/burstLedger";
 import {
   analyzePlayerCCAndTrinket,
@@ -25,7 +22,6 @@ import {
   REPOSITIONING_SPELL_IDS,
   trinketStateFact,
 } from "../utils/ccTrinketAnalysis";
-import { getTalentAvoidanceTriggers } from "../utils/talentBehaviors";
 import {
   annotateDefensiveTimings,
   applyCdTalentModifiers,
@@ -47,7 +43,6 @@ import {
   PRE_WALL_SECONDS,
   specToString,
 } from "../utils/cooldowns";
-import { renderedWindowSeconds, toRenderSecond } from "../utils/renderGrid";
 import {
   annotateMissedPurgesWithKillWindows,
   canDefensiveCleanse,
@@ -56,11 +51,16 @@ import {
   type IMissedPurgeWindow,
   reconstructDispelSummary,
 } from "../utils/dispelAnalysis";
+import { drResetMsAt } from "../utils/drAnalysis";
 import {
   type IAlignedBurstWindow,
   reconstructEnemyCDTimeline,
 } from "../utils/enemyCDs";
 import { detectHealingGaps, type IHealingGap } from "../utils/healingGaps";
+import {
+  attemptIntoTrinketEvents,
+  extractKillAttempts,
+} from "../utils/killAttempts";
 import {
   analyzeKillWindowTargetSelection,
   matchMinHpPct,
@@ -73,16 +73,9 @@ import {
   stayedInHadRealCost,
 } from "../utils/positionAnalysis";
 import { type RawStreams } from "../utils/rawStreams";
+import { renderedWindowSeconds, toRenderSecond } from "../utils/renderGrid";
+import { getTalentAvoidanceTriggers } from "../utils/talentBehaviors";
 import { matchThreatLevel, threatActiveAt } from "../utils/threatAssessment";
-import { fmtFactNum as fmt } from "./factFormat";
-import type { CandidateEvent } from "./types";
-import {
-  deathSetupEvents,
-  deathUnusedDefensiveEvents,
-  externalUnusedEvents,
-  questionableExternalEvents,
-  type DeathSetupParts,
-} from "./candidates/death";
 import {
   cdHoardedEvents,
   cdSpentIdleEvents,
@@ -92,6 +85,14 @@ import {
   missedSyncWindowEvents,
   unsyncedBurstEvents,
 } from "./candidates/cooldownTiming";
+import { crisisNoResponseEvents } from "./candidates/crisisNoResponse";
+import {
+  deathSetupEvents,
+  type DeathSetupParts,
+  deathUnusedDefensiveEvents,
+  externalUnusedEvents,
+  questionableExternalEvents,
+} from "./candidates/death";
 import {
   CYCLONE_SPELL_ID,
   DIVINE_SHIELD_SPELL_ID,
@@ -100,8 +101,9 @@ import {
   MD_SPELL_ID,
   mdCycloneWindowEvents,
 } from "./candidates/massDispel";
-import { buildAuraIntervals } from "../utils/auraIntervals";
-import { drResetMsAt } from "../utils/drAnalysis";
+import { crisisDecisionPoints } from "./crisisDecisionPoints";
+import { fmtFactNum as fmt } from "./factFormat";
+import type { CandidateEvent } from "./types";
 
 // Cooldown-timing producers moved to `candidates/cooldownTiming.ts` in the
 // 2026-08-16 theme split; re-exported so importers keep their paths.
@@ -114,10 +116,10 @@ export {
   enemyMinHpPctInWindow,
   friendlyCrisisMomentInWindow,
   HARD_CC_CATEGORIES,
-  missedSyncWindowEvents,
-  unsyncedBurstEvents,
   type ICrisisMoment,
   type IEnemyHealerCcWindow,
+  missedSyncWindowEvents,
+  unsyncedBurstEvents,
 } from "./candidates/cooldownTiming";
 
 // Death-anchored producers moved to `candidates/death.ts` in the 2026-08-16
@@ -125,12 +127,12 @@ export {
 export {
   DEATH_SETUP_LOOKBACK_S,
   deathSetupEvents,
+  type DeathSetupParts,
   deathUnusedDefensiveEvents,
   EXTERNAL_FREE_MIN_GAP_S,
   EXTERNAL_FREE_WINDOW_S,
   externalUnusedEvents,
   questionableExternalEvents,
-  type DeathSetupParts,
 } from "./candidates/death";
 
 // The mana producers and their calibrated thresholds moved to
@@ -147,6 +149,15 @@ export {
   manaEfficiencyEvents,
   manaPressureEvents,
 } from "./candidates/mana";
+
+// crisis-no-response (spec 2026-08-29): lives in `candidates/crisisNoResponse.ts`
+// alongside the shared `crisisDecisionPoints` predicate it consumes;
+// re-exported here so the package barrel and existing tests keep one import
+// path, same convention as the mana/cooldownTiming/death splits above.
+export {
+  CRISIS_NO_RESPONSE_CAP,
+  crisisNoResponseEvents,
+} from "./candidates/crisisNoResponse";
 
 /** Single-source predicate (CLAUDE.md shared-predicate rule; review round 1,
  * BACKLOG #26 Task 2 Minor finding): the two candidate types
@@ -348,6 +359,15 @@ export function extractCandidateFindings(
     } catch {
       /* no analysis throw may take down the rest of the menu */
     }
+  }
+
+  // spec §4: keep death-unused-defensive, but mark it when a crisis-no-response
+  // fired ≤10 s before the death so the two can be compared side by side (GH #58).
+  const crises = out.filter((c) => c.type === "crisis-no-response");
+  for (const d of out) {
+    if (d.type !== "death-unused-defensive") continue;
+    if (crises.some((c) => c.t <= d.t && d.t - c.t <= 10))
+      d.facts.precededBy = "crisis-no-response";
   }
 
   return out;
@@ -1996,6 +2016,26 @@ function teamPlayEvents(
       );
     } catch {
       /* healing-gap analysis not computable → type absent */
+    }
+  }
+
+  // crisis-no-response (spec 2026-08-29): healer-owner rounds only — the DPS
+  // "no response" rate is flat across rank brackets (5,613-match partial),
+  // so there is no baseline to accuse against. Same predicate as the eval
+  // behavior-prior scan (crisisDecisionPoints) and same lookup as the gate.
+  if (isHealerSpec(owner.spec)) {
+    try {
+      const bracket: string = combat?.startInfo?.bracket ?? "";
+      out.push(
+        ...crisisNoResponseEvents(
+          crisisDecisionPoints(owner, combat),
+          owner,
+          bracket,
+          { lookup: (dmg2s) => lookupBehaviorPrior(bracket, "healer", dmg2s) },
+        ),
+      );
+    } catch {
+      /* decision points not computable → type absent */
     }
   }
 

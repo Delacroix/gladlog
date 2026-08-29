@@ -34,9 +34,9 @@ import {
   LEGACY_TOPIC_TYPES,
   MANA_EFF_FLOOR,
   MANA_EFF_MIN_CASTS,
-  manaEfficiencyEvents,
   MANA_PRESSURE_MIN_FAILED,
   MANA_PRESSURE_MIN_WINDOW_S,
+  manaEfficiencyEvents,
   manaPressureEvents,
   missedCleanseEvents,
   missedPurgeEvents,
@@ -1030,6 +1030,113 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
       expect(ev).toHaveLength(1);
       expect(ev[0]!.facts["attempted"]).toBe("曾尝试施放被拒(法力值不足×1)");
     });
+  });
+});
+
+describe("crisis-no-response wiring(菜单接线 + death-unused-defensive precededBy,2026-08-29)", () => {
+  const T0 = 5_000_000;
+  // Full IAdvancedAction shape (not crisisDecisionPoints.test.ts's bare-bones
+  // helper): extractCandidateFindings' cd-waste branch calls matchMinHpPct →
+  // getLowestHpPercentInWindow, which reads `.logLine.timestamp`, so both the
+  // flat `.timestamp` crisisDecisionPoints reads AND the nested `.logLine.
+  // timestamp` the rest of the pipeline reads must be present and agree.
+  const hp = (t: number, cur: number, max = 100, unitId = "H") => ({
+    timestamp: T0 + t,
+    advancedActorCurrentHp: cur,
+    advancedActorMaxHp: max,
+    advancedActorPositionX: 0,
+    advancedActorPositionY: 0,
+    advancedActorPowers: [],
+    advancedActorId: unitId,
+    advanced: true,
+    logLine: { event: "ADVANCED_SAMPLE", timestamp: T0 + t },
+  });
+  // Healer owner "H" (Restoration Druid, spec "105") crosses 40% HP at 2s
+  // (100→70→38→35 at 0/1/2/3s) from a single 30-dmg hit by "E1" at 1.5s, with
+  // no casts/CC/self-heal in the response window → an unanswered feasible
+  // crossing. bracket "3v3" matches a real cell in behaviorPriorGenerated.json
+  // (n=179 at dmg2s=0.30, ">=20%" bin) so the reference lookup is non-null.
+  // pvpTalents: ["22812"] (Barkskin) puts a never-cast Defensive major CD into
+  // H's ledger the same way the existing "agy flash 复核采纳" fixture above
+  // does for Ultimate Penitence — a baseline ability only enters
+  // extractMajorCooldowns' ledger on cast evidence or a PvP-talent pick.
+  function fixture(over: { hDeathT?: number } = {}): any {
+    return {
+      startTime: T0,
+      endTime: T0 + 60_000,
+      startInfo: { bracket: "3v3" },
+      units: {
+        H: {
+          id: "H",
+          name: "Heals-R",
+          type: 1,
+          reaction: 1,
+          spec: "105", // Druid_Restoration
+          class: CombatUnitClass.Druid,
+          advancedActions: [
+            hp(0, 100),
+            hp(1000, 70),
+            hp(2000, 38),
+            hp(3000, 35),
+          ],
+          damageIn: [
+            {
+              timestamp: T0 + 1500,
+              srcUnitId: "E1",
+              amount: -30,
+              effectiveAmount: -30,
+            },
+          ],
+          healIn: [],
+          spellCastEvents: [],
+          auraEvents: [],
+          actionIn: [],
+          deathRecords:
+            over.hDeathT != null
+              ? [{ timestamp: T0 + over.hDeathT * 1000 }]
+              : [],
+          info: { teamId: "0", pvpTalents: ["22812"] },
+        },
+        E1: {
+          id: "E1",
+          name: "E1",
+          type: 1,
+          reaction: 2,
+          spec: "577", // Demon_Hunter_Havoc — non-healer
+          class: CombatUnitClass.DemonHunter,
+          advancedActions: [],
+          damageIn: [],
+          healIn: [],
+          spellCastEvents: [],
+          auraEvents: [],
+          actionIn: [],
+          deathRecords: [],
+          info: { teamId: "1" },
+        },
+      },
+    };
+  }
+
+  it("healer owner: an unanswered feasible crossing appears in the menu with reference facts", () => {
+    const ev = extractCandidateFindings(fixture(), "H").filter(
+      (c) => c.type === "crisis-no-response",
+    );
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.facts.refRespond).toMatch(/^\d+$/);
+    expect(ev[0]!.facts.cellKey.startsWith("3v3|healer|")).toBe(true);
+  });
+
+  it("a death-unused-defensive within 10 s after it is marked precededBy", () => {
+    const all = extractCandidateFindings(fixture({ hDeathT: 9 }), "H");
+    const dud = all.find((c) => c.type === "death-unused-defensive");
+    expect(dud?.facts.precededBy).toBe("crisis-no-response");
+  });
+
+  it("DPS owner: never emitted (v1 healer-only)", () => {
+    const ev = extractCandidateFindings(fixture(), "E1").filter(
+      (c) => c.type === "crisis-no-response",
+    );
+    expect(ev).toEqual([]);
   });
 });
 

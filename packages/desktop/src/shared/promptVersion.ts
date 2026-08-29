@@ -158,4 +158,7 @@
 // 牺牲祝福/Time Stop 根本不可驱、萨满版自然迅捷瞬发来不及)—— 12.1 语料
 // 2114 回合零实驱证据 + 官方 Magic 假阳性。missed-purge 窗口构成换血
 // (12.1 原始 −1444 窗)→ prompt 变 → 旧缓存作废。
-export const PROMPT_VERSION = 36;
+// v37 (2026-08-29): crisis-no-response 候选上线(治疗视角,行为先验参照表
+// behaviorPriorGenerated.json,spec 2026-08-29);death-unused-defensive 加
+// facts.precededBy。菜单变 → prompt 变 → 旧缓存作废。
+export const PROMPT_VERSION = 37;
