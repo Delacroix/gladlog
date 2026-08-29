@@ -209,6 +209,11 @@ export async function main(): Promise<void> {
         entries: readJson("observedSpellIdsGenerated.json").length,
         producer: "packages/eval/scripts/observedSpellIds.ts",
       },
+      "behaviorPriorGenerated.json": {
+        entries: Object.keys(readJson("behaviorPriorGenerated.json").cells)
+          .length,
+        producer: "packages/eval/scripts/behaviorPriorScan.ts emit-table",
+      },
       // "Usable while stunned" (B1, task-3): only the stunned dimension
       // resolves to a unique SpellMisc bit combo; feared/confused are a
       // documented gap (see the artifact's own file header and

@@ -10,6 +10,7 @@
  * `crisis-no-response` candidate excludes it from an accusation.
  */
 import type { DecisionPoint } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
+import { dmgBinOf } from "@gladlog/analysis/src/data/behaviorPrior";
 
 export interface BehaviorPriorRow {
   bracket: string;
@@ -42,9 +43,7 @@ const RESPONSE_KEYS = [
   "kite",
 ] as const;
 
-export function dmgBinOf(dmg2s: number): "<10%" | "10-20%" | ">=20%" {
-  return dmg2s < 0.1 ? "<10%" : dmg2s < 0.2 ? "10-20%" : ">=20%";
-}
+export { dmgBinOf };
 const r2 = (x: number) => Math.round(x * 100) / 100;
 function cellOf(points: DecisionPoint[]): BehaviorPriorCell {
   const n = points.length;
