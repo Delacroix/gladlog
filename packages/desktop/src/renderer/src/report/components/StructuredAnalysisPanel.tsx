@@ -430,7 +430,17 @@ export function StructuredAnalysisPanel({
                 }>;
                 activeKey?: string | null;
               }) => {
-                if (resultForRef.current !== matchId) return; // match-switch race
+                if (resultForRef.current !== matchId) {
+                  // GH #26 diagnostic (2026-08-29, user ruling): the flaky
+                  // "slotKey mismatch only warns" test times out with the warn
+                  // never emitted even at a 5 s wait, and this guard is the one
+                  // silent exit on the path. console.info (not warn — the test
+                  // spies on warn) so a CI log shows who moved the ref.
+                  console.info(
+                    `[analysis] onDone/getState resolved after a match switch: resultFor=${String(resultForRef.current)} matchId=${matchId} slotKey=${String(d.slotKey)} activeKey=${String(ak)}`,
+                  );
+                  return; // match-switch race
+                }
                 // Defensive cross-check (does not change what is displayed):
                 // the payload's slotKey must in theory equal the activeKey we
                 // just refreshed. If the invariant above is ever violated (say
@@ -447,7 +457,13 @@ export function StructuredAnalysisPanel({
                 setActiveKey(ak ?? null);
               },
             )
-            .catch(() => {});
+            .catch((e: unknown) => {
+              // GH #26 diagnostic: a swallowed getState failure is the other
+              // way the mismatch warn can silently never fire.
+              console.info(
+                `[analysis] onDone getState failed: ${e instanceof Error ? e.message : String(e)}`,
+              );
+            });
         },
       );
       offError = ai.onError((d: { matchId: string; message: string }) => {
