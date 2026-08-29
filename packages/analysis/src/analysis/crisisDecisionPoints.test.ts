@@ -216,4 +216,54 @@ describe("crisisDecisionPoints", () => {
     const o = unit({ advancedActions: [] });
     expect(crisisDecisionPoints(o, combat(o))).toEqual([]);
   });
+
+  it("attackers2s resolves pets/guardians to their owning player, ignores sources with no unit (measured 2026-08-29: a 3-enemy round rendered attackers=15, 13 of which were one warlock's imps/hounds)", () => {
+    const o = unit({
+      damageIn: [
+        {
+          timestamp: T0 + 1200,
+          srcUnitId: "E1",
+          amount: -10,
+          effectiveAmount: -10,
+        },
+        {
+          timestamp: T0 + 1400,
+          srcUnitId: "P1",
+          amount: -10,
+          effectiveAmount: -10,
+        },
+        {
+          timestamp: T0 + 1600,
+          srcUnitId: "P2",
+          amount: -10,
+          effectiveAmount: -10,
+        },
+        {
+          timestamp: T0 + 1700,
+          srcUnitId: "GHOST", // no unit for this id at all
+          amount: -10,
+          effectiveAmount: -10,
+        },
+      ],
+    });
+    const e = enemy("E1");
+    const p1 = {
+      id: "P1",
+      ownerId: "E1",
+      info: undefined,
+      reaction: CombatUnitReaction.Hostile,
+      spellCastEvents: [],
+      advancedActions: [],
+    };
+    const p2 = {
+      id: "P2",
+      ownerId: "E1",
+      info: undefined,
+      reaction: CombatUnitReaction.Hostile,
+      spellCastEvents: [],
+      advancedActions: [],
+    };
+    const p = crisisDecisionPoints(o, combat(o, [e, p1, p2]))[0]!;
+    expect(p.attackers2s).toBe(1);
+  });
 });

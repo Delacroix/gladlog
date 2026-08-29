@@ -105,6 +105,25 @@ interface Sample {
   y: number | null;
 }
 
+/** Resolve a damage source to the player id it should be attributed to: the
+ * unit itself if it's a player (`info` present), else its owning player if
+ * it's a pet/guardian (`unit.ownerId` → owner has `info`), else `null` for
+ * environment/unknown sources. Measured 2026-08-29: a 3-enemy Solo Shuffle
+ * round rendered "from 15 attackers" — 13 of the 15 raw damage sources were
+ * one demonology warlock's imps/hounds, not distinct enemy players. */
+function resolveAttackerId(
+  src: string,
+  unitById: Map<string, any>,
+): string | null {
+  const u = unitById.get(src);
+  if (u?.info) return src;
+  if (u?.ownerId) {
+    const owner = unitById.get(u.ownerId);
+    if (owner?.info) return u.ownerId;
+  }
+  return null;
+}
+
 function samplesOf(u: any): Sample[] {
   return ((u?.advancedActions ?? []) as any[])
     .filter((a) => (a.advancedActorMaxHp ?? 0) > 0)
@@ -227,7 +246,11 @@ export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
       w1 = t + RESPONSE_WINDOW_MS;
     const inWin = (tt: number) => tt >= w0 && tt <= w1;
     const recent = dmgIn.filter((d) => d.t > t - DMG_WINDOW_MS && d.t <= t);
-    const attackers = new Set(recent.map((d) => d.src));
+    const attackers = new Set(
+      recent
+        .map((d) => resolveAttackerId(d.src, unitById))
+        .filter((id): id is string => id != null),
+    );
     const dmg2s = recent.reduce((n, d) => n + d.a, 0) / x.max;
     const castsIn = ownerCasts.filter((c) => inWin(c.t));
     const selfHeal =
