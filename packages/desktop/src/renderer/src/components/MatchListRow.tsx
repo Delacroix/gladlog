@@ -1,13 +1,13 @@
 import { zoneMetadata } from "@gladlog/analysis";
 
 import type { StoredMatchMeta } from "../../../main/matchStore";
+import { useIconDataUrl } from "../report/components/useIconDataUrl";
 import {
   classColor,
   classGlyph,
   specIconName,
   specName,
 } from "../report/data/gameConstants";
-import { useIconDataUrl } from "../report/components/useIconDataUrl";
 
 const fmtDuration = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -130,6 +130,14 @@ export function MatchListRow({
           <span className={`badge badge-${meta.kind}`}>shuffle</span>
         )}
         <span className="mlr-zone">{zone ?? meta.bracket}</span>
+        {meta.structuralIssues && meta.structuralIssues.length > 0 && (
+          <span
+            className="mlr-partial"
+            title={`Incomplete: ${meta.structuralIssues.join(", ")}`}
+          >
+            partial
+          </span>
+        )}
         {meta.durationS != null && (
           <span className="mlr-dur">{fmtDuration(meta.durationS)}</span>
         )}
