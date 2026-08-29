@@ -53,7 +53,12 @@ beforeEach(() => {
 // still carries teachable CC/defensive signals (e.g. a hard CC around 47–58s with
 // the trinket unused), so not every window is null; 20–35s is one deterministically
 // verified empty window (see the task-4 implementation notes).
-const NO_SIGNAL_RANGE = { fromS: 20, toS: 35 };
+// 20–35 s used to be clean; GH #34 ① (2026-08-29) corrected Power Infusion's
+// buff duration 20 → 15 s, which moves the burst window it anchors, and a
+// teammate's Hammer of Justice at 22.6 s now enters an offensive-kind pack
+// inside 20–35. 25–40 and 30–45 are the clean 15 s windows on this fixture
+// (probed over the whole match); 25–40 keeps the "no signal" contract.
+const NO_SIGNAL_RANGE = { fromS: 25, toS: 40 };
 // 45–60s: a window measured to pass the gates (a survival-class signal, see the
 // task-4 scan notes) — the race and busy tests need analyzeWindow to actually be
 // called, so NO_SIGNAL_RANGE cannot be used (when the gate fails, the function
@@ -69,7 +74,6 @@ describe("buildWindowAnalysisRequest(#16 选段分析)", () => {
       buildWindowAnalysisRequest(m, NO_SIGNAL_RANGE.fromS, NO_SIGNAL_RANGE.toS),
     ).toBeNull();
   });
-
 });
 
 describe("MatchReport【AI 分析此段】按钮", () => {
@@ -163,8 +167,6 @@ describe("MatchReport【AI 分析此段】按钮", () => {
   // longer forces snapshot — it follows the deepDiveSnapshot setting, read at
   // click time. Only the moment-dive button (momentDive.test.tsx) stays fixed
   // dense.
-
-
 
   it("ok→result(全分支审查补测):有信号窗口,analyzeWindow resolve ok → 结果卡出现、文本渲染、缓存徽标在", async () => {
     const analyzeWindow = installFixtureBridge(

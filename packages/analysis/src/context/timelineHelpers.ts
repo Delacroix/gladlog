@@ -355,7 +355,8 @@ export function extractOwnerCDBuffExpiry(
 
     // Match each cast (ascending) to the chronologically-next removal after the cast.
     let removalIndex = 0;
-    for (const cast of cd.casts) {
+    for (let i = 0; i < cd.casts.length; i++) {
+      const cast = cd.casts[i]!;
       const castMs = matchStartMs + cast.timeSeconds * 1000;
 
       // Skip removals that happened before this cast started (orphans / prior applications).
@@ -373,10 +374,27 @@ export function extractOwnerCDBuffExpiry(
       // falls within duration + tolerance of the cast. Otherwise it likely belongs to a later
       // cast (this cast's own removal is missing from the log) — fall back to estimated and
       // leave removalIndex where it is so the removal remains available for that later cast.
+      // GH #34 ① (2026-08-29): a removal is this cast's as long as it lands
+      // before the NEXT cast of the same spell — a removal later than
+      // duration + tolerance is not "someone else's", it is the buff lasting
+      // longer than the hand table said (Avenging Wrath 20 → 24/27/30 s by
+      // talent, Time Dilation 8 → 10.4 s: 662/697 Time Dilations rendered
+      // "expired, estimated" with the removal sitting right there in the log).
+      // The LAST cast has no later cast that could own the removal, so any
+      // later removal is its own (Avenging Wrath is cast once per round and
+      // runs 24–30 s on a 20 s table entry: 61/90 stayed "estimated" with the
+      // last-cast fence at duration + tolerance).
+      const nextCastMs =
+        i + 1 < cd.casts.length
+          ? matchStartMs + cd.casts[i + 1]!.timeSeconds * 1000
+          : Number.POSITIVE_INFINITY;
       const withinWindow =
         removalIndex < removalTimestampsMs.length &&
-        removalTimestampsMs[removalIndex] <=
-          castMs + (duration + BUFF_EXPIRY_PAIRING_TOLERANCE_S) * 1000;
+        removalTimestampsMs[removalIndex] <
+          Math.max(
+            nextCastMs,
+            castMs + (duration + BUFF_EXPIRY_PAIRING_TOLERANCE_S) * 1000,
+          );
 
       if (withinWindow) {
         expiresAtSeconds =
@@ -392,7 +410,14 @@ export function extractOwnerCDBuffExpiry(
       // its full duration. A confirmed removal more than a tick before the natural end means the buff
       // was ended early (absorb consumed, dispelled, or cancelled) rather than expiring.
       const naturalEndSeconds = cast.timeSeconds + duration;
+      // GH #34 ① (2026-08-29): a channel's aura ends with the channel, whose
+      // length is haste-dependent — "ended early (absorbed, dispelled, or
+      // cancelled)" fired on 190/190 Divine Hymns against a hand-typed 8 s.
+      // Channels are never dispelled; whether one was interrupted is stated on
+      // the [YOU] line from kick/CC evidence (matchTimeline), so here they
+      // always read "expired".
       const cause: ICDExpiryEvent["cause"] =
+        !CHANNELED_CD_SPELL_IDS.has(cd.spellId) &&
         !isEstimated &&
         expiresAtSeconds < naturalEndSeconds - BUFF_FADE_EARLY_TOLERANCE_S
           ? "ended_early"

@@ -87,7 +87,6 @@ import {
   HEALING_WINDOW_MIN_HPS,
   isCriticalNonPlayerUnit,
   PASSIVE_SPELL_BLOCKLIST,
-  SPELL_DURATION_OVERRIDES,
 } from "./timelineHelpers";
 
 interface DeferredSnapshot {
@@ -1198,35 +1197,25 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
             Math.abs(e.castAtSeconds - cast.timeSeconds) < 0.01,
         );
         if (expiry) {
-          const expectedDuration =
-            SPELL_DURATION_OVERRIDES[cd.spellId] ||
-            spellEffectData[cd.spellId]?.durationSeconds ||
-            0;
           const actualDuration = expiry.expiresAtSeconds - cast.timeSeconds;
+          // GH #34 ① (2026-08-29): channel length is haste-dependent (Divine Hymn
+          // 2.3–4.6 s, p50 3.8, n=190; Tranquility 0.5–5.2 s) and the hand table
+          // said 8 s, so every channel read "channeled 3.8s of 8.0s" — an
+          // incomplete-channel claim on 190/190 Divine Hymns. Without a per-cast
+          // expected length we state only what the log shows: the channel
+          // length and its end; "interrupted" only on kick/CC evidence.
           if (expiry.isEstimated) {
-            channelSuffix = ` (estimated duration: ${expectedDuration.toFixed(1)}s)`;
-          } else if (actualDuration < expectedDuration - 0.2) {
-            // C1: a short channel may be a kick, a self-cancel, or movement — the aura
-            // lifetime alone can't tell us which.
-            // H13: when a real kick (interruptInstance) or control-CC (ccInstance) landed
-            // on the caster during the channel window, we can confirm it was an interrupt
-            // and say so positively. Otherwise keep the neutral "channeled X of Y" wording.
+            channelSuffix = ` (channel end not logged)`;
+          } else {
             const interrupted = channelWasInterrupted(
               ownerCCSummary,
               cast.timeSeconds,
               cast.timeSeconds + actualDuration,
             );
-            // B141: this entry is stamped at the channel START (the decision point). State the END
-            // time inline so the model judges "premature vs reactive" without inferring it from the
-            // separate [BUFF FADED] line or misreading the start-stamp as the completion.
             const channelEnd = fmtTime(cast.timeSeconds + actualDuration);
             channelSuffix = interrupted
-              ? ` (interrupted at ${actualDuration.toFixed(1)}s / ${expectedDuration.toFixed(1)}s, ended ${channelEnd})`
-              : ` (channeled ${actualDuration.toFixed(1)}s of ${expectedDuration.toFixed(1)}s, ended ${channelEnd})`;
-          } else {
-            channelSuffix = ` (channeled ${actualDuration.toFixed(1)}s to completion, ended ${fmtTime(
-              cast.timeSeconds + actualDuration,
-            )})`;
+              ? ` (interrupted at ${actualDuration.toFixed(1)}s, ended ${channelEnd})`
+              : ` (channeled ${actualDuration.toFixed(1)}s, ended ${channelEnd})`;
           }
         }
       }

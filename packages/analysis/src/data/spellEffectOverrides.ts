@@ -35,7 +35,7 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
       e("31224", "Cloak of Shadows", 120, 5),
       e("5277", "Evasion", 120, 10),
       e("33206", "Pain Suppression", 180, 8),
-      e("47788", "Guardian Spirit", 180, 10),
+      e("47788", "Guardian Spirit", 180, 12), // GH #34 ①: corpus lifetime 12.0 s (n=210, p10=p90); hand value 10 mis-paired the removal
       e("62618", "Power Word: Barrier", 180, 10),
       e("98008", "Spirit Link Totem", 180, 6),
       e("102342", "Ironbark", 90, 12),
@@ -62,7 +62,7 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
       e("109304", "Exhilaration", 120),
       e("363916", "Obsidian Scales", 90, 12),
       e("374348", "Renewing Blaze", 90, 8),
-      e("357170", "Time Dilation", 60, 8),
+      e("357170", "Time Dilation", 60, 10.4), // GH #34 ①: corpus lifetime 10.4 s (n=703, p10=p90); hand value 8 made every expiry "estimated"
       // ── Major offensive CDs (durationSeconds drives enemyCDs expiry tracking) ──
       // Added by the 2026-07-14 full audit: major burst CDs missing from the
       // generated layer (paired with new spellCategories classifications)
@@ -89,7 +89,7 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
       e("107574", "Avatar", 90, 20),
       e("227847", "Bladestorm", 90, 6),
       e("47585", "Dispersion", 120, 6),
-      e("10060", "Power Infusion", 120, 20),
+      e("10060", "Power Infusion", 120, 15), // GH #34 ①: corpus lifetime 15.0 s (n=604, p25=p90); hand value 20 called every PI "ended early"
       e("391109", "Dark Ascension", 60, 20),
       e("375087", "Dragonrage", 120, 18),
       e("51271", "Pillar of Frost", 60, 12),
@@ -105,7 +105,7 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
       e("266779", "Coordinated Assault", 120, 20),
       e("137639", "Storm, Earth, and Fire", 90, 15),
       e("123904", "Invoke Xuen, the White Tiger", 120, 20),
-      e("31884", "Avenging Wrath", 120, 20),
+      e("31884", "Avenging Wrath", 120, 20), // GH #34 ①: corpus lifetime 20–30 s (p25 24, p50 27, p75 30 — talent-extended); base kept, the pairing now accepts the longer removal
       e("231895", "Crusade", 120, 25),
       e("114050", "Ascendance", 180, 15),
       e("114051", "Ascendance", 180, 15),
