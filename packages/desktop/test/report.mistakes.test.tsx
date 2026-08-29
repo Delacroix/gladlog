@@ -6,6 +6,7 @@ import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
 import { MistakesCard } from "../src/renderer/src/report/components/MistakesCard";
 import { toLegacySafe } from "../src/renderer/src/report/derive/legacySource";
 import {
+  candidateDetail,
   deriveMistakes,
   IGNORED_CANDIDATE_TYPES,
   MISTAKE_RULES,
@@ -131,6 +132,24 @@ describe("失误引擎(第四阶段③ / backlog #8)— 规则表防腐", () => 
       "candidateFindings 新增了类型,请在 MISTAKE_RULES 或 IGNORED_CANDIDATE_TYPES 表态",
     ).toEqual([]);
     void friendlies;
+  });
+
+  it("crisis-no-response has a rule and a detail string", () => {
+    expect(
+      MISTAKE_RULES.find((r) => r.type === "crisis-no-response"),
+    ).toMatchObject({ severity: "major", source: "candidate" });
+    expect(
+      candidateDetail({
+        type: "crisis-no-response",
+        facts: {
+          hpPct: "38",
+          refRespond: "88",
+          refTop: "selfHeal 76%; wall 36%",
+        },
+      } as any),
+    ).toBe(
+      "血量 38% 后 3 秒无应对(同赛制前 10% 治疗此处 88% 会出手:selfHeal 76%; wall 36%)",
+    );
   });
 });
 

@@ -74,6 +74,8 @@ const TYPE_LABEL: Record<string, string> = {
   "cc-avoidable": "规避手段可用未用",
   // DEFENSIVE-003 (2026-08-11).
   "slow-defensive-response": "敌方开大应对迟缓",
+  // Task 5 (spec 2026-08-29, healer-only crisis threshold).
+  "crisis-no-response": "危机无应对",
 };
 
 const MAX_LABEL = 12;

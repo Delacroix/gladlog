@@ -95,6 +95,17 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     source: "candidate",
   },
   {
+    // Task 5 (spec 2026-08-29, healer-only): own HP crossed a crisis threshold
+    // and nothing answered it for 3s while free to act. severity=major, same
+    // tier as death-unused-defensive/external-unused — the crisis threshold
+    // and free-to-act gate make this a real-consequence fact, not a pure
+    // uptime one.
+    type: "crisis-no-response",
+    label: "危机 3 秒无应对",
+    severity: "major",
+    source: "candidate",
+  },
+  {
     type: "external-unused",
     label: "队友阵亡时外减可用未给",
     severity: "major",
@@ -290,7 +301,7 @@ export interface Mistake {
 
 const RULE_BY_TYPE = new Map(MISTAKE_RULES.map((r) => [r.type, r]));
 
-function candidateDetail(c: CandidateEvent): string {
+export function candidateDetail(c: CandidateEvent): string {
   const f = c.facts as Record<string, string | undefined>;
   switch (c.type) {
     case "attempt-into-trinket":
@@ -305,6 +316,8 @@ function candidateDetail(c: CandidateEvent): string {
       return `${f.spell ?? ""} 整场未按`;
     case "death-unused-defensive":
       return `死亡时 ${f.walls ?? ""} 可用未按`;
+    case "crisis-no-response":
+      return `血量 ${f.hpPct ?? "?"}% 后 3 秒无应对(同赛制前 10% 治疗此处 ${f.refRespond ?? "?"}% 会出手:${f.refTop ?? ""})`;
     case "external-unused":
       return `${f.victim ?? ""} 阵亡时 ${f.external ?? ""} 可用`;
     case "wasted-trinket":
