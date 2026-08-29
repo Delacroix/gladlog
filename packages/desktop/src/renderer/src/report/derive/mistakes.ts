@@ -1,16 +1,16 @@
 import {
   analyzeKickAudit,
   annotateMissedPurgesWithKillWindows,
+  type CandidateEvent,
   computeOffensiveWindows,
   extractCandidateFindings,
   reconstructDispelSummary,
-  type CandidateEvent,
 } from "@gladlog/analysis";
 import { CombatUnitReaction } from "@gladlog/parser-compat";
 
 import { resolveOwner } from "./analysisInput";
 import { toLegacySafe } from "./legacySource";
-import { tInRange, type TimeRange } from "./timeRange";
+import { type TimeRange,tInRange } from "./timeRange";
 import type { ReportSource } from "./types";
 
 /**
@@ -317,7 +317,7 @@ export function candidateDetail(c: CandidateEvent): string {
     case "death-unused-defensive":
       return `死亡时 ${f.walls ?? ""} 可用未按`;
     case "crisis-no-response":
-      return `血量 ${f.hpPct ?? "?"}% 后 3 秒无应对(同赛制前 10% 治疗此处 ${f.refRespond ?? "?"}% 会出手:${f.refTop ?? ""})`;
+      return `血量 ${f.hpPct ?? "?"}% 后 3 秒无应对(此状态下无应对者 ${f.refDeathNoResp ?? "?"}% 十秒内死亡,有应对者 ${f.refDeathResp ?? "?"}%,出手者常见应对:${f.refTop ?? ""})`;
     case "external-unused":
       return `${f.victim ?? ""} 阵亡时 ${f.external ?? ""} 可用`;
     case "wasted-trinket":

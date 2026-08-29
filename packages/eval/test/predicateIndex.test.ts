@@ -25,6 +25,7 @@ import { ensureAnalysisData } from "@gladlog/analysis";
 import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFindings";
 import * as cooldownTiming from "@gladlog/analysis/src/analysis/candidates/cooldownTiming";
 import * as candidatesShared from "@gladlog/analysis/src/analysis/candidates/shared";
+import * as crisisDecisionPoints from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
 import * as findingCategories from "@gladlog/analysis/src/analysis/findingCategories";
 import * as hindsightLint from "@gladlog/analysis/src/analysis/hindsightLint";
@@ -32,13 +33,15 @@ import * as momentSnapshot from "@gladlog/analysis/src/analysis/momentSnapshot";
 import * as buildExemplarLedPrompt from "@gladlog/analysis/src/compare/buildExemplarLedPrompt";
 import * as cellLookup from "@gladlog/analysis/src/compare/cellLookup";
 import * as claimChecker from "@gladlog/analysis/src/compare/claimChecker";
+import * as matchTimelineSections from "@gladlog/analysis/src/context/matchTimelineSections";
 import * as timelineHelpers from "@gladlog/analysis/src/context/timelineHelpers";
 import * as arenaGeometry from "@gladlog/analysis/src/data/arenaGeometry";
+import * as behaviorPrior from "@gladlog/analysis/src/data/behaviorPrior";
 import { CANDIDATE_TYPE_FLAGS } from "@gladlog/analysis/src/data/candidateTypeFlags";
 import { DISPEL_FEATURE_FLAGS } from "@gladlog/analysis/src/data/dispelFeatureFlags";
+import * as dispelObservedGenerated from "@gladlog/analysis/src/data/dispelObservedGenerated";
 import * as dispelVerdicts from "@gladlog/analysis/src/data/dispelVerdicts";
 import * as healingVerdicts from "@gladlog/analysis/src/data/healingVerdicts";
-import * as matchTimelineSections from "@gladlog/analysis/src/context/matchTimelineSections";
 import * as racialAbilities from "@gladlog/analysis/src/data/racialAbilities";
 import * as spellCategories from "@gladlog/analysis/src/data/spellCategories";
 import * as spellEffectData from "@gladlog/analysis/src/data/spellEffectData";
@@ -51,10 +54,8 @@ import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
 import * as deathOutcomeAnalysis from "@gladlog/analysis/src/utils/deathOutcomeAnalysis";
 import * as dispelAnalysis from "@gladlog/analysis/src/utils/dispelAnalysis";
 import * as dispelKind from "@gladlog/analysis/src/utils/dispelKind";
-import * as dispelObservedGenerated from "@gladlog/analysis/src/data/dispelObservedGenerated";
 import * as dpsMetrics from "@gladlog/analysis/src/utils/dpsMetrics";
 import * as drAnalysis from "@gladlog/analysis/src/utils/drAnalysis";
-import * as trinketCooldown from "@gladlog/analysis/src/utils/trinketCooldown";
 import { HEALER_OFFENSE_FLAGS } from "@gladlog/analysis/src/utils/healerOffenseAnalysis";
 import * as incomingPressure from "@gladlog/analysis/src/utils/incomingPressure";
 import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWindowTargetSelection";
@@ -68,8 +69,7 @@ import * as talentBehaviors from "@gladlog/analysis/src/utils/talentBehaviors";
 import * as talentOwnership from "@gladlog/analysis/src/utils/talentOwnership";
 import * as talents from "@gladlog/analysis/src/utils/talents";
 import * as threatAssessment from "@gladlog/analysis/src/utils/threatAssessment";
-import * as crisisDecisionPoints from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
-import * as behaviorPrior from "@gladlog/analysis/src/data/behaviorPrior";
+import * as trinketCooldown from "@gladlog/analysis/src/utils/trinketCooldown";
 import {
   decodeAdvanced as parserDecodeAdvanced,
   parseTimestamp as parserParseTimestamp,
@@ -84,24 +84,24 @@ import { join } from "path";
 // must be pinned to those exact files.
 import * as archiveLedger from "../../corpus-tools/src/archiveLedger";
 import * as archivePlan from "../../corpus-tools/src/archivePlan";
-import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
 import * as driveSync from "../../corpus-tools/src/driveSync";
 import * as ownLogArchive from "../../corpus-tools/src/ownLogArchive";
-// log-pipeline is deliberately dependency-free (that is what lets it deploy
-// standalone on the gaming machine), so corpus-tools cannot import it. The
-// naming relation between the two is asserted below instead.
-import * as collectLogs from "../../log-pipeline/src/collectLogs";
+import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
 import * as dashboard from "../../desktop/src/renderer/src/components/dashboard";
-// desktop's package.json also restricts deep imports via `exports`, so this
-// goes by relative path too, same as corpus-tools above.
-import * as obsAsset from "../../desktop/src/shared/obsAsset";
-import * as videoTime from "../../desktop/src/shared/videoTime";
 import * as analysisInput from "../../desktop/src/renderer/src/report/derive/analysisInput";
 import * as flowSeries from "../../desktop/src/renderer/src/report/derive/flowSeries";
 import * as meterRows from "../../desktop/src/renderer/src/report/derive/meterRows";
 import * as reportMistakes from "../../desktop/src/renderer/src/report/derive/mistakes";
 import * as teamSide from "../../desktop/src/renderer/src/report/derive/teamSide";
 import * as reportTimeRange from "../../desktop/src/renderer/src/report/derive/timeRange";
+// desktop's package.json also restricts deep imports via `exports`, so this
+// goes by relative path too, same as corpus-tools above.
+import * as obsAsset from "../../desktop/src/shared/obsAsset";
+import * as videoTime from "../../desktop/src/shared/videoTime";
+// log-pipeline is deliberately dependency-free (that is what lets it deploy
+// standalone on the gaming machine), so corpus-tools cannot import it. The
+// naming relation between the two is asserted below instead.
+import * as collectLogs from "../../log-pipeline/src/collectLogs";
 // Desktop renderer predicates (the "Report UI" section). Relative for a
 // different reason than corpus-tools: eval has no dependency on the desktop app
 // and should not grow one. Both modules are leaf-safe to import — flowSeries
@@ -1354,7 +1354,7 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
     }
   });
 
-  it("crisis-no-response 渲染出的参照数字,门规零违规;改动 refRespond 会被抓住(反向对照)", () => {
+  it("crisis-no-response 渲染出的参照数字,门规零违规;改动 refDeathNoResp 会被抓住(反向对照)", () => {
     // Same lookup the product renders from and the gate re-derives from —
     // one call, both sides consume its output (CLAUDE.md shared-predicate
     // rule; docs/predicate-index.md's crisisDecisionPoints/behaviorPrior rows).
@@ -1367,10 +1367,11 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
       dmg2sPct: "25",
       attackers: "2",
       burst: "yes",
-      refN: String(ref!.n),
-      refRespond: String(ref!.respondPct),
+      refNNoResp: String(ref!.nNoResp),
+      refDeathNoResp: String(ref!.deathNoRespPct),
+      refNResp: String(ref!.nResp),
+      refDeathResp: String(ref!.deathRespPct),
       refTop: ref!.top.map(([k, v]) => `${k} ${v}%`).join("; "),
-      refSelfHealMedian: String(ref!.selfHealMedianPct),
       cellKey: ref!.cellKey,
       fellBack: ref!.fellBack ? "yes" : "no",
     };
@@ -1382,11 +1383,11 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
       [],
     );
 
-    // Negative control: mutate refRespond only — must be exactly one failure,
-    // proof the case above is not a no-op.
+    // Negative control: mutate refDeathNoResp only — must be exactly one
+    // failure, proof the case above is not a no-op.
     const mutatedFacts = {
       ...facts,
-      refRespond: String(Number(facts.refRespond) + 1),
+      refDeathNoResp: String(Number(facts.refDeathNoResp) + 1),
     };
     const mutatedFactsStr = Object.entries(mutatedFacts)
       .map(([k, v]) => `${k}=${v}`)

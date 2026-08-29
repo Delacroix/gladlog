@@ -619,10 +619,11 @@ export function checkBehaviorPriorConsistency(lines: string[]): string[] {
     }
     const expect: Record<string, string> = {
       cellKey: ref.cellKey,
-      refN: String(ref.n),
-      refRespond: String(ref.respondPct),
+      refNNoResp: String(ref.nNoResp),
+      refDeathNoResp: String(ref.deathNoRespPct),
+      refNResp: String(ref.nResp),
+      refDeathResp: String(ref.deathRespPct),
       refTop: ref.top.map(([k, v]) => `${k} ${v}%`).join("; "),
-      refSelfHealMedian: String(ref.selfHealMedianPct),
       fellBack: ref.fellBack ? "yes" : "no",
     };
     for (const [k, v] of Object.entries(expect))

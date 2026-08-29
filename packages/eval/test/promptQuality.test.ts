@@ -332,10 +332,11 @@ describe("checkBehaviorPriorConsistency", () => {
       dmg2sPct: "25",
       attackers: "2",
       burst: "yes",
-      refN: String(ref.n),
-      refRespond: String(ref.respondPct),
+      refNNoResp: String(ref.nNoResp),
+      refDeathNoResp: String(ref.deathNoRespPct),
+      refNResp: String(ref.nResp),
+      refDeathResp: String(ref.deathRespPct),
       refTop: ref.top.map(([k, v]) => `${k} ${v}%`).join("; "),
-      refSelfHealMedian: String(ref.selfHealMedianPct),
       cellKey: ref.cellKey,
       fellBack: ref.fellBack ? "yes" : "no",
       ...over,
@@ -349,10 +350,13 @@ describe("checkBehaviorPriorConsistency", () => {
   it("accepts a line whose reference numbers match the table", () => {
     expect(checkBehaviorPriorConsistency([line()])).toEqual([]);
   });
-  it("rejects a planted wrong refRespond", () => {
-    const out = checkBehaviorPriorConsistency([line({ refRespond: "12" })]);
+  it("rejects a planted wrong refDeathNoResp", () => {
+    const ref = lookupBehaviorPrior("3v3", "healer", 0.25)!;
+    const out = checkBehaviorPriorConsistency([
+      line({ refDeathNoResp: String(ref.deathNoRespPct + 1) }),
+    ]);
     expect(out).toHaveLength(1);
-    expect(out[0]).toMatch(/refRespond/);
+    expect(out[0]).toMatch(/refDeathNoResp/);
   });
   it("rejects a refTop that is not the table's", () => {
     expect(
@@ -362,8 +366,8 @@ describe("checkBehaviorPriorConsistency", () => {
   it("rejects a cellKey the lookup would not have chosen for dmg2sPct", () => {
     // dmg2sPct alone selects a different bin (<10% vs >=20% for 3v3|healer),
     // so every ref-derived field drifts together, not just cellKey — assert
-    // "rejected" rather than an exact message count (measured: 5/6 fields
-    // differ; refRespond happens to coincide at 87 for both bins).
+    // "rejected" rather than an exact message count (the <10% bin no longer
+    // exists after gate 5, so this always falls back to the star cell).
     expect(
       checkBehaviorPriorConsistency([line({ dmg2sPct: "5" })]).length,
     ).toBeGreaterThan(0);

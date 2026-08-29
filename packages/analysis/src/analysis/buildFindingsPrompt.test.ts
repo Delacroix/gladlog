@@ -418,14 +418,14 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线;Task 9 �
   });
 });
 
-describe("crisis-no-response 图例(spec 2026-08-29,GH #58):条件渲染 + 引用即分布非处方", () => {
+describe("crisis-no-response 图例(spec 2026-08-29 §1b,GH #58):条件渲染 + 结果对照非因果", () => {
   it("菜单里没有该类型时,图例不渲染(D2 惯例)", () => {
     const withoutType = buildFindingsPrompt(candidates, "", "Holy Paladin");
     expect(withoutType).not.toMatch(/"crisis-no-response"/);
-    expect(withoutType).not.toMatch(/not a prescription/);
+    expect(withoutType).not.toMatch(/not causal proof/);
   });
 
-  it("菜单里有该类型时,图例出现且措辞守住「引用参照数字,不下处方」的红线", () => {
+  it("菜单里有该类型时,图例出现,包含结果对照句式,且措辞守住「描述性对照,不是因果」的红线", () => {
     const p = buildFindingsPrompt(
       [
         ...candidates,
@@ -441,10 +441,11 @@ describe("crisis-no-response 图例(spec 2026-08-29,GH #58):条件渲染 + 引�
             dmg2sPct: "30",
             attackers: "1",
             burst: "no",
-            refN: "179",
-            refRespond: "88",
+            refNNoResp: "179",
+            refDeathNoResp: "22",
+            refNResp: "62",
+            refDeathResp: "8",
             refTop: "self-heal 61%; wall 36%",
-            refSelfHealMedian: "22",
             cellKey: "3v3|healer|>=20%",
             fellBack: "no",
           },
@@ -454,6 +455,7 @@ describe("crisis-no-response 图例(spec 2026-08-29,GH #58):条件渲染 + 引�
       "Holy Paladin",
     );
     expect(p).toMatch(/"crisis-no-response"/);
-    expect(p).toMatch(/not a prescription/);
+    expect(p).toMatch(/did NOT respond within 3 s died within 10 s/);
+    expect(p).toMatch(/not causal proof/);
   });
 });

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
 import { extractCandidateFindings } from "@gladlog/analysis";
+import { render, screen } from "@testing-library/react";
 
 import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
 import { MistakesCard } from "../src/renderer/src/report/components/MistakesCard";
@@ -143,12 +143,13 @@ describe("失误引擎(第四阶段③ / backlog #8)— 规则表防腐", () => 
         type: "crisis-no-response",
         facts: {
           hpPct: "38",
-          refRespond: "88",
+          refDeathNoResp: "22",
+          refDeathResp: "8",
           refTop: "selfHeal 76%; wall 36%",
         },
       } as any),
     ).toBe(
-      "血量 38% 后 3 秒无应对(同赛制前 10% 治疗此处 88% 会出手:selfHeal 76%; wall 36%)",
+      "血量 38% 后 3 秒无应对(此状态下无应对者 22% 十秒内死亡,有应对者 8%,出手者常见应对:selfHeal 76%; wall 36%)",
     );
   });
 });
