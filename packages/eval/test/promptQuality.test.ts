@@ -1,14 +1,16 @@
+import { ensureAnalysisData } from "@gladlog/analysis";
 import { buildMomentSnapshotItems } from "@gladlog/analysis/src/analysis/momentSnapshot";
+import { lookupBehaviorPrior } from "@gladlog/analysis/src/data/behaviorPrior";
 import { CombatUnitReaction } from "@gladlog/parser-compat";
 
 import type { CoverageManifest } from "../src/quality/coverageManifest";
 import {
+  checkBehaviorPriorConsistency,
   checkMatch,
   checkSelfOnlyDefensiveClaims,
   checkSnapshotFactsConsistency,
 } from "../src/quality/promptQualityCheck";
 import { loadLegacyMatchFixture } from "./helpers/legacyFixture";
-import { ensureAnalysisData } from "@gladlog/analysis";
 
 const entry = {
   ordinal: 1,
@@ -317,5 +319,53 @@ describe("promptQualityCheck.checkSelfOnlyDefensiveClaims (GH #28)", () => {
       ]),
     ).toEqual([]);
     expect(checkSelfOnlyDefensiveClaims([teammateDeath[1]])).toEqual([]);
+  });
+});
+
+describe("checkBehaviorPriorConsistency", () => {
+  const line = (over: Partial<Record<string, string>> = {}) => {
+    const ref = lookupBehaviorPrior("3v3", "healer", 0.25)!;
+    const f = {
+      t: "72.4",
+      unit: "H",
+      hpPct: "38",
+      dmg2sPct: "25",
+      attackers: "2",
+      burst: "yes",
+      refN: String(ref.n),
+      refRespond: String(ref.respondPct),
+      refTop: ref.top.map(([k, v]) => `${k} ${v}%`).join("; "),
+      refSelfHealMedian: String(ref.selfHealMedianPct),
+      cellKey: ref.cellKey,
+      fellBack: ref.fellBack ? "yes" : "no",
+      ...over,
+    };
+    return `  - id=crisis-no-response:H:72 type=crisis-no-response t=72.4s units=H facts={${Object.entries(
+      f,
+    )
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ")}}`;
+  };
+  it("accepts a line whose reference numbers match the table", () => {
+    expect(checkBehaviorPriorConsistency([line()])).toEqual([]);
+  });
+  it("rejects a planted wrong refRespond", () => {
+    const out = checkBehaviorPriorConsistency([line({ refRespond: "12" })]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatch(/refRespond/);
+  });
+  it("rejects a refTop that is not the table's", () => {
+    expect(
+      checkBehaviorPriorConsistency([line({ refTop: "wall 99%" })]),
+    ).toHaveLength(1);
+  });
+  it("rejects a cellKey the lookup would not have chosen for dmg2sPct", () => {
+    // dmg2sPct alone selects a different bin (<10% vs >=20% for 3v3|healer),
+    // so every ref-derived field drifts together, not just cellKey — assert
+    // "rejected" rather than an exact message count (measured: 5/6 fields
+    // differ; refRespond happens to coincide at 87 for both bins).
+    expect(
+      checkBehaviorPriorConsistency([line({ dmg2sPct: "5" })]).length,
+    ).toBeGreaterThan(0);
   });
 });

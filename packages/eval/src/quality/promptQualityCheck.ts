@@ -28,12 +28,12 @@
  * Expects under BASE_DIR: prompts/, manifests/, index.json.
  */
 
+import { ensureAnalysisData } from "@gladlog/analysis";
+import { lookupBehaviorPrior } from "@gladlog/analysis/src/data/behaviorPrior";
+import { classMetadata } from "@gladlog/analysis/src/data/classSpells";
+import { canHelpAnotherUnit } from "@gladlog/analysis/src/utils/cooldowns";
 import fs from "fs-extra";
 import path from "path";
-
-import { ensureAnalysisData } from "@gladlog/analysis";
-import { canHelpAnotherUnit } from "@gladlog/analysis/src/utils/cooldowns";
-import { classMetadata } from "@gladlog/analysis/src/data/classSpells";
 
 import type { IndexEntry } from "../corpus/buildCorpus";
 import { CoverageManifest } from "./coverageManifest";
@@ -589,6 +589,54 @@ export function checkHealedThroughConsistency(lines: string[]): string[] {
   return failures;
 }
 
+/** crisis-no-response: every rendered reference number must be exactly what
+ * lookupBehaviorPrior returns for the line's own bracket/dmg2s (spec §5) —
+ * the analysis side and this gate share the lookup, so any drift is a bug in
+ * the producer's formatting, not a judgement call. */
+export function checkBehaviorPriorConsistency(lines: string[]): string[] {
+  const failures: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!line.includes("type=crisis-no-response")) continue;
+    const m = line.match(/facts=\{(.*)\}\s*$/);
+    if (!m) {
+      failures.push(`line ${i + 1}: crisis-no-response 行无 facts`);
+      continue;
+    }
+    const f: Record<string, string> = {};
+    for (const kv of m[1]!.split(", ")) {
+      const j = kv.indexOf("=");
+      if (j > 0) f[kv.slice(0, j)] = kv.slice(j + 1);
+    }
+    const bracket = (f.cellKey ?? "").split("|")[0] ?? "";
+    const ref = lookupBehaviorPrior(
+      bracket,
+      "healer",
+      Number(f.dmg2sPct) / 100,
+    );
+    if (!ref) {
+      failures.push(
+        `line ${i + 1}: crisis-no-response 引用了表里不存在的赛制 ${bracket}`,
+      );
+      continue;
+    }
+    const expect: Record<string, string> = {
+      cellKey: ref.cellKey,
+      refN: String(ref.n),
+      refRespond: String(ref.respondPct),
+      refTop: ref.top.map(([k, v]) => `${k} ${v}%`).join("; "),
+      refSelfHealMedian: String(ref.selfHealMedianPct),
+      fellBack: ref.fellBack ? "yes" : "no",
+    };
+    for (const [k, v] of Object.entries(expect))
+      if (f[k] !== v)
+        failures.push(
+          `line ${i + 1}: crisis-no-response ${k}=${f[k]} 与参照表 ${v} 不一致(${ref.cellKey})`,
+        );
+  }
+  return failures;
+}
+
 export function checkSelfOnlyDefensiveClaims(lines: string[]): string[] {
   const violations: string[] = [];
   lines.forEach((line, i) => {
@@ -831,6 +879,7 @@ export function checkMatch(
   hardFailures.push(...checkSelfOnlyDefensiveClaims(lines));
   hardFailures.push(...checkDmgSpikeCcCoverConsistency(lines));
   hardFailures.push(...checkHealedThroughConsistency(lines));
+  hardFailures.push(...checkBehaviorPriorConsistency(lines));
 
   return {
     ordinal: entry.ordinal,
