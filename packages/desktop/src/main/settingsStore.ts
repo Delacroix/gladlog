@@ -1,12 +1,13 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync } from "fs";
 import { dirname } from "path";
 
 import {
   AI_BACKENDS,
-  isKnownModel,
   type AiBackend,
   type AiModelSelection,
+  isKnownModel,
 } from "../shared/aiModels";
+import { atomicWriteFileSync } from "../shared/atomicWrite";
 import { clampUiZoom, UI_ZOOM_DEFAULT } from "../shared/uiZoom";
 
 export type { AiBackend, AiModelSelection };
@@ -370,9 +371,7 @@ export class SettingsStore {
       }
     }
     mkdirSync(dirname(this.filePath), { recursive: true });
-    const tmp = `${this.filePath}.tmp`;
-    writeFileSync(tmp, JSON.stringify(onDisk, null, 2));
-    renameSync(tmp, this.filePath);
+    atomicWriteFileSync(this.filePath, JSON.stringify(onDisk, null, 2));
     return next;
   }
 }

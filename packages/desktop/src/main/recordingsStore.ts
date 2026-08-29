@@ -4,12 +4,12 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  renameSync,
   statSync,
   unlinkSync,
-  writeFileSync,
 } from "fs";
 import { join, resolve } from "path";
+
+import { atomicWriteFileSync } from "../shared/atomicWrite";
 
 /**
  * Time-window association tolerance: a recording starting later than the match
@@ -97,13 +97,11 @@ export class RecordingsStore {
 
   private rewrite(entries: RecordingEntry[]): void {
     mkdirSync(this.dir, { recursive: true });
-    const tmp = `${this.indexPath()}.tmp`;
-    writeFileSync(
-      tmp,
+    atomicWriteFileSync(
+      this.indexPath(),
       entries.map((e) => JSON.stringify(e)).join("\n") +
         (entries.length ? "\n" : ""),
     );
-    renameSync(tmp, this.indexPath());
   }
 
   add(entry: RecordingEntry): void {

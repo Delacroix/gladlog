@@ -1,4 +1,6 @@
-import { readFileSync, renameSync, writeFileSync } from "fs";
+import { readFileSync } from "fs";
+
+import { atomicWriteFileSync } from "../shared/atomicWrite";
 import type { FileCheckpoint } from "../shared/protocol";
 
 export interface CheckpointRegistry {
@@ -19,7 +21,5 @@ export function loadCheckpoints(path: string): CheckpointRegistry {
 }
 
 export function saveCheckpoints(path: string, reg: CheckpointRegistry): void {
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, JSON.stringify(reg, null, 2));
-  renameSync(tmp, path);
+  atomicWriteFileSync(path, JSON.stringify(reg, null, 2));
 }

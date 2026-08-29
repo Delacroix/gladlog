@@ -6,7 +6,6 @@ import {
   promises as fsp,
   readdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -14,6 +13,10 @@ import {
 import { join } from "path";
 import { Worker } from "worker_threads";
 
+import {
+  atomicWriteFileSync,
+  renameWithRetrySync,
+} from "../shared/atomicWrite";
 import { nullFiller } from "../shared/roundOffsets";
 
 /** rounds.idx.json shape (written by roundsIdxWorker; size/mtime guard the
@@ -407,13 +410,11 @@ export class MatchStore {
   }
 
   private rewriteIndex(): void {
-    const tmp = this.indexPath() + ".tmp";
-    writeFileSync(
-      tmp,
+    atomicWriteFileSync(
+      this.indexPath(),
       [...this.index.values()].map((m) => JSON.stringify(m)).join("\n") +
         (this.index.size ? "\n" : ""),
     );
-    renameSync(tmp, this.indexPath());
   }
 
   init(): StoredMatchMeta[] {
@@ -568,7 +569,7 @@ export class MatchStore {
     );
     writeFileSync(join(tmpDir, "raw.txt"), item.rawLines.join("\n") + "\n");
     rmSync(finalDir, { recursive: true, force: true });
-    renameSync(tmpDir, finalDir);
+    renameWithRetrySync(tmpDir, finalDir);
     this.index.set(id, meta);
     this.appendIndexLine(meta);
     // perf-1: build the per-round sidecar right away — the user typically opens
