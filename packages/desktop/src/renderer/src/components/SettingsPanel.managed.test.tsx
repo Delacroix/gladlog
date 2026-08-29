@@ -132,7 +132,9 @@ describe("SettingsPanel 录像模式(task-6)", () => {
     act(() => {
       getProgressCb()!({ phase: "downloading", loaded: 50, total: 100 });
     });
-    await waitFor(() => expect(screen.getByText(/50%/)).toBeTruthy());
+    // Anchored on the "下载中" label: a bare /50%/ also matches the UI-zoom
+    // group's "150%" button that main added while this branch was open.
+    await waitFor(() => expect(screen.getByText(/下载中\s*50%/)).toBeTruthy());
   });
 
   it("下载失败 → 显示错误原文,按钮文案变重试", async () => {

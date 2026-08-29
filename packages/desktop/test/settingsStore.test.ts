@@ -206,6 +206,7 @@ describe("settings 脱敏(key 永不出主进程)", () => {
       autoCheckUpdates: true,
       lastSeenVersion: null,
       deepDiveSnapshot: false,
+      uiZoom: 1,
     };
     const redacted = redactSettings(base);
     expect(redacted.managedWsPassword).toBe(MANAGED_WS_PASSWORD_REDACTED);
