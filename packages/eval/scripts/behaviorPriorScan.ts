@@ -27,7 +27,12 @@ import {
   specToString,
   spellIdLists,
 } from "@gladlog/analysis";
+import {
+  rootSpellIds,
+  spells as spellMeta,
+} from "@gladlog/analysis/src/data/spellTags";
 import { SpellTag } from "@gladlog/analysis/src/data/spellTypes";
+import { TEAM_HEAL_CD_IDS } from "@gladlog/analysis/src/utils/cooldowns";
 import {
   cdAvailableAt,
   extractMajorCooldowns,
@@ -64,6 +69,25 @@ const OFFENSIVE_CD_IDS = new Set<string>(
       .filter((a: any) => (a.tags ?? []).includes(SpellTag.Offensive))
       .map((a: any) => String(a.spellId)),
   ),
+);
+/** owner-side "stop the damage" tools: hard CC ∪ roots ∪ typed interrupts */
+const CONTROL_IDS = new Set<string>([
+  ...ccSpellIds,
+  ...rootSpellIds,
+  ...Object.entries(spellMeta)
+    .filter(([, m]) => m.type === "interrupts")
+    .map(([id]) => id),
+]);
+const RESPONSE_WINDOW_MS = 3000;
+const MOVE_YARDS = 15;
+const KITE_GAIN_YARDS = 8;
+const SELF_HEAL_BIG = 0.15;
+/** PERSONAL walls only — the curated bigDefensiveSpellIds. extractMajorCooldowns
+ * tags externals (Pain Suppression, Ironbark…) and team-heal CDs (Divine Hymn,
+ * Tranquility, Aura Mastery…) as "Defensive" too; v1–v3 of this scan counted
+ * all of them as "a wall". Found 2026-08-29, fixed in v4. */
+const PERSONAL_WALL_IDS = new Set<string>(
+  (spellIdLists as any).bigDefensiveSpellIds.map(String),
 );
 const EXTERNAL_IDS = new Set<string>(
   (spellIdLists as any).externalDefensiveSpellIds.map(String),
@@ -109,6 +133,31 @@ interface Opp {
   externalRecent: boolean;
   /** lowest teammate (not owner) HP% at the crossing, null if unknown */
   lowestAllyHp: number | null;
+  // ---- responses in [−1.5s, +3s] (v4) ----
+  /** owner cast a throughput / team-heal major CD */
+  rThroughputCd: boolean;
+  /** owner cast an external defensive (on anyone) */
+  rExternalCast: boolean;
+  /** owner cast a team-heal CD */
+  rTeamHealCd: boolean;
+  /** owner self-healed ≥15% max HP inside 3s */
+  rSelfHeal: boolean;
+  selfHeal3s: number;
+  allyHeal3s: number;
+  /** owner cast hard CC / root / interrupt on an enemy */
+  rOwnerControl: boolean;
+  /** a teammate cast CC / root / interrupt on one of the owner's attackers */
+  rPeel: boolean;
+  /** owner displaced ≥15yd over the 3s */
+  rMoved: boolean;
+  moved3s: number | null;
+  /** distance to nearest attacker grew ≥8yd over the 3s */
+  rKited: boolean;
+  /** owner healed someone other than themself inside 3s */
+  rHealedOthers: boolean;
+  /** owner cast nothing at all in the window */
+  rIdle: boolean;
+  hpAfter5s: number | null;
 }
 
 function isoWeek(ms: number): string {
@@ -219,7 +268,8 @@ function oppsOf(
     (cd) =>
       cd.tag === "Defensive" &&
       !cd.isThroughput &&
-      !isProcOnlyActivation(cd.spellId),
+      !isProcOnlyActivation(cd.spellId) &&
+      PERSONAL_WALL_IDS.has(String(cd.spellId)),
   );
   if (!wallCds.length) return [];
   const wallIds = new Set(wallCds.map((c) => String(c.spellId)));
@@ -293,6 +343,77 @@ function oppsOf(
           hp: a.advancedActorCurrentHp / a.advancedActorMaxHp,
         })),
     );
+  // v4 response sources
+  const ownerCasts = ((owner.spellCastEvents ?? []) as any[]).map((c) => ({
+    t: c.timestamp,
+    id: String(c.spellId ?? ""),
+    dest: c.destUnitId,
+  }));
+  // every non-personal-wall, non-control major CD the owner owns
+  const externalIds = new Set(
+    cds
+      .filter((cd) => EXTERNAL_IDS.has(String(cd.spellId)))
+      .map((cd) => String(cd.spellId)),
+  );
+  const teamHealIds = new Set(
+    cds
+      .filter((cd) => TEAM_HEAL_CD_IDS.has(String(cd.spellId)))
+      .map((cd) => String(cd.spellId)),
+  );
+  const throughputIds = new Set(
+    cds
+      .filter(
+        (cd) =>
+          cd.tag !== "Control" &&
+          !PERSONAL_WALL_IDS.has(String(cd.spellId)) &&
+          !externalIds.has(String(cd.spellId)) &&
+          !teamHealIds.has(String(cd.spellId)) &&
+          !isProcOnlyActivation(cd.spellId),
+      )
+      .map((cd) => String(cd.spellId)),
+  );
+  const healIn = ((owner.healIn ?? []) as any[]).map((h) => ({
+    t: h.timestamp,
+    src: h.srcUnitId,
+    a: Math.abs(h.effectiveAmount ?? h.amount ?? 0),
+  }));
+  const healOut = ((owner.healOut ?? []) as any[]).map((h) => ({
+    t: h.timestamp,
+    dest: h.destUnitId,
+  }));
+  const friendControlCasts: { t: number; dest: string }[] = [];
+  for (const u of units) {
+    if (!u.info || !friendIds.has(u.id) || u.id === owner.id) continue;
+    for (const c of (u.spellCastEvents ?? []) as any[])
+      if (CONTROL_IDS.has(String(c.spellId ?? "")))
+        friendControlCasts.push({ t: c.timestamp, dest: c.destUnitId });
+  }
+  const posOf = (
+    u: any,
+    t: number,
+    tol = 1500,
+  ): { x: number; y: number } | null => {
+    let best: any = null;
+    for (const a of (u.advancedActions ?? []) as any[]) {
+      if (a.advancedActorPositionX == null) continue;
+      const d = Math.abs(a.timestamp - t);
+      if (d <= tol && (!best || d < Math.abs(best.timestamp - t))) best = a;
+    }
+    return best
+      ? { x: best.advancedActorPositionX, y: best.advancedActorPositionY }
+      : null;
+  };
+  const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    Math.hypot(a.x - b.x, a.y - b.y);
+  const unitById = new Map(units.map((u) => [u.id, u]));
+  const hpAt = (t: number): number | null => {
+    let best: any = null;
+    for (const a of samples) {
+      const d = Math.abs(a.t - t);
+      if (d <= 1500 && (!best || d < Math.abs(best.t - t))) best = a;
+    }
+    return best ? Math.round(best.hp * 100) : null;
+  };
   const lowestAllyAt = (t: number): number | null => {
     let low: number | null = null;
     for (const arr of allySamples) {
@@ -304,6 +425,65 @@ function oppsOf(
       if (best && (low === null || best.hp < low)) low = best.hp;
     }
     return low === null ? null : Math.round(low * 100);
+  };
+
+  const responsesAt = (t: number) => {
+    const w0 = t - ACTION_PRE_MS,
+      w1 = t + RESPONSE_WINDOW_MS;
+    const inWin = (tt: number) => tt >= w0 && tt <= w1;
+    const attackers = new Set(
+      dmgSrc
+        .filter((d) => d.t > t - DMG_WINDOW_MS && d.t <= t)
+        .map((d) => d.src),
+    );
+    const castsIn = ownerCasts.filter((c) => inWin(c.t));
+    const selfHeal = healIn
+      .filter((h) => h.t > t && h.t <= w1 && h.src === owner.id)
+      .reduce((n, h) => n + h.a, 0);
+    const allyHeal = healIn
+      .filter((h) => h.t > t && h.t <= w1 && h.src !== owner.id)
+      .reduce((n, h) => n + h.a, 0);
+    const maxHp = samples.find((s) => s.t >= t)?.max ?? samples[0]!.max;
+    const p0 = posOf(owner, t),
+      p1 = posOf(owner, w1);
+    const moved = p0 && p1 ? dist(p0, p1) : null;
+    let kited = false;
+    if (p0 && p1 && attackers.size) {
+      const near = (p: { x: number; y: number }, tt: number) => {
+        let m = Infinity;
+        for (const id of attackers) {
+          const u = unitById.get(id);
+          const q = u ? posOf(u, tt, 2500) : null;
+          if (q) m = Math.min(m, dist(p, q));
+        }
+        return m;
+      };
+      const d0 = near(p0, t),
+        d1 = near(p1, w1);
+      kited = isFinite(d0) && isFinite(d1) && d1 - d0 >= KITE_GAIN_YARDS;
+    }
+    return {
+      rThroughputCd: castsIn.some((c) => throughputIds.has(c.id)),
+      rExternalCast: castsIn.some((c) => externalIds.has(c.id)),
+      rTeamHealCd: castsIn.some((c) => teamHealIds.has(c.id)),
+      rSelfHeal: selfHeal / maxHp >= SELF_HEAL_BIG,
+      selfHeal3s: Math.round((selfHeal / maxHp) * 100) / 100,
+      allyHeal3s: Math.round((allyHeal / maxHp) * 100) / 100,
+      rOwnerControl: castsIn.some(
+        (c) => CONTROL_IDS.has(c.id) && c.dest && !friendIds.has(c.dest),
+      ),
+      rPeel: friendControlCasts.some(
+        (c) => inWin(c.t) && attackers.has(c.dest),
+      ),
+      rMoved: moved != null && moved >= MOVE_YARDS,
+      moved3s: moved == null ? null : Math.round(moved),
+      rKited: kited,
+      rHealedOthers: healOut.some(
+        (h) => h.t > t && h.t <= w1 && h.dest !== owner.id,
+      ),
+      rIdle: castsIn.length === 0,
+      hpAfter5s: hpAt(t + 5000),
+    };
   };
 
   const out: Opp[] = [];
@@ -356,6 +536,7 @@ function oppsOf(
         (t) => t > x.t - EXTERNAL_LOOKBACK_MS && t <= x.t + ACTION_WINDOW_MS,
       ),
       lowestAllyHp: lowestAllyAt(x.t),
+      ...responsesAt(x.t),
     });
   }
   return out;
@@ -508,7 +689,7 @@ function report(): void {
   const usable = all.filter((r) => r.wallsReady > 0);
   const lines: string[] = [];
   lines.push(
-    `# behavior prior — owner HP crossed ≤${CRISIS_HP_PCT * 100}% with a wall ready\n`,
+    `# behavior prior — owner HP crossed ≤${CRISIS_HP_PCT * 100}% with a PERSONAL wall ready (v4: bigDefensiveSpellIds only)\n`,
   );
   lines.push(
     `matches ${matches}, opportunities ${rows.length} (${usable.length} ranked). Action = a ready wall cast within [−${ACTION_PRE_MS}ms, +${ACTION_WINDOW_MS}ms].\n`,
@@ -629,6 +810,77 @@ function report(): void {
       };
       lines.push(`| ${name} | ${cell("top10")} | ${cell("<30")} |`);
     }
+
+    // v4: response mix (multi-label) by rank, free & wall ready
+    const RESP: [string, (r: Opp) => boolean][] = [
+      ["personal wall", (r) => r.pressed],
+      ["external defensive cast (self or ally)", (r) => r.rExternalCast],
+      ["team-heal CD", (r) => r.rTeamHealCd],
+      ["other major CD (PI / wings / …)", (r) => r.rThroughputCd],
+      ["self-heal ≥15% in 3s", (r) => r.rSelfHeal],
+      ["own CC / root / interrupt on enemy", (r) => r.rOwnerControl],
+      ["teammate peel on your attacker", (r) => r.rPeel],
+      ["moved ≥15yd", (r) => r.rMoved],
+      ["kited: +8yd from nearest attacker", (r) => r.rKited],
+      ["kept healing others", (r) => r.rHealedOthers],
+      ["cast nothing", (r) => r.rIdle],
+      [
+        "none of: wall/external/teamCD/otherCD/self-heal/control/peel/kite",
+        (r) =>
+          !(
+            r.pressed ||
+            r.rExternalCast ||
+            r.rTeamHealCd ||
+            r.rThroughputCd ||
+            r.rSelfHeal ||
+            r.rOwnerControl ||
+            r.rPeel ||
+            r.rKited
+          ),
+      ],
+    ];
+    const respTable = (title: string, filt: (r: Opp) => boolean) => {
+      lines.push(`\n### ${title}\n`);
+      lines.push(`| response within 3s | ${BUCKETS.join(" | ")} |`);
+      lines.push(`|---|${BUCKETS.map(() => "---").join("|")}|`);
+      for (const [name, f] of RESP) {
+        const cells = BUCKETS.map((b) => {
+          const sub = rs.filter((r) => filt(r) && bucketOfPct(r.pct!) === b);
+          return pctStr(sub.filter(f).length, sub.length);
+        });
+        lines.push(`| ${name} | ${cells.join(" | ")} |`);
+      }
+      const med = (b: string, k: (r: Opp) => number | null) => {
+        const v = rs
+          .filter((r) => filt(r) && bucketOfPct(r.pct!) === b)
+          .map(k)
+          .filter((x): x is number => x != null)
+          .sort((a, c) => a - c);
+        return v.length ? String(v[Math.floor(v.length / 2)]) : "—";
+      };
+      lines.push(
+        `| median self-heal in 3s (% maxHP) | ${BUCKETS.map((b) => med(b, (r) => Math.round(r.selfHeal3s * 100))).join(" | ")} |`,
+      );
+      lines.push(
+        `| median ally heal on you in 3s (% maxHP) | ${BUCKETS.map((b) => med(b, (r) => Math.round(r.allyHeal3s * 100))).join(" | ")} |`,
+      );
+      lines.push(
+        `| median yards moved in 3s | ${BUCKETS.map((b) => med(b, (r) => r.moved3s)).join(" | ")} |`,
+      );
+      lines.push(
+        `| median HP 5s later | ${BUCKETS.map((b) => med(b, (r) => r.hpAfter5s)).join(" | ")} |`,
+      );
+    };
+    respTable("response mix — not in CC, wall ready", (r) => !r.inCC);
+    respTable(
+      "response mix — not in CC, wall ready, enemy burst CD or ≥2 attackers",
+      (r) => !r.inCC && (r.enemyBurst || r.attackers2s >= 2),
+    );
+    respTable(
+      "response mix — not in CC, wall ready, wall NOT pressed",
+      (r) => !r.inCC && !r.pressed,
+    );
+    respTable("response mix — in CC, wall ready", (r) => r.inCC);
 
     // pre-emptive walls: every crossing in this bracket (wall ready or not),
     // how often had a wall been pressed in the 10s BEFORE the HP got here?
