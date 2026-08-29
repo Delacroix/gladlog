@@ -12,6 +12,7 @@ import {
   isCooldownAvailableFromLastUse,
   specToString,
 } from "./cooldowns";
+import spellReachGenerated from "../data/spellReachGenerated.json";
 import { talentOwnershipOf } from "./talentOwnership";
 import {
   distanceBetween,
@@ -486,18 +487,30 @@ export function wasLockedOutByStunOnly(
   );
 }
 
-// Max range for external defensive spells. GH #34 batch 4 (2026-08-28) checked
-// every externalDefensiveSpellIds entry against official DB2 SpellMisc.RangeIndex
-// → SpellRange at 12.1.0.69382: 9 targeted externals ARE 40yd (Pain Suppression,
-// Guardian Spirit, Ironbark, BoP, Sacrifice, Spellwarding, Life Cocoon,
-// PW: Barrier, Spirit Link Totem); TWO are 30yd (Anti-Magic Zone 51052
-// placement, Time Dilation 357170); FOUR are caster-centred auras with range 0
-// whose reach is their radius, not a cast range (Rallying Cry, Aura Mastery,
-// Darkness, Zephyr). So 40 over-reaches by ≤10yd for two spells and is the wrong
-// kind of number for four — a per-spell official range/radius table would be the
-// door-1 fix; impact (teammates 30–40yd away holding TD/AMZ at a death) is
-// unmeasured. Left at 40 pending that ruling; do not "fix" by hand-typing 30.
-const EXTERNAL_SPELL_RANGE_YARDS = 40;
+// Per-spell reach for "could this teammate have thrown it": official DB2 via
+// data/spellReachGenerated.json (GH #34 batch 4 ②, user ruling 2026-08-29) —
+// cast range for targeted spells, range + radius for placed areas, radius for
+// caster-centred auras. The old single constant (40 yd, "all are 40-yard
+// targeted spells") was false for 6 of 15: Time Dilation and Anti-Magic Zone
+// are 30 yd, Rallying Cry / Aura Mastery / Darkness / Zephyr are auras.
+// Darkness 196718 has no radius anywhere in DB2 (the 8 yd zone lives on the
+// area-trigger object), so it is the one hand value here, with provenance.
+// Anything missing from the table falls back to the old 40 — never lower,
+// so an unlisted spell cannot start acquitting teammates silently.
+const EXTERNAL_REACH_FALLBACK_YARDS = 40;
+const EXTERNAL_REACH_HAND_OVERRIDES: Record<string, number> = {
+  "196718": 8, // Darkness — zone radius; not derivable from SpellEffect/SpellRadius
+};
+export function externalReachYards(spellId: string): number {
+  const hand = EXTERNAL_REACH_HAND_OVERRIDES[spellId];
+  if (hand !== undefined) return hand;
+  const gen = (
+    spellReachGenerated as { spells: Record<string, { reachYards: number }> }
+  ).spells[spellId];
+  return gen && gen.reachYards > 0
+    ? gen.reachYards
+    : EXTERNAL_REACH_FALLBACK_YARDS;
+}
 
 export function buildDeathOutcomeSummary(
   combat: Pick<AtomicArenaCombat, "startTime"> & { zoneId?: string },
@@ -598,15 +611,14 @@ export function buildDeathOutcomeSummary(
           (s) => s.playerName === teammate.name,
         );
 
-        // B27: skip if teammate was out of spell range or LoS-blocked at death time
+        // B27: skip if teammate was LoS-blocked at death time; the per-spell
+        // reach check happens inside the spell loop (GH #34 ②).
         const casterPos = getUnitPositionAtTime(teammate, deathMs);
-        if (dyingPos && casterPos) {
-          if (distanceBetween(dyingPos, casterPos) > EXTERNAL_SPELL_RANGE_YARDS)
-            continue;
-          if (combat.zoneId) {
-            const los = hasLineOfSight(combat.zoneId, casterPos, dyingPos);
-            if (los === false) continue; // confirmed LoS blocked (null = unmapped, pass through)
-          }
+        const casterDistance =
+          dyingPos && casterPos ? distanceBetween(dyingPos, casterPos) : null;
+        if (dyingPos && casterPos && combat.zoneId) {
+          const los = hasLineOfSight(combat.zoneId, casterPos, dyingPos);
+          if (los === false) continue; // confirmed LoS blocked (null = unmapped, pass through)
         }
 
         for (const [spellId, spell] of Object.entries(
@@ -618,6 +630,11 @@ export function buildDeathOutcomeSummary(
               e.logLine.event === LogEvent.SPELL_CAST_SUCCESS,
           );
           if (!everCast && !spell.specs.includes(teammate.spec)) continue;
+          if (
+            casterDistance !== null &&
+            casterDistance > externalReachYards(spellId)
+          )
+            continue;
           // Talent-ownership gate (issue #8 / BACKLOG #23-1): PW:Barrier &co
           // are choice-node talents most players skip — a Disc priest without
           // the talent must not be told "you had Power Word: Barrier

@@ -59,6 +59,11 @@ npx tsx packages/analysis/scripts/datagen/genPvpTalentReplaces.ts
 npx tsx packages/analysis/scripts/datagen/genPvpTalentPool.ts
 # 6e. DR category table (SpellCategories.DiminishType; consumed by drAnalysis, aura ID key)
 npx tsx packages/analysis/scripts/datagen/genDrCategories.ts
+# Per-spell reach (cast range / area radius) for the ally-castable defensives —
+# GH #34 ②: feeds deathOutcomeAnalysis's "could a teammate have thrown it"
+# distance check; id universe = externalDefensiveSpellIds. Darkness 196718 has
+# no radius in DB2 (stays on the hand fallback in code).
+npx tsx packages/analysis/scripts/datagen/genSpellReach.ts
 # 6f. off-GCD active abilities table (SpellCooldowns StartRecoveryTime==0; consumed by swimlane folding)
 npx tsx packages/analysis/scripts/datagen/genOffGcd.ts
 # 6g. Damage mitigation table (#17 foundation; whitelist = big ∪ external 35 items, curated overrides in mitigationData.ts)

@@ -1,0 +1,96 @@
+{
+  "generatedAt": "2026-08-29T08:38:19.032Z",
+  "build": "12.1.0.69382",
+  "spells": {
+    "1022": {
+      "rangeYards": 40,
+      "radiusYards": 0,
+      "reachYards": 40,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    },
+    "6940": {
+      "rangeYards": 40,
+      "radiusYards": 0,
+      "reachYards": 40,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    },
+    "31821": {
+      "rangeYards": 0,
+      "radiusYards": 40,
+      "reachYards": 40,
+      "source": "radius from linked spell 465"
+    },
+    "33206": {
+      "rangeYards": 40,
+      "radiusYards": 0,
+      "reachYards": 40,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    },
+    "47788": {
+      "rangeYards": 40,
+      "radiusYards": 0,
+      "reachYards": 40,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    },
+    "51052": {
+      "rangeYards": 30,
+      "radiusYards": 8,
+      "reachYards": 38,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    },
+    "62618": {
+      "rangeYards": 40,
+      "radiusYards": 8,
+      "reachYards": 48,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    },
+    "97462": {
+      "rangeYards": 0,
+      "radiusYards": 40,
+      "reachYards": 40,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    },
+    "98008": {
+      "rangeYards": 40,
+      "radiusYards": 10,
+      "reachYards": 50,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    },
+    "102342": {
+      "rangeYards": 40,
+      "radiusYards": 0,
+      "reachYards": 40,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    },
+    "116849": {
+      "rangeYards": 40,
+      "radiusYards": 0,
+      "reachYards": 40,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    },
+    "196718": {
+      "rangeYards": 0,
+      "radiusYards": 0,
+      "reachYards": 0,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    },
+    "204018": {
+      "rangeYards": 40,
+      "radiusYards": 0,
+      "reachYards": 40,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    },
+    "357170": {
+      "rangeYards": 30,
+      "radiusYards": 0,
+      "reachYards": 30,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    },
+    "374227": {
+      "rangeYards": 0,
+      "radiusYards": 20,
+      "reachYards": 20,
+      "source": "SpellMisc/SpellRange + SpellEffect/SpellRadius"
+    }
+  }
+}

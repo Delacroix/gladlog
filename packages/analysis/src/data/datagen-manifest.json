@@ -101,6 +101,12 @@
       "specs": 41,
       "classes": 14,
       "bytes": 2035
+    },
+    "spellReachGenerated.json": {
+      "spells": 15,
+      "bytes": 2463,
+      "generator": "scripts/datagen/genSpellReach.ts",
+      "consumer": "utils/deathOutcomeAnalysis.ts externalReachYards (GH #34 ②)"
     }
   }
 }

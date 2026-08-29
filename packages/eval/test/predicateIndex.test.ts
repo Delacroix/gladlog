@@ -267,6 +267,11 @@ const INDEX: PredicateRow[] = [
     mod: cooldowns,
   },
   {
+    file: `${A}/utils/deathOutcomeAnalysis.ts`,
+    symbol: "externalReachYards",
+    mod: deathOutcomeAnalysis,
+  },
+  {
     file: `${A}/utils/drAnalysis.ts`,
     symbol: "drCategoryIds",
     mod: drAnalysis,
