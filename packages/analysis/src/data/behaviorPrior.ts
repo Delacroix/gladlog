@@ -29,6 +29,21 @@ export type BehaviorPriorOutcome = "ownDeath10s" | "teamDeath15s";
 function isValidOutcome(v: unknown): v is BehaviorPriorOutcome {
   return v === "ownDeath10s" || v === "teamDeath15s";
 }
+/** Single source for the enum-token → prose translation (crisis-no-response
+ * follow-up, 2026-08-29): the rendered `facts.refOutcome` must be a human
+ * phrase a coaching model can paste into a sentence, never the bare
+ * `BehaviorPriorOutcome` token. `crisisNoResponse.ts` renders through this;
+ * `promptQualityCheck.ts`'s `checkBehaviorPriorConsistency` re-derives
+ * through the same function — one place, both sides (CLAUDE.md
+ * shared-predicate rule). The enum itself still travels as
+ * `facts.refOutcomeKey` for anything that needs to branch on it. */
+export const OUTCOME_PHRASE: Record<BehaviorPriorOutcome, string> = {
+  ownDeath10s: "this healer died within 10 s",
+  teamDeath15s: "a teammate (or the healer) died within 15 s",
+};
+export function outcomePhrase(o: BehaviorPriorOutcome): string {
+  return OUTCOME_PHRASE[o];
+}
 interface Cell {
   nNoResp: number;
   deathNoResp: number;

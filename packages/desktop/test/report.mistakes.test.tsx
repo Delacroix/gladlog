@@ -134,7 +134,7 @@ describe("失误引擎(第四阶段③ / backlog #8)— 规则表防腐", () => 
     void friendlies;
   });
 
-  it("crisis-no-response has a rule and a detail string", () => {
+  it("crisis-no-response has a rule and a detail string; falls back to facts.refOutcome when facts.refOutcomeKey is absent (a cached round from before it existed)", () => {
     expect(
       MISTAKE_RULES.find((r) => r.type === "crisis-no-response"),
     ).toMatchObject({ severity: "major", source: "candidate" });
@@ -145,6 +145,8 @@ describe("失误引擎(第四阶段③ / backlog #8)— 规则表防腐", () => 
           hpPct: "38",
           refDeathNoResp: "22",
           refDeathResp: "8",
+          // no refOutcomeKey — pre-PROMPT_VERSION-40 cache, refOutcome was
+          // still the bare enum token
           refOutcome: "ownDeath10s",
           refTop: "selfHeal 76%; wall 36%",
         },
@@ -154,7 +156,7 @@ describe("失误引擎(第四阶段③ / backlog #8)— 规则表防腐", () => 
     );
   });
 
-  it("crisis-no-response (spec §1c): refOutcome=teamDeath15s (Solo Shuffle) renders the team-death wording instead of the own-death wording", () => {
+  it("crisis-no-response (spec §1c): refOutcomeKey=teamDeath15s (Solo Shuffle) renders the team-death wording instead of the own-death wording, driven by the key — refOutcome is now prose and never branched on", () => {
     expect(
       candidateDetail({
         type: "crisis-no-response",
@@ -162,7 +164,8 @@ describe("失误引擎(第四阶段③ / backlog #8)— 规则表防腐", () => 
           hpPct: "38",
           refDeathNoResp: "25",
           refDeathResp: "15",
-          refOutcome: "teamDeath15s",
+          refOutcome: "a teammate (or the healer) died within 15 s",
+          refOutcomeKey: "teamDeath15s",
           refTop: "selfHeal 75%; wall 23%",
         },
       } as any),

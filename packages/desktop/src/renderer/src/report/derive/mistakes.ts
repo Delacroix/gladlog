@@ -318,12 +318,17 @@ export function candidateDetail(c: CandidateEvent): string {
       return `死亡时 ${f.walls ?? ""} 可用未按`;
     case "crisis-no-response": {
       // spec §1c: Solo Shuffle's reference counts ANY friendly death within
-      // 15 s (facts.refOutcome === "teamDeath15s"); everything else counts
-      // the owner's own death within 10 s — same fact, two wordings, driven
-      // by the SAME facts.refOutcome the gate (checkBehaviorPriorConsistency)
-      // cross-checks.
+      // 15 s; everything else counts the owner's own death within 10 s —
+      // same fact, two wordings. Branch on facts.refOutcomeKey (the enum),
+      // the SAME field the gate (checkBehaviorPriorConsistency) cross-checks
+      // against lookupBehaviorPrior — facts.refOutcome is prose now (a human
+      // phrase, single-sourced from data/behaviorPrior.ts's outcomePhrase)
+      // and must never be branched on. Fall back to facts.refOutcome for a
+      // cached round produced before refOutcomeKey existed (pre-PROMPT_VERSION
+      // 40), where refOutcome was still the bare enum token.
+      const outcomeKey = f.refOutcomeKey ?? f.refOutcome;
       const outcomeClause =
-        f.refOutcome === "teamDeath15s"
+        outcomeKey === "teamDeath15s"
           ? `此状态下无应对者 ${f.refDeathNoResp ?? "?"}% 十五秒内我方有人阵亡,有应对者 ${f.refDeathResp ?? "?"}%`
           : `此状态下无应对者 ${f.refDeathNoResp ?? "?"}% 十秒内死亡,有应对者 ${f.refDeathResp ?? "?"}%`;
       return `血量 ${f.hpPct ?? "?"}% 后 3 秒无应对(${outcomeClause},出手者常见应对:${f.refTop ?? ""})`;

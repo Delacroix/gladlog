@@ -445,7 +445,8 @@ describe("crisis-no-response 图例(spec 2026-08-29 §1b,GH #58):条件渲染 + 
             refDeathNoResp: "22",
             refNResp: "62",
             refDeathResp: "8",
-            refOutcome: "ownDeath10s",
+            refOutcome: "this healer died within 10 s",
+            refOutcomeKey: "ownDeath10s",
             refTop: "self-heal 61%; wall 36%",
             cellKey: "3v3|healer|>=20%",
             fellBack: "no",
@@ -480,7 +481,8 @@ describe("crisis-no-response 图例(spec 2026-08-29 §1b,GH #58):条件渲染 + 
             refDeathNoResp: "25",
             refNResp: "62",
             refDeathResp: "15",
-            refOutcome: "teamDeath15s",
+            refOutcome: "a teammate (or the healer) died within 15 s",
+            refOutcomeKey: "teamDeath15s",
             refTop: "self-heal 61%; wall 36%",
             cellKey: "Rated Solo Shuffle|healer|>=20%",
             fellBack: "no",
@@ -490,11 +492,10 @@ describe("crisis-no-response 图例(spec 2026-08-29 §1b,GH #58):条件渲染 + 
       "",
       "Holy Paladin",
     );
-    expect(p).toMatch(/facts\.refOutcome/);
-    expect(p).toMatch(/"ownDeath10s" = this healer died within 10 s/);
-    expect(p).toMatch(
-      /"teamDeath15s" = ANY teammate including the healer died within 15 s/,
-    );
+    expect(p).toMatch(/facts\.refOutcome names the outcome that was counted/);
+    expect(p).toMatch(/"a teammate \(or the healer\) died within 15 s"/);
+    expect(p).toMatch(/"this healer died within 10 s"/);
     expect(p).toMatch(/kill target is often a teammate/);
+    expect(p).toMatch(/never as a code token/);
   });
 });

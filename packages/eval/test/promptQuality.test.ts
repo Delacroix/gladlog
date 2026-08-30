@@ -1,6 +1,9 @@
 import { ensureAnalysisData } from "@gladlog/analysis";
 import { buildMomentSnapshotItems } from "@gladlog/analysis/src/analysis/momentSnapshot";
-import { lookupBehaviorPrior } from "@gladlog/analysis/src/data/behaviorPrior";
+import {
+  lookupBehaviorPrior,
+  outcomePhrase,
+} from "@gladlog/analysis/src/data/behaviorPrior";
 import { CombatUnitReaction } from "@gladlog/parser-compat";
 
 import type { CoverageManifest } from "../src/quality/coverageManifest";
@@ -336,7 +339,8 @@ describe("checkBehaviorPriorConsistency", () => {
       refDeathNoResp: String(ref.deathNoRespPct),
       refNResp: String(ref.nResp),
       refDeathResp: String(ref.deathRespPct),
-      refOutcome: ref.outcome,
+      refOutcome: outcomePhrase(ref.outcome),
+      refOutcomeKey: ref.outcome,
       refTop: ref.top.map(([k, v]) => `${k} ${v}%`).join("; "),
       cellKey: ref.cellKey,
       fellBack: ref.fellBack ? "yes" : "no",
@@ -359,11 +363,19 @@ describe("checkBehaviorPriorConsistency", () => {
     expect(out).toHaveLength(1);
     expect(out[0]).toMatch(/refDeathNoResp/);
   });
-  it("rejects a planted wrong refOutcome (spec §1c)", () => {
+  it("rejects a planted wrong refOutcomeKey (spec §1c)", () => {
     const ref = lookupBehaviorPrior("3v3", "healer", 0.25)!;
     const wrong: "ownDeath10s" | "teamDeath15s" =
       ref.outcome === "ownDeath10s" ? "teamDeath15s" : "ownDeath10s";
-    const out = checkBehaviorPriorConsistency([line({ refOutcome: wrong })]);
+    const out = checkBehaviorPriorConsistency([line({ refOutcomeKey: wrong })]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatch(/refOutcomeKey/);
+  });
+  it("rejects a planted wrong refOutcome phrase (must be outcomePhrase(ref.outcome), never the bare enum token)", () => {
+    const ref = lookupBehaviorPrior("3v3", "healer", 0.25)!;
+    const out = checkBehaviorPriorConsistency([
+      line({ refOutcome: ref.outcome }), // the enum token pasted verbatim — exactly the bug this fixes
+    ]);
     expect(out).toHaveLength(1);
     expect(out[0]).toMatch(/refOutcome/);
   });

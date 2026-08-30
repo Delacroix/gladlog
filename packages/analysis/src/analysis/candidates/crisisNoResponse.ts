@@ -11,7 +11,7 @@
  * numbers, never prescribe from them.
  * Spec: docs/superpowers/specs/2026-08-29-crisis-no-response-design.md.
  */
-import type { BehaviorPriorRef } from "../../data/behaviorPrior";
+import { type BehaviorPriorRef, outcomePhrase } from "../../data/behaviorPrior";
 import type { DecisionPoint } from "../crisisDecisionPoints";
 import { fmtFactNum as fmt } from "../factFormat";
 import type { CandidateEvent } from "../types";
@@ -56,7 +56,8 @@ export function crisisNoResponseEvents(
         refDeathNoResp: String(ref.deathNoRespPct),
         refNResp: String(ref.nResp),
         refDeathResp: String(ref.deathRespPct),
-        refOutcome: ref.outcome,
+        refOutcome: outcomePhrase(ref.outcome), // prose, never the enum token — model pastes this straight into a sentence
+        refOutcomeKey: ref.outcome, // enum, for the gate / desktop branch — never rendered as prose
         refTop: ref.top.map(([k, v]) => `${k} ${v}%`).join("; "), // "; " — ", " is the facts separator the gate splits on
         cellKey: ref.cellKey,
         fellBack: ref.fellBack ? "yes" : "no",

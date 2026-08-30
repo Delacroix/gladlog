@@ -29,7 +29,10 @@
  */
 
 import { ensureAnalysisData } from "@gladlog/analysis";
-import { lookupBehaviorPrior } from "@gladlog/analysis/src/data/behaviorPrior";
+import {
+  lookupBehaviorPrior,
+  outcomePhrase,
+} from "@gladlog/analysis/src/data/behaviorPrior";
 import { classMetadata } from "@gladlog/analysis/src/data/classSpells";
 import { canHelpAnotherUnit } from "@gladlog/analysis/src/utils/cooldowns";
 import fs from "fs-extra";
@@ -623,7 +626,8 @@ export function checkBehaviorPriorConsistency(lines: string[]): string[] {
       refDeathNoResp: String(ref.deathNoRespPct),
       refNResp: String(ref.nResp),
       refDeathResp: String(ref.deathRespPct),
-      refOutcome: ref.outcome,
+      refOutcome: outcomePhrase(ref.outcome),
+      refOutcomeKey: ref.outcome,
       refTop: ref.top.map(([k, v]) => `${k} ${v}%`).join("; "),
       fellBack: ref.fellBack ? "yes" : "no",
     };
