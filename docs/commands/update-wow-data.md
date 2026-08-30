@@ -54,6 +54,8 @@ npx tsx packages/eval/scripts/observedSpellIds.ts \
 #   Regenerate at season start and whenever packages/analysis/src/analysis/crisisDecisionPoints.ts changes.
 #   ~1 h over the archive; run ≤3 shards with nice. Health test: packages/analysis/src/data/behaviorPrior.test.ts
 #   ("every bracket star cell n ≥ 50") goes red when the season is too young — wait for more archive, do not lower the floor.
+#   Rated Solo Shuffle cells count ANY friendly death (owner included) within 15 s instead of the owner's own death
+#   within 10 s (spec §1c) — a healer diving to 40% in Solo Shuffle usually isn't the kill target.
 E=$GLADLOG_EVAL_HOME; R=$E/reports/behavior-prior-$(date +%F); mkdir -p $R
 find $E/corpus/archive-gz -name '*.txt.gz' | sort > $R/manifest.txt
 for i in 0 1 2; do nice -n 10 npx tsx packages/eval/scripts/behaviorPriorScan.ts scan \

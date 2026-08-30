@@ -56,6 +56,7 @@ export function crisisNoResponseEvents(
         refDeathNoResp: String(ref.deathNoRespPct),
         refNResp: String(ref.nResp),
         refDeathResp: String(ref.deathRespPct),
+        refOutcome: ref.outcome,
         refTop: ref.top.map(([k, v]) => `${k} ${v}%`).join("; "), // "; " — ", " is the facts separator the gate splits on
         cellKey: ref.cellKey,
         fellBack: ref.fellBack ? "yes" : "no",

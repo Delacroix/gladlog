@@ -29,6 +29,7 @@ const pt = (over: Partial<DecisionPoint> = {}): DecisionPoint => ({
   feasible: true,
   dangerous: true,
   diedWithin10s: false,
+  friendDiedWithin15s: false,
   ...over,
 });
 const ref = {
@@ -38,6 +39,7 @@ const ref = {
   deathNoRespPct: 22,
   nResp: 62,
   deathRespPct: 8,
+  outcome: "ownDeath10s" as const,
   top: [
     ["selfHeal", 76],
     ["wall", 36],
@@ -64,6 +66,7 @@ describe("crisis-no-response", () => {
       refDeathNoResp: "22",
       refNResp: "62",
       refDeathResp: "8",
+      refOutcome: "ownDeath10s",
       refTop: "selfHeal 76%; wall 36%; control 16%",
       cellKey: "3v3|healer|>=20%",
       fellBack: "no",

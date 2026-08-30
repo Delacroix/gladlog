@@ -445,6 +445,7 @@ describe("crisis-no-response 图例(spec 2026-08-29 §1b,GH #58):条件渲染 + 
             refDeathNoResp: "22",
             refNResp: "62",
             refDeathResp: "8",
+            refOutcome: "ownDeath10s",
             refTop: "self-heal 61%; wall 36%",
             cellKey: "3v3|healer|>=20%",
             fellBack: "no",
@@ -455,7 +456,45 @@ describe("crisis-no-response 图例(spec 2026-08-29 §1b,GH #58):条件渲染 + 
       "Holy Paladin",
     );
     expect(p).toMatch(/"crisis-no-response"/);
-    expect(p).toMatch(/did NOT respond within 3 s died within 10 s/);
+    expect(p).toMatch(/did NOT respond within 3 s saw that outcome/);
     expect(p).toMatch(/not causal proof/);
+  });
+
+  it("图例说明两种结果口径(spec §1c):ownDeath10s = 本人 10 秒内阵亡,teamDeath15s = 含本人在内任意队友 15 秒内阵亡(单排常见击杀目标是队友)", () => {
+    const p = buildFindingsPrompt(
+      [
+        ...candidates,
+        {
+          id: "crisis-no-response:H:2",
+          type: "crisis-no-response",
+          t: 2,
+          unitNames: ["Heals-R"],
+          facts: {
+            t: "2",
+            unit: "Heals-R",
+            hpPct: "38",
+            dmg2sPct: "30",
+            attackers: "1",
+            burst: "no",
+            refNNoResp: "179",
+            refDeathNoResp: "25",
+            refNResp: "62",
+            refDeathResp: "15",
+            refOutcome: "teamDeath15s",
+            refTop: "self-heal 61%; wall 36%",
+            cellKey: "Rated Solo Shuffle|healer|>=20%",
+            fellBack: "no",
+          },
+        },
+      ],
+      "",
+      "Holy Paladin",
+    );
+    expect(p).toMatch(/facts\.refOutcome/);
+    expect(p).toMatch(/"ownDeath10s" = this healer died within 10 s/);
+    expect(p).toMatch(
+      /"teamDeath15s" = ANY teammate including the healer died within 15 s/,
+    );
+    expect(p).toMatch(/kill target is often a teammate/);
   });
 });

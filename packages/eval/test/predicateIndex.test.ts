@@ -1371,6 +1371,7 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
       refDeathNoResp: String(ref!.deathNoRespPct),
       refNResp: String(ref!.nResp),
       refDeathResp: String(ref!.deathRespPct),
+      refOutcome: ref!.outcome,
       refTop: ref!.top.map(([k, v]) => `${k} ${v}%`).join("; "),
       cellKey: ref!.cellKey,
       fellBack: ref!.fellBack ? "yes" : "no",

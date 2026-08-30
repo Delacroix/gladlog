@@ -336,6 +336,7 @@ describe("checkBehaviorPriorConsistency", () => {
       refDeathNoResp: String(ref.deathNoRespPct),
       refNResp: String(ref.nResp),
       refDeathResp: String(ref.deathRespPct),
+      refOutcome: ref.outcome,
       refTop: ref.top.map(([k, v]) => `${k} ${v}%`).join("; "),
       cellKey: ref.cellKey,
       fellBack: ref.fellBack ? "yes" : "no",
@@ -357,6 +358,14 @@ describe("checkBehaviorPriorConsistency", () => {
     ]);
     expect(out).toHaveLength(1);
     expect(out[0]).toMatch(/refDeathNoResp/);
+  });
+  it("rejects a planted wrong refOutcome (spec §1c)", () => {
+    const ref = lookupBehaviorPrior("3v3", "healer", 0.25)!;
+    const wrong: "ownDeath10s" | "teamDeath15s" =
+      ref.outcome === "ownDeath10s" ? "teamDeath15s" : "ownDeath10s";
+    const out = checkBehaviorPriorConsistency([line({ refOutcome: wrong })]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatch(/refOutcome/);
   });
   it("rejects a refTop that is not the table's", () => {
     expect(

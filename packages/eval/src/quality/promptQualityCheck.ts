@@ -623,6 +623,7 @@ export function checkBehaviorPriorConsistency(lines: string[]): string[] {
       refDeathNoResp: String(ref.deathNoRespPct),
       refNResp: String(ref.nResp),
       refDeathResp: String(ref.deathRespPct),
+      refOutcome: ref.outcome,
       refTop: ref.top.map(([k, v]) => `${k} ${v}%`).join("; "),
       fellBack: ref.fellBack ? "yes" : "no",
     };

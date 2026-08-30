@@ -145,11 +145,29 @@ describe("失误引擎(第四阶段③ / backlog #8)— 规则表防腐", () => 
           hpPct: "38",
           refDeathNoResp: "22",
           refDeathResp: "8",
+          refOutcome: "ownDeath10s",
           refTop: "selfHeal 76%; wall 36%",
         },
       } as any),
     ).toBe(
       "血量 38% 后 3 秒无应对(此状态下无应对者 22% 十秒内死亡,有应对者 8%,出手者常见应对:selfHeal 76%; wall 36%)",
+    );
+  });
+
+  it("crisis-no-response (spec §1c): refOutcome=teamDeath15s (Solo Shuffle) renders the team-death wording instead of the own-death wording", () => {
+    expect(
+      candidateDetail({
+        type: "crisis-no-response",
+        facts: {
+          hpPct: "38",
+          refDeathNoResp: "25",
+          refDeathResp: "15",
+          refOutcome: "teamDeath15s",
+          refTop: "selfHeal 75%; wall 23%",
+        },
+      } as any),
+    ).toBe(
+      "血量 38% 后 3 秒无应对(此状态下无应对者 25% 十五秒内我方有人阵亡,有应对者 15%,出手者常见应对:selfHeal 75%; wall 23%)",
     );
   });
 });
