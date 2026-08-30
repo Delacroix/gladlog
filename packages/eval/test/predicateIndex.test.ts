@@ -61,6 +61,7 @@ import * as incomingPressure from "@gladlog/analysis/src/utils/incomingPressure"
 import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWindowTargetSelection";
 import * as losAnalysis from "@gladlog/analysis/src/utils/losAnalysis";
 import * as positionAnalysis from "@gladlog/analysis/src/utils/positionAnalysis";
+import * as rootReachability from "@gladlog/analysis/src/utils/rootReachability";
 import * as positionSampling from "@gladlog/analysis/src/utils/positionSampling";
 import * as rawStreams from "@gladlog/analysis/src/utils/rawStreams";
 import * as renderGrid from "@gladlog/analysis/src/utils/renderGrid";
@@ -352,6 +353,26 @@ const INDEX: PredicateRow[] = [
     mod: killWindowTargetSelection,
   },
   // Position and geometry
+  {
+    file: `${A}/utils/positionAnalysis.ts`,
+    symbol: "CLOSE_RANGE_YARDS",
+    mod: positionAnalysis,
+  },
+  {
+    file: `${A}/utils/positionAnalysis.ts`,
+    symbol: "isDeadAt",
+    mod: positionAnalysis,
+  },
+  {
+    file: `${A}/utils/rootReachability.ts`,
+    symbol: "ROOT_SPELL_IDS",
+    mod: rootReachability,
+  },
+  {
+    file: `${A}/utils/rootReachability.ts`,
+    symbol: "ROOT_UNREACHABLE_MIN_S",
+    mod: rootReachability,
+  },
   {
     file: `${A}/utils/positionSampling.ts`,
     symbol: "LOS_SWEEP_SLACK_S",

@@ -181,4 +181,8 @@
 // behavior-prior scan lands (no `|dps|` cells exist yet, so
 // lookupBehaviorPrior(bracket, "dps", …) always returns null and no DPS
 // crisis-no-response event can fire) → prompt 变 → 旧缓存作废。
-export const PROMPT_VERSION = 41;
+// v42 (2026-08-30): [ROOT] context facts in the timeline (GH #24, user
+// ruling: root value = reachability, not DR) + three legend lines. Only roots
+// whose target could not reach anyone for >= ROOT_UNREACHABLE_MIN_S (3 s)
+// render; no candidate/accusation → prompt 变 → 旧缓存作废。
+export const PROMPT_VERSION = 42;

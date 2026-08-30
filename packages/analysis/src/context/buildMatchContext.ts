@@ -1,7 +1,4 @@
-import {
-  AtomicArenaCombat,
-  ICombatUnit,
-} from "@gladlog/parser-compat";
+import { AtomicArenaCombat, ICombatUnit } from "@gladlog/parser-compat";
 
 import { zoneMetadata } from "../data/zoneMetadata";
 import { buildArchetypeInjectionHeader } from "../utils/archetypeInjection";
@@ -10,9 +7,7 @@ import {
   auditWindowTargeting,
   formatBurstLedgerForContext,
 } from "../utils/burstLedger";
-import {
-  analyzePlayerCCAndTrinket,
-} from "../utils/ccTrinketAnalysis";
+import { analyzePlayerCCAndTrinket } from "../utils/ccTrinketAnalysis";
 import { analyzeCcBreaks } from "../utils/ccBreakAnalysis";
 import { extractStasisEvents } from "../utils/combatStates";
 import {
@@ -39,12 +34,8 @@ import {
   canOffensivePurge,
   reconstructDispelSummary,
 } from "../utils/dispelAnalysis";
-import {
-  analyzeOutgoingCCChains,
-} from "../utils/drAnalysis";
-import {
-  reconstructEnemyCDTimeline,
-} from "../utils/enemyCDs";
+import { analyzeOutgoingCCChains } from "../utils/drAnalysis";
+import { reconstructEnemyCDTimeline } from "../utils/enemyCDs";
 import {
   computeHealerExposureEvents,
   formatEnemyCCKitHeader,
@@ -55,20 +46,14 @@ import {
   formatHealerOffenseForContext,
   HEALER_OFFENSE_FLAGS,
 } from "../utils/healerOffenseAnalysis";
-import {
-  detectHealingGaps,
-} from "../utils/healingGaps";
+import { detectHealingGaps } from "../utils/healingGaps";
 import { analyzeKickAudit } from "../utils/kickAudit";
 import {
   extractKillAttempts,
   formatKillAttemptsForContext,
 } from "../utils/killAttempts";
-import {
-  matchMinHpPct,
-} from "../utils/killWindowTargetSelection";
-import {
-  computeMatchArchetype,
-} from "../utils/matchArchetype";
+import { matchMinHpPct } from "../utils/killWindowTargetSelection";
+import { computeMatchArchetype } from "../utils/matchArchetype";
 import {
   buildOffensiveWasteSummary,
   formatOffensiveWasteForContext,
@@ -78,10 +63,7 @@ import {
   computeOwnerPositionEvents,
   formatPositionEventsForContext,
 } from "../utils/positionAnalysis";
-import {
-  fmtTime,
-  toRenderSecond,
-} from "../utils/renderGrid";
+import { fmtTime, toRenderSecond } from "../utils/renderGrid";
 import {
   benchmarks,
   formatDTPSBaselines,
@@ -94,15 +76,16 @@ import {
   lowPressureUnusedDefensiveNote,
   MITIGATION_AUDIT_INDEPENDENT_NOTE,
 } from "./matchTimelineSections";
-import {
-  DMG_SPIKE_THRESHOLD,
-  mergeTimestampedLines,
-} from "./timelineHelpers";
+import { DMG_SPIKE_THRESHOLD, mergeTimestampedLines } from "./timelineHelpers";
 import {
   buildMatchTimeline,
   BuildMatchTimelineParams,
   buildPlayerLoadout,
 } from "./utils";
+import {
+  computeRootReachability,
+  formatRootReachabilityEntries,
+} from "../utils/rootReachability";
 
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -370,7 +353,6 @@ export function buildMatchContext(
         )
       : null;
 
-
   const matchArchetype = computeMatchArchetype(
     friends as ICombatUnit[],
     enemies as ICombatUnit[],
@@ -409,7 +391,6 @@ export function buildMatchContext(
       enemyTeamSpecs: [],
     },
   );
-
 
   // F15 iterations 1–3: owner engagement-state events from real X/Y coordinates
   // (STAYED_IN / KITED during enemy bursts, MISSED_PUSH, offensive CD out of range,
@@ -531,11 +512,7 @@ export function buildMatchContext(
         enemies as ICombatUnit[],
         combat,
       ),
-      analyzeKickAudit(
-        owner as ICombatUnit,
-        enemies as ICombatUnit[],
-        combat,
-      ),
+      analyzeKickAudit(owner as ICombatUnit, enemies as ICombatUnit[], combat),
     );
     if (ledgerLines.length > 0) {
       tLines.push("");
@@ -617,8 +594,7 @@ export function buildMatchContext(
     const missedExternals =
       deathOutcome.events.find(
         (e) =>
-          e.deadPlayer === victimName &&
-          Math.abs(e.atSeconds - atSeconds) < 1,
+          e.deadPlayer === victimName && Math.abs(e.atSeconds - atSeconds) < 1,
       )?.missedExternals ?? [];
 
     const audit = computeMitigationAudit(victim, combat, deathS);
@@ -694,11 +670,29 @@ export function buildMatchContext(
       line: `${fmtTime(entry.atSeconds)}  ${entry.line}`,
     }),
   );
+  // [ROOT] context facts (GH #24, 2026-08-30): roots whose target could not
+  // reach anyone for >= ROOT_UNREACHABLE_MIN_S. Same merge path as exposure.
+  let rootInserts: Array<{ atSeconds: number; line: string }> = [];
+  try {
+    rootInserts = formatRootReachabilityEntries(
+      computeRootReachability(combat, [
+        ...(friends as ICombatUnit[]),
+        ...(enemies as ICombatUnit[]),
+      ]),
+      owner.id,
+    ).map((entry) => ({
+      atSeconds: entry.atSeconds,
+      line: `${fmtTime(entry.atSeconds)}  ${entry.line}`,
+    }));
+  } catch {
+    /* no positions → no root facts */
+  }
   tLines.push("");
   tLines.push(
-    mergeTimestampedLines(timelineText.split("\n"), exposureInserts).join(
-      "\n",
-    ),
+    mergeTimestampedLines(timelineText.split("\n"), [
+      ...exposureInserts,
+      ...rootInserts,
+    ]).join("\n"),
   );
 
   if (positionLines.length > 0) {
@@ -712,8 +706,7 @@ export function buildMatchContext(
   // appended only on the sparse path below, so the timeline branch never
   // rendered it before returning here (measured in E2E: 139 matches before →
   // 0 after).
-  const deathOutcomeBlockTimeline =
-    formatDeathOutcomeForContext(deathOutcome);
+  const deathOutcomeBlockTimeline = formatDeathOutcomeForContext(deathOutcome);
   if (deathOutcomeBlockTimeline) {
     tLines.push("");
     tLines.push(deathOutcomeBlockTimeline);

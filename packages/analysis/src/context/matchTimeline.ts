@@ -2719,6 +2719,11 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     "    a leading `-<spell>` marks one that just LEFT the ready set. `cd:<spell>(Ns)` = seconds until it returns.",
     "  [DMG SPIKE] `START–END` = the window's exact bounds; its `A% -> B% HP` maps directly to those two timestamps.",
     "  Window durations `(Ns)` are computed from the displayed start/end timestamps, so they always match what you see.",
+    // GH #24 (2026-08-30): roots carry no DR and are not hard CC; a [ROOT]
+    // line appears only when the rooted player could not reach anyone.
+    "  [ROOT] = a root that left its target unable to reach anyone (melee: no enemy in melee range; healer: a damaged",
+    "    ally out of range/LoS; ranged: no enemy in range/LoS) for the stated seconds — only such roots are listed; roots",
+    "    that changed nothing are omitted. Roots have no DR tier and are not hard CC (the rooted player can still cast).",
     "  [OFFENSIVE WINDOW] `X on <unit>` = damage DEALT TO that unit (it is the victim, not the dealer);",
     "    its `peak spike` figure covers the spike's own sub-window, printed after it — not the whole offensive window.",
     "",

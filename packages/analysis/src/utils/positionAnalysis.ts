@@ -41,7 +41,7 @@ import { HEALER_TRAINED_YARDS, INTERP_MAX_GAP_MS } from "./positionSampling";
 //  · RANGED=45 仅 0.6% 采样超过(40yd 也才 1.2%)—— 保守到几乎只剩真离场,
 //    与行尾「35–40 是正常满射程走位」的设计意图一致。
 // 改任何一条前先重跑 scratchpad pos.mts 形态的分布脚本拿前后数字。
-const CLOSE_RANGE_YARDS = 12; // "in range" of an enemy
+export const CLOSE_RANGE_YARDS = 12; // "in range" of an enemy — shared with rootReachability.ts (melee reach)
 const KITE_DELTA_YARDS = 10; // distance gained that counts as a successful kite(p66,见上)
 const STAY_DELTA_YARDS = 5; // distance gained below this = stayed in(p39,见上)
 const MISSED_PUSH_MELEE_YARDS = 20; // melee parked beyond this = disengaged(≈p95,见上)
@@ -169,7 +169,8 @@ interface INearestEnemy {
 /** True when the unit has died at or before the given timestamp. A corpse's
  *  last-known position is returned by getUnitPositionAtTime indefinitely, so
  *  dead enemies must be excluded from distance checks. */
-function isDeadAt(unit: ICombatUnit, tMs: number): boolean {
+/** Shared with rootReachability.ts (2026-08-30). */
+export function isDeadAt(unit: ICombatUnit, tMs: number): boolean {
   return (unit.deathRecords ?? []).some((d) => d.timestamp <= tMs);
 }
 
