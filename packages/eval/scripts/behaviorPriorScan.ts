@@ -23,7 +23,6 @@
  */
 import {
   ensureAnalysisData,
-  extractCandidateFindings,
   isHealerSpec,
   specToString,
 } from "@gladlog/analysis";
@@ -32,6 +31,7 @@ import {
   crisisDecisionPoints,
   DecisionPoint,
 } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
+import type { CrisisRole } from "@gladlog/analysis/src/data/behaviorPrior";
 import { PATCH_121_GOLIVE_EPOCH_MS } from "@gladlog/analysis/src/utils/drAnalysis";
 import { GladLogParser } from "@gladlog/parser";
 import {
@@ -57,11 +57,11 @@ const flag = (f: string): string | undefined => {
 };
 const num = (f: string, d: number): number => Number(flag(f) ?? d);
 /** --role healer (default) | dps : which friendly units become the owner */
-const ROLE = flag("--role") ?? "healer";
+const ROLE: CrisisRole = flag("--role") === "dps" ? "dps" : "healer";
 
 /** one row per DecisionPoint from the shared predicate
  * (crisisDecisionPoints.ts) — the scan no longer computes its own crossing or
- * response logic; it only adds corpus-scan bookkeeping (match/rank/gate). */
+ * response logic; it only adds corpus-scan bookkeeping (match/rank/role). */
 interface Row {
   matchId: string;
   seq: number | null;
@@ -70,8 +70,8 @@ interface Row {
   rating: number | null;
   pct: number | null; // percentile within (bracket, week), 0–100
   spec: string;
+  role: CrisisRole;
   point: DecisionPoint;
-  gateFiredThisRound: boolean; // product death-unused-defensive fired in this round
 }
 
 function isoWeek(ms: number): string {
@@ -147,9 +147,8 @@ function oppsOf(
   pct: number | null,
   matchId: string,
   seq: number | null,
-  gateFired: boolean,
 ): Row[] {
-  return crisisDecisionPoints(owner, legacy).map((point) => ({
+  return crisisDecisionPoints(owner, legacy, ROLE).map((point) => ({
     matchId,
     seq,
     bracket: meta?.bracket ?? legacy.startInfo?.bracket ?? "?",
@@ -157,8 +156,8 @@ function oppsOf(
     rating: meta?.playerTeamRating ?? null,
     pct,
     spec: specToString(owner.spec),
+    role: ROLE,
     point,
-    gateFiredThisRound: gateFired,
   }));
 }
 
@@ -242,14 +241,6 @@ async function scan(): Promise<void> {
           ? friends.filter((u) => !isHealerSpec(u.spec))
           : friends.filter((u) => isHealerSpec(u.spec)).slice(0, 1);
       for (const owner of owners) {
-        let gateFired = false;
-        try {
-          gateFired = extractCandidateFindings(legacy, owner.id).some(
-            (c: any) => c.type === "death-unused-defensive",
-          );
-        } catch {
-          /* keep false */
-        }
         for (const o of oppsOf(
           legacy,
           owner,
@@ -257,7 +248,6 @@ async function scan(): Promise<void> {
           pctOf.get(matchId) ?? null,
           matchId,
           mySeq,
-          gateFired,
         )) {
           lines.push(JSON.stringify(o));
           opps++;
@@ -411,23 +401,11 @@ function report(): void {
       "response mix — feasible, enemy burst CD or ≥2 attackers",
       (r) => r.point.enemyBurst || r.point.attackers2s >= 2,
     );
-
-    // product gate cross-reference
-    lines.push(
-      `\n### product gate cross-reference — rounds where death-unused-defensive fired\n`,
-    );
-    lines.push(
-      `| rank bucket | rounds fired | decision points in those rounds | of which feasible & not responded |`,
-    );
-    lines.push(`|---|---|---|---|`);
-    for (const b of BUCKETS) {
-      const sub = rs.filter(
-        (r) => bucketOfPct(r.pct!) === b && r.gateFiredThisRound,
-      );
-      lines.push(
-        `| ${b} | ${new Set(sub.map((r) => `${r.matchId}#${r.seq}`)).size} | ${sub.length} | ${sub.filter((r) => r.point.feasible && !r.point.responded).length} |`,
-      );
-    }
+    // The "product gate cross-reference" section (rounds where
+    // death-unused-defensive fired) was removed spec §1d, GH #59: the type
+    // it cross-referenced is retired, and computing it re-ran
+    // extractCandidateFindings per owner — the reason the DPS scan (every
+    // non-healer friendly, several owners per round) was 3× slower.
   }
   process.stdout.write(lines.join("\n") + "\n");
 }
@@ -448,7 +426,14 @@ async function emitTable(): Promise<void> {
       matches.add(r.matchId);
       if (r.empty) continue;
       weeks.add(r.week);
-      rows.push({ bracket: r.bracket, pct: r.pct, point: r.point });
+      // Pre-§1d scan output has no `role` field on disk — default it to
+      // "healer" (spec §1d), the only role that existed before this change.
+      rows.push({
+        bracket: r.bracket,
+        role: r.role === "dps" ? "dps" : "healer",
+        pct: r.pct,
+        point: r.point,
+      });
     } catch {
       /* torn */
     }

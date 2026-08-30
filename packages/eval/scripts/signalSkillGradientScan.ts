@@ -234,10 +234,16 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
   }
   // I3: the candidate fires on feasible && dangerous (gate 5, spec §1b) — a
   // feasible-but-not-dangerous point is never an opportunity for it, so
-  // counting `feasible` alone inflates the denominator.
-  e.crisisDecisionPoints = crisisDecisionPoints(owner, legacy).filter(
-    (p) => p.feasible && p.dangerous,
-  ).length;
+  // counting `feasible` alone inflates the denominator. Role (spec §1d, GH
+  // #59) is threaded through even though this scan's owners are all healers
+  // today (line ~315: `friends.find(u => isHealerSpec(u.spec))`) — feeding
+  // gate 3 the wrong role would silently mis-gate `feasible` the day a DPS
+  // owner is added here.
+  e.crisisDecisionPoints = crisisDecisionPoints(
+    owner,
+    legacy,
+    isHealerSpec(owner.spec) ? "healer" : "dps",
+  ).filter((p) => p.feasible && p.dangerous).length;
   return e;
 }
 

@@ -31,18 +31,32 @@
  * say so.
  */
 import type { DecisionPoint } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
-import type { BehaviorPriorOutcome } from "@gladlog/analysis/src/data/behaviorPrior";
+import type {
+  BehaviorPriorOutcome,
+  CrisisRole,
+} from "@gladlog/analysis/src/data/behaviorPrior";
 import { dmgBinOf } from "@gladlog/analysis/src/data/behaviorPrior";
 
-/** Brackets whose cells count any friendly death (spec §1c). Everything else
- * counts the owner's own death. */
+/** Brackets whose cells count any friendly death (spec §1c) — HEALER cells
+ * only (spec §1d, GH #59): a DPS owner is the kill target far more often, so
+ * their cells always count the owner's own death, even in Solo Shuffle. */
 export const TEAM_OUTCOME_BRACKETS = new Set<string>(["Rated Solo Shuffle"]);
-export function outcomeOf(bracket: string): BehaviorPriorOutcome {
-  return TEAM_OUTCOME_BRACKETS.has(bracket) ? "teamDeath15s" : "ownDeath10s";
+export function outcomeOf(
+  bracket: string,
+  role: CrisisRole,
+): BehaviorPriorOutcome {
+  return role === "healer" && TEAM_OUTCOME_BRACKETS.has(bracket)
+    ? "teamDeath15s"
+    : "ownDeath10s";
 }
 
 export interface BehaviorPriorRow {
   bracket: string;
+  /** spec §1d: which population this decision point belongs to. Callers
+   * building rows from pre-§1d JSONL (no `role` field on disk) must default
+   * it to "healer" themselves before constructing this row — this type does
+   * not carry an implicit default. */
+  role: CrisisRole;
   pct: number | null;
   point: DecisionPoint;
 }
@@ -126,19 +140,21 @@ export function buildBehaviorPriorTable(
   meta: BehaviorPriorTable["meta"],
 ): BehaviorPriorTable {
   const groups = new Map<string, DecisionPoint[]>();
-  const bracketOf = new Map<string, string>();
+  const keyMeta = new Map<string, { bracket: string; role: CrisisRole }>();
   for (const r of rows) {
     if (r.pct == null || !r.point.feasible || !r.point.dangerous) continue;
     for (const key of [
-      `${r.bracket}|healer|${dmgBinOf(r.point.dmg2s)}`,
-      `${r.bracket}|healer|*`,
+      `${r.bracket}|${r.role}|${dmgBinOf(r.point.dmg2s)}`,
+      `${r.bracket}|${r.role}|*`,
     ]) {
       (groups.get(key) ?? groups.set(key, []).get(key)!).push(r.point);
-      bracketOf.set(key, r.bracket);
+      keyMeta.set(key, { bracket: r.bracket, role: r.role });
     }
   }
   const cells: Record<string, BehaviorPriorCell> = {};
-  for (const k of [...groups.keys()].sort())
-    cells[k] = cellOf(groups.get(k)!, outcomeOf(bracketOf.get(k)!));
+  for (const k of [...groups.keys()].sort()) {
+    const m = keyMeta.get(k)!;
+    cells[k] = cellOf(groups.get(k)!, outcomeOf(m.bracket, m.role));
+  }
   return { meta, cells };
 }
