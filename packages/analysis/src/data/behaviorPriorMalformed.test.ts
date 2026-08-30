@@ -13,17 +13,35 @@ vi.mock("./behaviorPriorGenerated.json", () => ({
     cells: {
       "3v3|healer|*": {
         nNoResp: NaN,
-        death10NoResp: 0.1,
+        deathNoResp: 0.1,
         nResp: 10,
-        death10Resp: 0.1,
+        deathResp: 0.1,
         top: [],
+        outcome: "ownDeath10s",
       },
       "3v3|healer|>=20%": {
         nNoResp: 999, // passes the n-floor check on its own…
-        death10NoResp: Infinity, // …but this field is malformed
+        deathNoResp: Infinity, // …but this field is malformed
         nResp: 10,
-        death10Resp: 0.1,
+        deathResp: 0.1,
         top: [],
+        outcome: "ownDeath10s",
+      },
+      "3v3|healer|10-20%": {
+        nNoResp: 999,
+        deathNoResp: 0.1,
+        nResp: 10,
+        deathResp: 0.1,
+        top: [],
+        // outcome missing entirely (§1c: fail closed)
+      },
+      "2v2|healer|*": {
+        nNoResp: 999,
+        deathNoResp: 0.1,
+        nResp: 10,
+        deathResp: 0.1,
+        top: [],
+        outcome: "bogus", // §1c: fail closed on an invalid value
       },
     },
   },
@@ -38,5 +56,17 @@ describe("lookupBehaviorPrior — malformed cell (I5)", () => {
   it("returns null when the fine cell passes the n-floor but another field is not finite", async () => {
     const { lookupBehaviorPrior } = await import("./behaviorPrior");
     expect(lookupBehaviorPrior("3v3", "healer", 0.3)).toBeNull();
+  });
+
+  it("returns null when the fine cell's outcome field is missing (spec §1c)", async () => {
+    const { lookupBehaviorPrior } = await import("./behaviorPrior");
+    expect(lookupBehaviorPrior("3v3", "healer", 0.15)).toBeNull();
+  });
+
+  it("returns null when the (star, fallback) cell's outcome field is not a valid literal (spec §1c)", async () => {
+    const { lookupBehaviorPrior } = await import("./behaviorPrior");
+    // 2v2 has only a star cell, no ">=20%" fine cell, so this falls back —
+    // the fallback star cell's invalid outcome must still fail closed.
+    expect(lookupBehaviorPrior("2v2", "healer", 0.3)).toBeNull();
   });
 });

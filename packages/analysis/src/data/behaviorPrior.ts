@@ -18,12 +18,25 @@ export type DmgBin = "<10%" | "10-20%" | ">=20%";
 export function dmgBinOf(dmg2s: number): DmgBin {
   return dmg2s < 0.1 ? "<10%" : dmg2s < 0.2 ? "10-20%" : ">=20%";
 }
+/** Which death predicate a cell's death rates were computed under (spec
+ * §1c): `ownDeath10s` = the owner's own death within 10 s;
+ * `teamDeath15s` = ANY friendly player's death within 15 s (Rated Solo
+ * Shuffle — a healer diving to 40% there usually isn't the kill target, the
+ * cost lands on a teammate instead). Must match
+ * packages/eval/src/explore/behaviorPriorTable.ts's `BehaviorPriorOutcome` —
+ * that module is the table builder, this is the reader, same two literals.
+ */
+export type BehaviorPriorOutcome = "ownDeath10s" | "teamDeath15s";
+function isValidOutcome(v: unknown): v is BehaviorPriorOutcome {
+  return v === "ownDeath10s" || v === "teamDeath15s";
+}
 interface Cell {
   nNoResp: number;
-  death10NoResp: number;
+  deathNoResp: number;
   nResp: number;
-  death10Resp: number;
+  deathResp: number;
   top: [string, number][];
+  outcome: BehaviorPriorOutcome;
 }
 // I5: a cell key existing in the JSON is not proof the cell itself is well
 // formed — index access can still miss (unknown key) or hit a malformed
@@ -46,6 +59,9 @@ export interface BehaviorPriorRef {
   /** among healers who DID respond, the most common answers, shares as int %
    * (no rank filter — the rating line is out entirely, 2026-08-29 amendment) */
   top: [string, number][];
+  /** which death predicate deathNoRespPct/deathRespPct were computed under
+   * (spec §1c) */
+  outcome: BehaviorPriorOutcome;
 }
 const pct = (f: number) => Math.round(f * 100);
 
@@ -60,13 +76,15 @@ export function lookupBehaviorPrior(
   const cell =
     fine && fine.nNoResp >= BEHAVIOR_PRIOR_N_FLOOR ? fine : CELLS[starKey];
   if (!cell) return null;
-  // I5: a malformed cell (non-finite counts) must fail closed, not render
-  // NaN/Infinity into the prompt.
+  // I5: a malformed cell (non-finite counts, or a missing/invalid `outcome`
+  // — spec §1c) must fail closed, not render NaN/Infinity/undefined into the
+  // prompt.
   if (
     !Number.isFinite(cell.nNoResp) ||
-    !Number.isFinite(cell.death10NoResp) ||
+    !Number.isFinite(cell.deathNoResp) ||
     !Number.isFinite(cell.nResp) ||
-    !Number.isFinite(cell.death10Resp)
+    !Number.isFinite(cell.deathResp) ||
+    !isValidOutcome(cell.outcome)
   )
     return null;
   const fellBack = cell !== fine;
@@ -74,9 +92,10 @@ export function lookupBehaviorPrior(
     cellKey: fellBack ? starKey : fineKey,
     fellBack,
     nNoResp: cell.nNoResp,
-    deathNoRespPct: pct(cell.death10NoResp),
+    deathNoRespPct: pct(cell.deathNoResp),
     nResp: cell.nResp,
-    deathRespPct: pct(cell.death10Resp),
+    deathRespPct: pct(cell.deathResp),
     top: cell.top.map(([k, f]) => [k, pct(f)] as [string, number]),
+    outcome: cell.outcome,
   };
 }

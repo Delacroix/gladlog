@@ -8,8 +8,10 @@
  * amended same-day ("不管分数线" — the rating line is out entirely): the
  * reference is OUTCOME-based, not rank-based — "died within 10 s" for ALL
  * ranked (pct != null) players, split by whether they responded
- * (`nNoResp`/`death10NoResp` vs `nResp`/`death10Resp`). `top` (the most
- * common answers) is now ALSO computed over the full `nResp` population —
+ * (`nNoResp`/`deathNoResp` vs `nResp`/`deathResp` — field names as of spec
+ * §1c; §1b's amendment introduced them as `death10NoResp`/`death10Resp`,
+ * renamed when the death predicate stopped being fixed at 10 s). `top` (the
+ * most common answers) is now ALSO computed over the full `nResp` population —
  * there is no rank filter anywhere in this table. `dangerous` (gate 5:
  * dmg2s >= CRISIS_MIN_DMG2S) and `feasible` are applied to every population —
  * a gated point (in CC, locked out, or died in the window) was never a fair
@@ -18,9 +20,26 @@
  * 7.8% responded — flat; >=10% died 22–23%), so both are excluded from the
  * reference the same way the product's `crisis-no-response` candidate
  * excludes them from an accusation.
+ *
+ * Spec §1c (2026-08-29, third ruling): Solo Shuffle's cells count ANY
+ * friendly death (owner included) within 15 s instead of the owner's own
+ * death within 10 s — a healer diving to 40% in Solo Shuffle usually isn't
+ * the kill target (measured: healer-death ÷ crossing 0.11 in Solo vs 0.29 in
+ * 3v3), the cost lands on a teammate instead (no-response → 15s any-friend
+ * death 25% vs 15% for responders, 3,000-match outcome scan). `outcome`
+ * records which predicate a cell used so the renderer and the gate can both
+ * say so.
  */
 import type { DecisionPoint } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
 import { dmgBinOf } from "@gladlog/analysis/src/data/behaviorPrior";
+
+export type BehaviorPriorOutcome = "ownDeath10s" | "teamDeath15s";
+/** Brackets whose cells count any friendly death (spec §1c). Everything else
+ * counts the owner's own death. */
+export const TEAM_OUTCOME_BRACKETS = new Set<string>(["Rated Solo Shuffle"]);
+export function outcomeOf(bracket: string): BehaviorPriorOutcome {
+  return TEAM_OUTCOME_BRACKETS.has(bracket) ? "teamDeath15s" : "ownDeath10s";
+}
 
 export interface BehaviorPriorRow {
   bracket: string;
@@ -30,12 +49,15 @@ export interface BehaviorPriorRow {
 export interface BehaviorPriorCell {
   /** ALL ranked players (pct != null), feasible && dangerous && !responded */
   nNoResp: number;
-  death10NoResp: number;
+  /** death rate under `outcome`'s predicate (spec §1c) */
+  deathNoResp: number;
   /** ALL ranked players, feasible && dangerous && responded — also `top`'s
    * denominator: share of nResp, 2 dp. */
   nResp: number;
-  death10Resp: number;
+  deathResp: number;
   top: [string, number][];
+  /** which death predicate this cell's bracket uses (spec §1c) */
+  outcome: BehaviorPriorOutcome;
 }
 export interface BehaviorPriorTable {
   meta: {
@@ -58,12 +80,29 @@ const RESPONSE_KEYS = [
 export { dmgBinOf };
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
-function deathRate(points: DecisionPoint[]): number {
+function deathRate(
+  points: DecisionPoint[],
+  outcome: BehaviorPriorOutcome,
+): number {
   if (!points.length) return 0;
-  return r2(points.filter((p) => p.diedWithin10s).length / points.length);
+  const died =
+    outcome === "teamDeath15s"
+      ? points.filter(
+          (p) =>
+            // TRANSITIONAL (§1c): remove after the v8 re-scan. v7 scan rows
+            // (packages/eval/scripts/behaviorPriorScan.ts output predating
+            // §1c) don't carry friendDiedWithin15s at all; treat a missing
+            // value as false rather than let it poison the temp table.
+            p.friendDiedWithin15s ?? false,
+        ).length
+      : points.filter((p) => p.diedWithin10s).length;
+  return r2(died / points.length);
 }
 
-function cellOf(all: DecisionPoint[]): BehaviorPriorCell {
+function cellOf(
+  all: DecisionPoint[],
+  outcome: BehaviorPriorOutcome,
+): BehaviorPriorCell {
   const noResp = all.filter((p) => !p.responded);
   const resp = all.filter((p) => p.responded);
   const nResp = resp.length;
@@ -76,10 +115,11 @@ function cellOf(all: DecisionPoint[]): BehaviorPriorCell {
     .map(([k, c]) => [k, nResp ? r2(c / nResp) : 0] as [string, number]);
   return {
     nNoResp: noResp.length,
-    death10NoResp: deathRate(noResp),
+    deathNoResp: deathRate(noResp, outcome),
     nResp,
-    death10Resp: deathRate(resp),
+    deathResp: deathRate(resp, outcome),
     top: counts,
+    outcome,
   };
 }
 export function buildBehaviorPriorTable(
@@ -87,15 +127,19 @@ export function buildBehaviorPriorTable(
   meta: BehaviorPriorTable["meta"],
 ): BehaviorPriorTable {
   const groups = new Map<string, DecisionPoint[]>();
+  const bracketOf = new Map<string, string>();
   for (const r of rows) {
     if (r.pct == null || !r.point.feasible || !r.point.dangerous) continue;
     for (const key of [
       `${r.bracket}|healer|${dmgBinOf(r.point.dmg2s)}`,
       `${r.bracket}|healer|*`,
-    ])
+    ]) {
       (groups.get(key) ?? groups.set(key, []).get(key)!).push(r.point);
+      bracketOf.set(key, r.bracket);
+    }
   }
   const cells: Record<string, BehaviorPriorCell> = {};
-  for (const k of [...groups.keys()].sort()) cells[k] = cellOf(groups.get(k)!);
+  for (const k of [...groups.keys()].sort())
+    cells[k] = cellOf(groups.get(k)!, outcomeOf(bracketOf.get(k)!));
   return { meta, cells };
 }

@@ -28,6 +28,14 @@ describe("behaviorPrior lookup", () => {
     expect(Number.isInteger(ref.deathRespPct)).toBe(true);
     expect(ref.top.every(([, p]) => Number.isInteger(p))).toBe(true);
   });
+  it("outcome (spec §1c): Rated Solo Shuffle counts any friendly death (teamDeath15s), everything else counts the owner's own death (ownDeath10s)", () => {
+    const solo = lookupBehaviorPrior("Rated Solo Shuffle", "healer", 0.3)!;
+    expect(solo.outcome).toBe("teamDeath15s");
+    const threeVThree = lookupBehaviorPrior("3v3", "healer", 0.3)!;
+    expect(threeVThree.outcome).toBe("ownDeath10s");
+    const twoVTwo = lookupBehaviorPrior("2v2", "healer", 0.3)!;
+    expect(twoVTwo.outcome).toBe("ownDeath10s");
+  });
   it("falls back to the star cell when the fine cell's nNoResp is thin, and says so", () => {
     const fine = (raw as any).cells["3v3|healer|<10%"];
     const ref = lookupBehaviorPrior("3v3", "healer", 0.05)!;

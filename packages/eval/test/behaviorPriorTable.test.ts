@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildBehaviorPriorTable,
   dmgBinOf,
+  outcomeOf,
+  TEAM_OUTCOME_BRACKETS,
 } from "../src/explore/behaviorPriorTable";
 
 const point = (over: Record<string, unknown> = {}) => ({
@@ -28,6 +30,7 @@ const point = (over: Record<string, unknown> = {}) => ({
   feasible: true,
   dangerous: true,
   diedWithin10s: false,
+  friendDiedWithin15s: false,
   ...over,
 });
 const meta = {
@@ -82,10 +85,11 @@ describe("buildBehaviorPriorTable", () => {
     const t = buildBehaviorPriorTable(rows, meta);
     const cell = t.cells["3v3|healer|>=20%"]!;
     expect(cell.nNoResp).toBe(2);
-    expect(cell.death10NoResp).toBe(0.5);
+    expect(cell.deathNoResp).toBe(0.5);
     expect(cell.nResp).toBe(1);
-    expect(cell.death10Resp).toBe(0);
+    expect(cell.deathResp).toBe(0);
     expect(cell.top).toEqual([["selfHeal", 1]]); // the single low-pct (20) responder still counts — no rank filter
+    expect(cell.outcome).toBe("ownDeath10s");
     expect(t.cells["3v3|healer|*"]!.nNoResp).toBe(2);
   });
   it("dangerous:false never produces a <10% cell, even when every row is dmg2s<10%", () => {
@@ -157,5 +161,81 @@ describe("buildBehaviorPriorTable", () => {
       ["wall", 0.67],
       ["control", 0.33],
     ]);
+  });
+  it("outcomeOf: Rated Solo Shuffle maps to teamDeath15s, everything else maps to ownDeath10s (spec §1c)", () => {
+    expect(TEAM_OUTCOME_BRACKETS.has("Rated Solo Shuffle")).toBe(true);
+    expect(outcomeOf("Rated Solo Shuffle")).toBe("teamDeath15s");
+    expect(outcomeOf("3v3")).toBe("ownDeath10s");
+    expect(outcomeOf("2v2")).toBe("ownDeath10s");
+    expect(outcomeOf("Rated Battleground")).toBe("ownDeath10s");
+  });
+  it("a Solo Shuffle cell counts deaths via friendDiedWithin15s (ignoring diedWithin10s); a 3v3 cell counts via diedWithin10s (ignoring friendDiedWithin15s); outcome is stamped on both", () => {
+    const soloRows = [
+      {
+        bracket: "Rated Solo Shuffle",
+        pct: 95,
+        point: point({
+          responded: false,
+          diedWithin10s: true, // must be IGNORED for a Solo cell
+          friendDiedWithin15s: false,
+        }),
+      },
+      {
+        bracket: "Rated Solo Shuffle",
+        pct: 50,
+        point: point({
+          responded: false,
+          diedWithin10s: false,
+          friendDiedWithin15s: true,
+        }),
+      },
+    ];
+    const solo = buildBehaviorPriorTable(soloRows, meta);
+    const soloCell = solo.cells["Rated Solo Shuffle|healer|>=20%"]!;
+    expect(soloCell.outcome).toBe("teamDeath15s");
+    expect(soloCell.nNoResp).toBe(2);
+    expect(soloCell.deathNoResp).toBe(0.5); // 1 of 2 by friendDiedWithin15s, not diedWithin10s (which would give 0.5 too by coincidence of counts, but the *identity* differs — see the isolated case below)
+
+    // isolate the predicate choice: diedWithin10s says "both died", friendDiedWithin15s says "neither did"
+    const soloIsolated = [
+      {
+        bracket: "Rated Solo Shuffle",
+        pct: 95,
+        point: point({
+          responded: false,
+          diedWithin10s: true,
+          friendDiedWithin15s: false,
+        }),
+      },
+      {
+        bracket: "Rated Solo Shuffle",
+        pct: 50,
+        point: point({
+          responded: false,
+          diedWithin10s: true,
+          friendDiedWithin15s: false,
+        }),
+      },
+    ];
+    const soloIsolatedCell = buildBehaviorPriorTable(soloIsolated, meta).cells[
+      "Rated Solo Shuffle|healer|>=20%"
+    ]!;
+    expect(soloIsolatedCell.deathNoResp).toBe(0); // diedWithin10s is all true but must be ignored
+
+    const teamRows = [
+      {
+        bracket: "3v3",
+        pct: 95,
+        point: point({
+          responded: false,
+          diedWithin10s: true,
+          friendDiedWithin15s: false, // must be IGNORED for a non-Solo cell
+        }),
+      },
+    ];
+    const team = buildBehaviorPriorTable(teamRows, meta);
+    const teamCell = team.cells["3v3|healer|>=20%"]!;
+    expect(teamCell.outcome).toBe("ownDeath10s");
+    expect(teamCell.deathNoResp).toBe(1);
   });
 });
