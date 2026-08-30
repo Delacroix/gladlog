@@ -361,15 +361,6 @@ export function extractCandidateFindings(
     }
   }
 
-  // spec §4: keep death-unused-defensive, but mark it when a crisis-no-response
-  // fired ≤10 s before the death so the two can be compared side by side (GH #58).
-  const crises = out.filter((c) => c.type === "crisis-no-response");
-  for (const d of out) {
-    if (d.type !== "death-unused-defensive") continue;
-    if (crises.some((c) => c.t <= d.t && d.t - c.t <= 10))
-      d.facts.precededBy = "crisis-no-response";
-  }
-
   return out;
 }
 
@@ -2188,14 +2179,16 @@ function extractDeathSetups(
         }
       }
       out.push(...deathSetupEvents(parts));
-      out.push(
-        ...deathUnusedDefensiveEvents(
-          parts,
-          { isOwner: u.id === ownerId, unit: u },
-          combat,
-          rawStreams,
-        ),
-      );
+      // death-unused-defensive 已退役(GH #58,用户裁定 2026-08-29,v38):
+      // 它的指控「你死时减伤是好的却没按」在语料里是高手多数时候也不做的事
+      // (自由态前 10% 治疗按个人减伤仅 19–36%),54% 的出面列的还是宁静/
+      // 神圣赞美诗这类非个人减伤;真正有分段梯度的错误是「危机 3 秒无应对」,
+      // 由 crisis-no-response(不以死亡为锚、承伤 ≥10%、结果参照)接替。
+      // 死亡时哪些减伤可用的事实仍由时间线 [DEATH] 行的 (Unused: …) 供给模型;
+      // 纯函数 deathUnusedDefensiveEvents 与测试保留(照 cc-locked #14 先例,
+      // 缓存 findings 仍要能渲染)。
+      void deathUnusedDefensiveEvents;
+      void rawStreams; // was threaded only to the retired producer
       if (ownerUnit && ownerUnit.id !== u.id) {
         try {
           out.push(

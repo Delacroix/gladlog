@@ -88,12 +88,9 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     severity: "average",
     source: "dispel",
   },
-  {
-    type: "death-unused-defensive",
-    label: "死亡时保命技可用未按",
-    severity: "major",
-    source: "candidate",
-  },
+  // death-unused-defensive: RETIRED 2026-08-29(GH #58,用户裁定)—— 由
+  // crisis-no-response 接替;规则移入 IGNORED_CANDIDATE_TYPES,candidateDetail
+  // 分支保留供缓存回合渲染。
   {
     // Task 5 (spec 2026-08-29, healer-only): own HP crossed a crisis threshold
     // and nothing answered it for 3s while free to act. severity=major, same
@@ -248,6 +245,9 @@ export const IGNORED_CANDIDATE_TYPES: ReadonlySet<string> = new Set([
   "cc-locked",
   "kick-eaten",
   "wasted-trinket",
+  // death-unused-defensive retired 2026-08-29 (GH #58) — superseded by
+  // crisis-no-response; entry kept for cached rounds.
+  "death-unused-defensive",
   // dr-clipped-cc retired 2026-08-20 (GH #17) — entry kept for cached rounds,
   // same as the retirees above.
   "dr-clipped-cc",

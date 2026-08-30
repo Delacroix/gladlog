@@ -124,7 +124,7 @@ describe("extractCandidateFindings", () => {
     ).toEqual([]);
   });
 
-  it("agy flash 复核采纳:不传 ownerId(缺省回退友方治疗)时,治疗自己死亡且有可用保命技 → death-unused-defensive 仍出现(此前原始 ownerId 被直接转发给 extractDeathSetups,isOwner 恒 false,该类型永不产出)", () => {
+  it("death-unused-defensive 已退役(GH #58,2026-08-29):即使走缺省 owner 回退、治疗自己死亡且有可用保命技,菜单也不再产出它(纯函数 deathUnusedDefensiveEvents 另有测试)", () => {
     // Priest_Holy (a healer, the fallback target), with Ultimate Penitence
     // (421453, 240s CD, Defensive and not throughput — the second spell that
     // extractMajorCooldowns dynamically appends for Priest, not in the talent
@@ -171,10 +171,7 @@ describe("extractCandidateFindings", () => {
     };
     const evts = extractCandidateFindings(c); // no ownerId passed
     const found = evts.find((ev) => ev.type === "death-unused-defensive");
-    expect(found).toBeTruthy();
-    expect(found!.facts["unit"]).toBe("Healer-R");
-    expect(found!.facts["walls"]).toContain("Ultimate Penitence");
-    expect(found!.facts["free"]).toBe("yes");
+    expect(found).toBeUndefined();
   });
 
   it("信号扩容批 1(2026-08-06)接线冒烟:无位置数据 + 无 CC 大招 kit 的普通治疗轮 → position-mistake/cc-held 零产出,不崩溃(三态兑现在整条流水线上,不只在纯函数里)", () => {
@@ -1128,10 +1125,10 @@ describe("crisis-no-response wiring(菜单接线 + death-unused-defensive preced
     expect(ev[0]!.facts.cellKey.startsWith("3v3|healer|")).toBe(true);
   });
 
-  it("a death-unused-defensive within 10 s after it is marked precededBy", () => {
+  it("death-unused-defensive is no longer emitted alongside it (retired GH #58, 2026-08-29) — no precededBy marking remains", () => {
     const all = extractCandidateFindings(fixture({ hDeathT: 9 }), "H");
     const dud = all.find((c) => c.type === "death-unused-defensive");
-    expect(dud?.facts.precededBy).toBe("crisis-no-response");
+    expect(dud).toBeUndefined();
   });
 
   it("DPS owner: never emitted (v1 healer-only)", () => {
