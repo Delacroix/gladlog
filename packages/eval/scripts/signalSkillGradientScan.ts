@@ -31,7 +31,11 @@ import {
   specToString,
 } from "@gladlog/analysis";
 import { crisisDecisionPoints } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
-import { extractMajorCooldowns } from "@gladlog/analysis/src/utils/cooldowns";
+import {
+  cdAvailableAt,
+  extractMajorCooldowns,
+} from "@gladlog/analysis/src/utils/cooldowns";
+import { reconstructEnemyCDTimeline } from "@gladlog/analysis/src/utils/enemyCDs";
 import {
   getDispelType,
   PURGE_BLOCKLIST,
@@ -115,6 +119,7 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
     teamOffensiveCdCasts: 0,
     enemyCyclones: 0,
     crisisDecisionPoints: 0,
+    ccBurstOpportunities: 0,
   };
   const friendIds = new Set(friends.map((u) => u.id));
   for (const u of Object.values(legacy.units ?? {}) as any[]) {
@@ -326,6 +331,42 @@ async function scan(): Promise<void> {
       } catch {
         continue;
       }
+      const exposure = exposureOf(legacy, owner, friends);
+      // cc-held-burst (2026-08-29, GH #50 (a)): opportunity = a friendly aligned
+      // burst window opening while the owner has a CC major available;
+      // unconverted = no own CC (ccSpellIds) SPELL_CAST_SUCCESS in
+      // [open - 2 s, open + 5 s]. Scan-side signal, no candidate involved.
+      try {
+        const enemies = players.filter(
+          (u) => u.reaction !== CombatUnitReaction.Friendly,
+        );
+        const bursts =
+          reconstructEnemyCDTimeline(friends, legacy, owner, enemies)
+            .alignedBurstWindows ?? [];
+        const ccMajors = extractMajorCooldowns(owner, legacy).filter((cd) =>
+          ccSpellIds.has(cd.spellId),
+        );
+        const ownCcCasts = (owner.spellCastEvents ?? [])
+          .filter(
+            (c: any) =>
+              c.logLine?.event === "SPELL_CAST_SUCCESS" &&
+              ccSpellIds.has(String(c.spellId)),
+          )
+          .map((c: any) => (c.timestamp - legacy.startTime) / 1000);
+        let held = 0;
+        for (const w of bursts) {
+          const t = w.fromSeconds;
+          if (!ccMajors.some((cd) => cdAvailableAt(cd, t))) continue;
+          exposure.ccBurstOpportunities++;
+          if (!ownCcCasts.some((c: number) => c >= t - 2 && c <= t + 5)) held++;
+        }
+        if (held > 0) {
+          counts["cc-held-burst"] = held;
+          fired = Object.keys(counts);
+        }
+      } catch {
+        /* no burst timeline → 0 opportunities, round drops out of that denominator */
+      }
       const rec: RoundRecord = {
         matchId,
         seq: mySeq,
@@ -338,7 +379,7 @@ async function scan(): Promise<void> {
         durationS: (legacy.endTime - legacy.startTime) / 1000,
         fired,
         counts,
-        exposure: exposureOf(legacy, owner, friends),
+        exposure,
       };
       lines.push(JSON.stringify(rec));
       rounds++;

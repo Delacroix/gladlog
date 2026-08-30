@@ -41,6 +41,7 @@ const rec = (
     teamOffensiveCdCasts: 0,
     enemyCyclones: 0,
     crisisDecisionPoints: 0,
+    ccBurstOpportunities: 0,
     ...exposure,
   },
 });
