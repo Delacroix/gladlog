@@ -593,9 +593,11 @@ export function checkHealedThroughConsistency(lines: string[]): string[] {
 }
 
 /** crisis-no-response: every rendered reference number must be exactly what
- * lookupBehaviorPrior returns for the line's own bracket/dmg2s (spec §5) —
- * the analysis side and this gate share the lookup, so any drift is a bug in
- * the producer's formatting, not a judgement call. */
+ * lookupBehaviorPrior returns for the line's own bracket/role/dmg2s (spec
+ * §5, role dimension spec §1d GH #59) — the analysis side and this gate
+ * share the lookup, so any drift is a bug in the producer's formatting, not
+ * a judgement call. Role is derived from the rendered `cellKey` itself
+ * (`${bracket}|${role}|${dmgBin}`), never assumed to be "healer". */
 export function checkBehaviorPriorConsistency(lines: string[]): string[] {
   const failures: string[] = [];
   for (let i = 0; i < lines.length; i++) {
@@ -612,8 +614,21 @@ export function checkBehaviorPriorConsistency(lines: string[]): string[] {
       failures.push(`line ${i + 1}: crisis-no-response 行缺 dmg2sPct`);
       continue;
     }
-    const bracket = (f.cellKey ?? "").split("|")[0] ?? "";
-    const ref = lookupBehaviorPrior(bracket, "healer", dmg2s / 100);
+    const cellKeyParts = (f.cellKey ?? "").split("|");
+    const bracket = cellKeyParts[0] ?? "";
+    // Role travels inside cellKey itself (spec §1d, GH #59: `${bracket}|
+    // ${role}|${dmgBin}`) — derive it from the rendered fact rather than
+    // hardcoding "healer", and reject anything that isn't a known role so a
+    // corrupted/renamed cellKey fails closed instead of silently looking up
+    // the wrong population.
+    const role = cellKeyParts[1] ?? "";
+    if (role !== "healer" && role !== "dps") {
+      failures.push(
+        `line ${i + 1}: crisis-no-response cellKey 里的 role「${role}」不是 healer/dps(${f.cellKey ?? ""})`,
+      );
+      continue;
+    }
+    const ref = lookupBehaviorPrior(bracket, role, dmg2s / 100);
     if (!ref) {
       failures.push(
         `line ${i + 1}: crisis-no-response 引用了表里不存在的赛制 ${bracket}`,
