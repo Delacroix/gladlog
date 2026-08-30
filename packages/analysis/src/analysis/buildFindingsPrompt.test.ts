@@ -445,7 +445,7 @@ describe("crisis-no-response 图例(spec 2026-08-29 §1b,GH #58):条件渲染 + 
             refDeathNoResp: "22",
             refNResp: "62",
             refDeathResp: "8",
-            refOutcome: "this healer died within 10 s",
+            refOutcome: "this player died within 10 s",
             refOutcomeKey: "ownDeath10s",
             refTop: "self-heal 61%; wall 36%",
             cellKey: "3v3|healer|>=20%",
@@ -457,7 +457,17 @@ describe("crisis-no-response 图例(spec 2026-08-29 §1b,GH #58):条件渲染 + 
       "Holy Paladin",
     );
     expect(p).toMatch(/"crisis-no-response"/);
-    expect(p).toMatch(/did NOT respond within 3 s saw that outcome/);
+    expect(p).toMatch(
+      /Players of the same role in this bracket who did NOT respond within 3 s saw that outcome/,
+    );
+    expect(p).toMatch(/players of the same role who DID respond saw it/);
+    expect(p).toMatch(/Among players of the same role who DID respond here/);
+    expect(p).not.toMatch(/healers who did NOT respond/);
+    expect(p).not.toMatch(/healers who DID respond/);
+    expect(p).not.toMatch(/Among healers who DID respond/);
+    expect(p).toMatch(
+      /For DPS the counted outcome is always "this player died within 10 s" \(DPS are the kill target\); for healers in Solo Shuffle it is a teammate's death within 15 s\./,
+    );
     expect(p).toMatch(/not causal proof/);
   });
 
@@ -494,7 +504,7 @@ describe("crisis-no-response 图例(spec 2026-08-29 §1b,GH #58):条件渲染 + 
     );
     expect(p).toMatch(/facts\.refOutcome names the outcome that was counted/);
     expect(p).toMatch(/"a teammate \(or the healer\) died within 15 s"/);
-    expect(p).toMatch(/"this healer died within 10 s"/);
+    expect(p).toMatch(/"this player died within 10 s"/);
     expect(p).toMatch(/kill target is often a teammate/);
     expect(p).toMatch(/never as a code token/);
   });

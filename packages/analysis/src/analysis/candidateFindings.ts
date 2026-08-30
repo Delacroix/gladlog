@@ -2012,19 +2012,37 @@ function teamPlayEvents(
     }
   }
 
-  // crisis-no-response (spec 2026-08-29): healer-owner rounds only — the DPS
-  // "no response" rate is flat across rank brackets (5,613-match partial),
-  // so there is no baseline to accuse against. Same predicate as the eval
-  // behavior-prior scan (crisisDecisionPoints) and same lookup as the gate.
+  // crisis-no-response: same predicate as the eval behavior-prior scan
+  // (crisisDecisionPoints) and same lookup as the gate, keyed by role (spec
+  // §1d, GH #59). Healer and DPS owners each get their own role-tagged
+  // decision points and reference lookup.
   if (isHealerSpec(owner.spec)) {
     try {
       const bracket: string = combat?.startInfo?.bracket ?? "";
       out.push(
         ...crisisNoResponseEvents(
-          crisisDecisionPoints(owner, combat),
+          crisisDecisionPoints(owner, combat, "healer"),
           owner,
           bracket,
           { lookup: (dmg2s) => lookupBehaviorPrior(bracket, "healer", dmg2s) },
+        ),
+      );
+    } catch {
+      /* decision points not computable → type absent */
+    }
+  } else {
+    // DPS side of the same signal (spec §1d): until the DPS behavior-prior
+    // scan lands, behaviorPriorGenerated.json carries no `|dps|` cells, so
+    // lookupBehaviorPrior always returns null here and crisisNoResponseEvents
+    // emits nothing — byte-identical product output until that data exists.
+    try {
+      const bracket: string = combat?.startInfo?.bracket ?? "";
+      out.push(
+        ...crisisNoResponseEvents(
+          crisisDecisionPoints(owner, combat, "dps"),
+          owner,
+          bracket,
+          { lookup: (dmg2s) => lookupBehaviorPrior(bracket, "dps", dmg2s) },
         ),
       );
     } catch {

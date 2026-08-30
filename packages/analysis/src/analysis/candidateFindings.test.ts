@@ -49,6 +49,8 @@ import {
   unsyncedBurstEvents,
   wastedTrinketEvents,
 } from "./candidateFindings";
+import { crisisNoResponseEvents } from "./candidates/crisisNoResponse";
+import { crisisDecisionPoints } from "./crisisDecisionPoints";
 
 // Synthetic combat: one Friendly death + one Hostile death. spec "256" is
 // Priest_Discipline (a healer) with reaction 1 (Friendly).
@@ -1095,6 +1097,14 @@ describe("crisis-no-response wiring(菜单接线 + death-unused-defensive preced
               : [],
           info: { teamId: "0", pvpTalents: ["22812"] },
         },
+        // E1 is also given its own feasible & dangerous crisis crossing
+        // (spec §1d, GH #59): HP 100→70→38→35 at 0/1/2/3s from a single
+        // 30-dmg hit at 1.5s (dmg2s=0.30, same shape as H's), no
+        // casts/CC/root/self-heal in the response window → unanswered. No
+        // `class`/talent/pvp-talent data resolves to a real Defensive/Control
+        // major CD for it, so wallReady=controlReady=false and it is never
+        // rooted either — hasTool=true trivially via `!rooted`, so this
+        // crossing is feasible regardless of gate 3.
         E1: {
           id: "E1",
           name: "E1",
@@ -1102,8 +1112,20 @@ describe("crisis-no-response wiring(菜单接线 + death-unused-defensive preced
           reaction: 2,
           spec: "577", // Demon_Hunter_Havoc — non-healer
           class: CombatUnitClass.DemonHunter,
-          advancedActions: [],
-          damageIn: [],
+          advancedActions: [
+            hp(0, 100),
+            hp(1000, 70),
+            hp(2000, 38),
+            hp(3000, 35),
+          ],
+          damageIn: [
+            {
+              timestamp: T0 + 1500,
+              srcUnitId: "H",
+              amount: -30,
+              effectiveAmount: -30,
+            },
+          ],
           healIn: [],
           spellCastEvents: [],
           auraEvents: [],
@@ -1131,11 +1153,36 @@ describe("crisis-no-response wiring(菜单接线 + death-unused-defensive preced
     expect(dud).toBeUndefined();
   });
 
-  it("DPS owner: never emitted (v1 healer-only)", () => {
+  it("DPS owner: feasible & dangerous crossing exists but no dps reference cell exists yet in behaviorPriorGenerated.json, so lookupBehaviorPrior returns null and the wiring emits nothing — byte-identical DPS output until the dps scan lands (spec §1d)", () => {
     const ev = extractCandidateFindings(fixture(), "E1").filter(
       (c) => c.type === "crisis-no-response",
     );
     expect(ev).toEqual([]);
+  });
+
+  it("DPS owner: the producer fires when given a non-null reference (crisisDecisionPoints role='dps' feeding crisisNoResponseEvents directly, mirroring the candidateFindings.ts DPS branch's shape)", () => {
+    const f = fixture();
+    const points = crisisDecisionPoints(f.units.E1, f, "dps");
+    const eligible = points.filter(
+      (p: any) => p.feasible && p.dangerous && !p.responded,
+    );
+    expect(eligible).toHaveLength(1);
+    const fakeRef = {
+      cellKey: "3v3|dps|>=20%",
+      fellBack: false,
+      nNoResp: 40,
+      deathNoRespPct: 18,
+      nResp: 25,
+      deathRespPct: 8,
+      outcome: "ownDeath10s" as const,
+      top: [["control", 30]] as [string, number][],
+    };
+    const ev = crisisNoResponseEvents(points, { id: "E1", name: "E1" }, "3v3", {
+      lookup: () => fakeRef,
+    });
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.type).toBe("crisis-no-response");
+    expect(ev[0]!.facts.cellKey).toBe("3v3|dps|>=20%");
   });
 });
 

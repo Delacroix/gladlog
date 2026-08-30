@@ -170,4 +170,15 @@
 // into prose; the enum travels separately as facts.refOutcomeKey for the
 // gate/desktop branch. Legend wording changed to match → prompt 变 → 旧缓存
 // 作废。
-export const PROMPT_VERSION = 40;
+// v41 (2026-08-29): crisis-no-response DPS role dimension (spec §1d, GH
+// #59) — the legend's "healers who did/did not respond…" wording became
+// role-neutral ("players of the same role in this bracket who did/did not
+// respond…") and gained a sentence explaining the DPS vs. healer outcome
+// split; OUTCOME_PHRASE.ownDeath10s changed from "this healer died within
+// 10 s" to "this player died within 10 s" (it is now also the outcome for
+// every DPS crossing, not just a healer's non-Solo-Shuffle one). Product
+// output is otherwise unchanged for existing healer rounds until the dps
+// behavior-prior scan lands (no `|dps|` cells exist yet, so
+// lookupBehaviorPrior(bracket, "dps", …) always returns null and no DPS
+// crisis-no-response event can fire) → prompt 变 → 旧缓存作废。
+export const PROMPT_VERSION = 41;
