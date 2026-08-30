@@ -39,6 +39,19 @@
 - **单排照发**:不再因分段梯度平而排除;结果对照在单排也成立与否由表里的数字自己说话。
 - `DecisionPoint` 增加 `diedWithin10s`(仅供建表;产品出面逻辑**不得**读它——不看结果的红线不变)。
 
+## 1c. 修订(2026-08-29 第三次裁定):单排的结果口径按全队算
+
+结果分析(3,000 场)显示单排的对照最弱(无应对 13% vs 有应对 6%),原因不是判定错:单排里治疗跌到 40% 通常不是击杀企图
+(治疗死亡 ÷ 穿越 0.11 vs 3v3 0.29),代价常落到**队友**(无应对后 15 秒内队友死 10% vs 6%;全队任何人死 25% vs 15%)。
+用户:「单排可以把所有人算进去」。
+
+- `DecisionPoint` 增加 `friendDiedWithin15s`(我方任何人,含自己,15 秒内死;**仅供建表**,producer 不得读)。
+- 表格每格增加 `outcome: "ownDeath10s" | "teamDeath15s"`,由赛制决定:Rated Solo Shuffle → `teamDeath15s`,其余 → `ownDeath10s`;
+  `death10NoResp/death10Resp` 语义随之为「该口径下的死亡率」(字段名改为 `deathNoResp/deathResp`)。
+- facts 增加 `refOutcome`;legend 解释两种口径;门规同时比对 `refOutcome`。结论句(单排):
+  > …这种状态下没应对的治疗,15 秒内**我方有人阵亡** 25%;出手的 15%;出手者常见应对……
+- 谓词改动 → 表必须重扫重生成(§2 红线)。
+
 ## 2. 决策点谓词(分析与扫描共享)
 
 新文件 `packages/analysis/src/analysis/crisisDecisionPoints.ts`,纯函数:
