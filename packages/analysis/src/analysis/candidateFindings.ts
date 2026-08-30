@@ -1991,10 +1991,13 @@ function teamPlayEvents(
 
   // cc-held (COOLDOWN-001, 2026-08-06): pure filter over ownerCds, already
   // computed once by the caller (extractCandidateFindings) — no re-fetch.
-  try {
-    out.push(...ccHeldEvents(ownerCds, owner));
-  } catch {
-    /* same as above */
+  // Demoted 2026-08-29 (GH #50 (d), flag ledger in docs/predicate-index.md).
+  if (CANDIDATE_TYPE_FLAGS.ccHeld) {
+    try {
+      out.push(...ccHeldEvents(ownerCds, owner));
+    } catch {
+      /* same as above */
+    }
   }
 
   // healing-gap (HEAL-001, 2026-08-06): healer-owner rounds only — mirrors

@@ -102,6 +102,12 @@ const EXTERNAL_IDS = new Set<string>(
 );
 const CYCLONE_ID = "33786";
 
+// cc-held-burst conversion window around a burst opening. The pre-window is
+// overridable for the GH #50 variant probe ("did the CC land before the burst
+// as setup?"); the default is the landed definition.
+const CC_HELD_PRE_S = Number(process.env.CC_HELD_PRE_S ?? 2);
+const CC_HELD_POST_S = Number(process.env.CC_HELD_POST_S ?? 5);
+
 function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
   const e: RoundExposure = {
     rounds: 1,
@@ -358,7 +364,12 @@ async function scan(): Promise<void> {
           const t = w.fromSeconds;
           if (!ccMajors.some((cd) => cdAvailableAt(cd, t))) continue;
           exposure.ccBurstOpportunities++;
-          if (!ownCcCasts.some((c: number) => c >= t - 2 && c <= t + 5)) held++;
+          if (
+            !ownCcCasts.some(
+              (c: number) => c >= t - CC_HELD_PRE_S && c <= t + CC_HELD_POST_S,
+            )
+          )
+            held++;
         }
         if (held > 0) {
           counts["cc-held-burst"] = held;
