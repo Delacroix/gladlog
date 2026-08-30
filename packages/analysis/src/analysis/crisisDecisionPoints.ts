@@ -52,6 +52,16 @@ export const CRISIS_MIN_DMG2S = 0.1;
  * NEVER read `diedWithin10s` — only the reference-table builder
  * (packages/eval/src/explore/behaviorPriorTable.ts) does. */
 export const DEATH_LOOKAHEAD_MS = 10_000;
+/** Table-only outcome window (spec §1c, Solo Shuffle only): did ANY friendly
+ * player — same `reaction` as the owner, owner included — have a
+ * `deathRecords` entry within this many ms after the crossing? A healer
+ * diving to 40% in Solo Shuffle usually isn't the kill target (measured:
+ * healer-death ÷ crossing is 0.11 in Solo vs 0.29 in 3v3); the cost lands on
+ * a teammate instead, so the reference-table builder counts the whole team
+ * for Solo cells. The producer (candidates/crisisNoResponse.ts) must NEVER
+ * read `friendDiedWithin15s` — only the reference-table builder
+ * (packages/eval/src/explore/behaviorPriorTable.ts) does. */
+export const TEAM_DEATH_LOOKAHEAD_MS = 15_000;
 const POS_TOLERANCE_MS = 1500;
 const ATTACKER_POS_TOLERANCE_MS = 2500;
 
@@ -88,6 +98,10 @@ export interface DecisionPoint {
   /** OUTCOME — for the reference table only (packages/eval's
    * behaviorPriorTable.ts). The producer must never read this field. */
   diedWithin10s: boolean;
+  /** OUTCOME (spec §1c, Solo Shuffle) — for the reference table only
+   * (packages/eval's behaviorPriorTable.ts). The producer must never read
+   * this field. */
+  friendDiedWithin15s: boolean;
 }
 
 const PERSONAL_WALL_IDS = new Set<string>(
@@ -210,6 +224,17 @@ export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
   const friendIds = new Set(
     players.filter((u) => u.reaction === owner.reaction).map((u) => u.id),
   );
+  // Spec §1c: Solo Shuffle's outcome cells count ANY friendly death, owner
+  // included — so this collects deathRecords across every friendly player,
+  // not just the owner's own (which `deaths` below still does, for
+  // diedInWindow / diedWithin10s).
+  const friendDeaths: number[] = [];
+  for (const u of players) {
+    if (!friendIds.has(u.id)) continue;
+    for (const d of (u.deathRecords ?? []) as any[]) {
+      friendDeaths.push(d.timestamp as number);
+    }
+  }
   const unitById = new Map(units.map((u) => [u.id, u]));
   const enemySamples = new Map<string, Sample[]>();
 
@@ -328,6 +353,12 @@ export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
     const diedWithin10s = deaths.some(
       (d) => d > t && d <= t + DEATH_LOOKAHEAD_MS,
     );
+    // Table-only outcome (spec §1c): same (t, t+…] shape as diedWithin10s,
+    // wider horizon, and across every friendly player instead of just the
+    // owner.
+    const friendDiedWithin15s = friendDeaths.some(
+      (d) => d > t && d <= t + TEAM_DEATH_LOOKAHEAD_MS,
+    );
     const responded =
       responses.selfHeal ||
       responses.wall ||
@@ -348,6 +379,7 @@ export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
       diedInWindow,
       dangerous,
       diedWithin10s,
+      friendDiedWithin15s,
       responses,
       responded,
       selfHealPct: Math.round(selfHeal * 100),

@@ -7,6 +7,7 @@ import {
   crisisDecisionPoints,
   DEATH_LOOKAHEAD_MS,
   RESPONSE_WINDOW_MS,
+  TEAM_DEATH_LOOKAHEAD_MS,
 } from "./crisisDecisionPoints";
 
 const T0 = 1_000_000;
@@ -345,6 +346,43 @@ describe("crisisDecisionPoints", () => {
     expect(
       crisisDecisionPoints(none, combat(none, [enemy()]))[0]!.diedWithin10s,
     ).toBe(false);
+  });
+
+  it("friendDiedWithin15s (table-only outcome, spec §1c): true when any friendly player's deathRecords entry — owner's own death included — lies in (t, t+15000]; an enemy-only death does not count", () => {
+    expect(TEAM_DEATH_LOOKAHEAD_MS).toBe(15_000);
+    const t = T0 + 2000; // the crossing timestamp for the default unit()
+
+    const mate = {
+      ...enemy("M1"),
+      reaction: CombatUnitReaction.Friendly,
+      info: { teamId: "0" },
+      deathRecords: [{ timestamp: t + 12_000 }],
+    };
+    const teammateDies = unit();
+    expect(
+      crisisDecisionPoints(
+        teammateDies,
+        combat(teammateDies, [enemy(), mate]),
+      )[0]!.friendDiedWithin15s,
+    ).toBe(true);
+
+    const enemyDies = {
+      ...enemy("E1"),
+      deathRecords: [{ timestamp: t + 5000 }],
+    };
+    const noFriendDeath = unit();
+    expect(
+      crisisDecisionPoints(
+        noFriendDeath,
+        combat(noFriendDeath, [enemyDies]),
+      )[0]!.friendDiedWithin15s,
+    ).toBe(false);
+
+    const ownerDies = unit({ deathRecords: [{ timestamp: t + 8000 }] });
+    expect(
+      crisisDecisionPoints(ownerDies, combat(ownerDies, [enemy()]))[0]!
+        .friendDiedWithin15s,
+    ).toBe(true);
   });
 
   it("feasible is unaffected by dangerous — gates 1/2/4 alone decide it", () => {
