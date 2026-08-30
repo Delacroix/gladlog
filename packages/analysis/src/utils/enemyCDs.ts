@@ -31,8 +31,12 @@ import {
 /** Two offensive CD casts within this window are considered an aligned burst.
  * Shared with burstLedger (friendly-side burst grouping) — one clustering predicate for both teams. */
 export const BURST_CLUSTER_SECONDS = 10;
-/** A single CD with at least this danger weight forms a burst window on its own (≈ a 2-minute major) */
-const SOLO_WINDOW_MIN_WEIGHT = 1.3;
+/** A single CD with at least this danger weight forms a burst window on its own (≈ a 2-minute major).
+ * Exported since 2026-08-31 (GH #60): `analysis/burstWindowDecisionPoints.ts`
+ * re-applies this exact qualification rule to each per-exchange piece it cuts
+ * a window into, and a second copy of the number would be a silent fork of
+ * "what counts as a burst" (CLAUDE.md shared-predicate rule). */
+export const SOLO_WINDOW_MIN_WEIGHT = 1.3;
 
 export interface IEnemyCDCast {
   spellId: string;

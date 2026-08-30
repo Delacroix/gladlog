@@ -214,6 +214,14 @@ export async function main(): Promise<void> {
           .length,
         producer: "packages/eval/scripts/behaviorPriorScan.ts emit-table",
       },
+      // GH #60 phase 1 (2026-08-31): the enemy-burst-window outcome reference.
+      // Same corpus-driven shape as behaviorPriorGenerated.json above — the
+      // producer lives in packages/eval, not under datagen.
+      "burstWindowPriorGenerated.json": {
+        entries: Object.keys(readJson("burstWindowPriorGenerated.json").cells)
+          .length,
+        producer: "packages/eval/scripts/burstWindowScan.ts emit-table",
+      },
       // "Usable while stunned" (B1, task-3): only the stunned dimension
       // resolves to a unique SpellMisc bit combo; feared/confused are a
       // documented gap (see the artifact's own file header and

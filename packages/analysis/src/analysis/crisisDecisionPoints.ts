@@ -208,8 +208,16 @@ function resolveAttackerId(
   return null;
 }
 
+/** Per-unit memo for `samplesOf`. Keyed on the unit object, so it costs
+ * nothing when the same round is walked twice (this module's own crossings,
+ * and burstWindowDecisionPoints' kite test through `kitedAway`) and cannot
+ * outlive the parsed combat. */
+const SAMPLE_CACHE = new WeakMap<object, Sample[]>();
+
 function samplesOf(u: any): Sample[] {
-  return ((u?.advancedActions ?? []) as any[])
+  const hit = u && typeof u === "object" ? SAMPLE_CACHE.get(u) : undefined;
+  if (hit) return hit;
+  const out = ((u?.advancedActions ?? []) as any[])
     .filter((a) => (a.advancedActorMaxHp ?? 0) > 0)
     .map((a) => ({
       t: a.timestamp,
@@ -219,6 +227,8 @@ function samplesOf(u: any): Sample[] {
       y: a.advancedActorPositionY ?? null,
     }))
     .sort((a, b) => a.t - b.t);
+  if (u && typeof u === "object") SAMPLE_CACHE.set(u, out);
+  return out;
 }
 
 /** `CRISIS_HP_PCT` on the scale [STATE] rounds to — an integer percent. The
@@ -276,6 +286,45 @@ function nearestSample(
   return best;
 }
 
+/**
+ * "Did `target` open at least `KITE_GAIN_YARDS` of distance from the nearest
+ * of `attackers` between `t0Ms` and `t1Ms`?" — the ONE kite predicate.
+ *
+ * Extracted 2026-08-31 (GH #60 phase 1) so the enemy-burst-window engine
+ * (`burstWindowDecisionPoints.ts`) tests kiting with exactly this code rather
+ * than a second copy of it: same position sampler, same two tolerances, same
+ * "nearest attacker at each endpoint" reduction, same gain threshold
+ * (CLAUDE.md shared-predicate rule). `crisisDecisionPoints` below is the other
+ * caller and its behaviour is unchanged — it used to inline this block.
+ *
+ * Returns false whenever either endpoint has no position sample within
+ * tolerance, or no attacker does: an unmeasurable distance is not a kite.
+ */
+export function kitedAway(
+  target: any,
+  attackers: any[],
+  t0Ms: number,
+  t1Ms: number,
+): boolean {
+  if (!attackers.length) return false;
+  const samples = samplesOf(target);
+  const p0 = nearestSample(samples, t0Ms, POS_TOLERANCE_MS);
+  const p1 = nearestSample(samples, t1Ms, POS_TOLERANCE_MS);
+  if (p0?.x == null || p1?.x == null) return false;
+  const near = (p: Sample, tt: number) => {
+    let m = Infinity;
+    for (const u of attackers) {
+      if (!u) continue;
+      const q = nearestSample(samplesOf(u), tt, ATTACKER_POS_TOLERANCE_MS);
+      if (q?.x != null) m = Math.min(m, Math.hypot(p.x! - q.x, p.y! - q.y!));
+    }
+    return m;
+  };
+  const d0 = near(p0, t0Ms),
+    d1 = near(p1, t1Ms);
+  return isFinite(d0) && isFinite(d1) && d1 - d0 >= KITE_GAIN_YARDS;
+}
+
 export function crisisDecisionPoints(
   owner: any,
   combat: any,
@@ -314,7 +363,6 @@ export function crisisDecisionPoints(
     }
   }
   const unitById = new Map(units.map((u) => [u.id, u]));
-  const enemySamples = new Map<string, Sample[]>();
 
   const dmgIn = ((owner.damageIn ?? []) as any[]).map((d) => ({
     t: d.timestamp,
@@ -427,30 +475,13 @@ export function crisisDecisionPoints(
         .filter((h) => h.t > t && h.t <= w1 && h.src === owner.id)
         .reduce((n, h) => n + h.a, 0) / x.max;
 
-    let kite = false;
-    const p0 = nearestSample(samples, t, POS_TOLERANCE_MS),
-      p1 = nearestSample(samples, w1, POS_TOLERANCE_MS);
-    if (p0?.x != null && p1?.x != null && attackers.size) {
-      const near = (p: Sample, tt: number) => {
-        let m = Infinity;
-        for (const id of attackers) {
-          const u = unitById.get(id);
-          if (!u) continue;
-          if (!enemySamples.has(id)) enemySamples.set(id, samplesOf(u));
-          const q = nearestSample(
-            enemySamples.get(id)!,
-            tt,
-            ATTACKER_POS_TOLERANCE_MS,
-          );
-          if (q?.x != null)
-            m = Math.min(m, Math.hypot(p.x! - q.x, p.y! - q.y!));
-        }
-        return m;
-      };
-      const d0 = near(p0, t),
-        d1 = near(p1, w1);
-      kite = isFinite(d0) && isFinite(d1) && d1 - d0 >= KITE_GAIN_YARDS;
-    }
+    // one kite predicate, shared with burstWindowDecisionPoints (see kitedAway)
+    const kite = kitedAway(
+      owner,
+      [...attackers].map((id) => unitById.get(id)),
+      t,
+      w1,
+    );
 
     const responses: DecisionPointResponses = {
       selfHeal: selfHeal >= SELF_HEAL_BIG,

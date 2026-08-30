@@ -28,6 +28,7 @@ import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFind
 import * as bracketKey from "@gladlog/analysis/src/utils/bracketKey";
 import * as cooldownTiming from "@gladlog/analysis/src/analysis/candidates/cooldownTiming";
 import * as candidatesShared from "@gladlog/analysis/src/analysis/candidates/shared";
+import * as burstWindowDecisionPoints from "@gladlog/analysis/src/analysis/burstWindowDecisionPoints";
 import * as crisisDecisionPoints from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
 import * as findingCategories from "@gladlog/analysis/src/analysis/findingCategories";
@@ -40,6 +41,7 @@ import * as matchTimelineSections from "@gladlog/analysis/src/context/matchTimel
 import * as timelineHelpers from "@gladlog/analysis/src/context/timelineHelpers";
 import * as arenaGeometry from "@gladlog/analysis/src/data/arenaGeometry";
 import * as behaviorPrior from "@gladlog/analysis/src/data/behaviorPrior";
+import * as burstWindowPrior from "@gladlog/analysis/src/data/burstWindowPrior";
 import { CANDIDATE_TYPE_FLAGS } from "@gladlog/analysis/src/data/candidateTypeFlags";
 import { DISPEL_FEATURE_FLAGS } from "@gladlog/analysis/src/data/dispelFeatureFlags";
 import * as dispelObservedGenerated from "@gladlog/analysis/src/data/dispelObservedGenerated";
@@ -60,6 +62,7 @@ import * as dispelAnalysis from "@gladlog/analysis/src/utils/dispelAnalysis";
 import * as dispelKind from "@gladlog/analysis/src/utils/dispelKind";
 import * as dpsMetrics from "@gladlog/analysis/src/utils/dpsMetrics";
 import * as drAnalysis from "@gladlog/analysis/src/utils/drAnalysis";
+import * as enemyCDs from "@gladlog/analysis/src/utils/enemyCDs";
 import { HEALER_OFFENSE_FLAGS } from "@gladlog/analysis/src/utils/healerOffenseAnalysis";
 import * as incomingPressure from "@gladlog/analysis/src/utils/incomingPressure";
 import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWindowTargetSelection";
@@ -636,6 +639,36 @@ const INDEX: PredicateRow[] = [
     file: `${A}/data/outcomeRefs.ts`,
     symbol: "ATTEMPT_INTO_TRINKET_OUTCOME_REF",
     mod: outcomeRefs,
+  },
+  {
+    file: `${A}/analysis/burstWindowDecisionPoints.ts`,
+    symbol: "burstWindowDecisionPoints",
+    mod: burstWindowDecisionPoints,
+  },
+  {
+    file: `${A}/data/burstWindowPrior.ts`,
+    symbol: "lookupBurstWindowPrior",
+    mod: burstWindowPrior,
+  },
+  {
+    file: `${A}/data/burstWindowPrior.ts`,
+    symbol: "BURST_WINDOW_PRIOR_N_FLOOR",
+    mod: burstWindowPrior,
+  },
+  {
+    file: `${A}/analysis/crisisDecisionPoints.ts`,
+    symbol: "kitedAway",
+    mod: crisisDecisionPoints,
+  },
+  {
+    file: `${A}/analysis/crisisDecisionPoints.ts`,
+    symbol: "KITE_GAIN_YARDS",
+    mod: crisisDecisionPoints,
+  },
+  {
+    file: `${A}/utils/enemyCDs.ts`,
+    symbol: "SOLO_WINDOW_MIN_WEIGHT",
+    mod: enemyCDs,
   },
   // Formatting and notation
   {
