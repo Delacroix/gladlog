@@ -1,6 +1,8 @@
 import {
+  buildFindingsPrompt,
   buildMatchContext,
   ensureAnalysisData,
+  extractCandidateFindings,
   isHealerSpec,
   specToString,
 } from "@gladlog/analysis";
@@ -127,9 +129,23 @@ export async function buildCorpus(opts: {
         // Build prompt (the timeline variant is the default, matching
         // production; GLADLOG_TIMELINE_PROMPT=0 falls back to the sparse variant
         // for a control arm)
-        const prompt = buildMatchContext(combat, friends, enemies, {
+        const richContext = buildMatchContext(combat, friends, enemies, {
           owner,
         });
+        // GLADLOG_CORPUS_PROMPT=findings renders the PRODUCTION single-shot
+        // prompt (candidate menu + legend + rich context, exactly what
+        // desktop/main/analysis.ts sends) instead of the bare context. Needed
+        // for any A/B whose change lives in the candidate menu — with the bare
+        // context both arms are byte-identical and eval-ab correctly aborts
+        // (2026-08-30: five candidate-menu A/Bs hit exactly that).
+        const prompt =
+          process.env.GLADLOG_CORPUS_PROMPT === "findings"
+            ? buildFindingsPrompt(
+                extractCandidateFindings(combat, owner.id),
+                richContext,
+                specToString(owner.spec) || String(owner.spec),
+              )
+            : richContext;
 
         // Write prompt file
         const nnn = String(ordinal).padStart(3, "0");

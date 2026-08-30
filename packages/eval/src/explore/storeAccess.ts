@@ -113,7 +113,15 @@ export function loadLegacyRound(
   matchesDir: string,
   matchId: string,
   roundSeq?: number,
-): { legacy: LegacyRound; kind: "match" | "shuffle"; roundSeq?: number } {
+): {
+  legacy: LegacyRound;
+  kind: "match" | "shuffle";
+  roundSeq?: number;
+  /** The id the app keys this round's analysis cache by: the round's own id
+   * for a shuffle round (equals `matchId` only for round 0), `matchId`
+   * otherwise. GH #18 bench fix, 2026-08-30. */
+  analysisId: string;
+} {
   const doc = JSON.parse(
     readFileSync(join(matchesDir, matchId, "match.json"), "utf8"),
   ) as { kind?: string; data?: unknown };
@@ -143,7 +151,12 @@ export function loadLegacyRound(
     ...(roundData as GladMatch),
     rawLines: [],
   } as GladMatch);
-  return { legacy, kind, roundSeq: resolvedRoundSeq };
+  const roundId = (roundData as { id?: unknown }).id;
+  const analysisId =
+    kind === "shuffle" && typeof roundId === "string" && roundId
+      ? roundId
+      : matchId;
+  return { legacy, kind, roundSeq: resolvedRoundSeq, analysisId };
 }
 
 /**
