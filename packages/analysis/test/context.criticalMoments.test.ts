@@ -83,6 +83,7 @@ describe("criticalMoments unit tests", () => {
         mostDamagedName: "Player1",
         mostDamagedSpec: "Restoration Druid",
         mostDamagedAmount: 100000,
+        lowestFriendlyHpPct: 35,
       };
 
       const resultWithGap = identifyCriticalMoments(

@@ -1600,9 +1600,14 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
   });
 });
 
-describe("healingGapEvents(HEAL-001,2026-08-06 信号扩容批 1)", () => {
+describe("healingGapEvents(HEAL-001,2026-08-30 HP-crisis 门 change 1/5)", () => {
   const owner = { id: "h1", name: "Me-R" };
-  const gap = (freeS: number, dmg: number, name = "Ally") => ({
+  const gap = (
+    lowestFriendlyHpPct: number | null,
+    dmg: number,
+    name = "Ally",
+    freeS = 5,
+  ) => ({
     fromSeconds: 30.7,
     toSeconds: 40,
     durationSeconds: 9.3,
@@ -1610,31 +1615,45 @@ describe("healingGapEvents(HEAL-001,2026-08-06 信号扩容批 1)", () => {
     mostDamagedName: name,
     mostDamagedSpec: "Warrior_Arms",
     mostDamagedAmount: dmg,
+    lowestFriendlyHpPct,
   });
 
-  it("freeCastSeconds < HEAL_GAP_FREE_MIN_S(4s) → 不报", () => {
-    expect(healingGapEvents([gap(3.9, 50_000)], owner)).toEqual([]);
+  it("5s 空窗但全队 HP 都 >70% → 不报(gap 长度本身不再是判据)", () => {
+    expect(healingGapEvents([gap(75, 50_000, "Ally", 5)], owner)).toEqual([]);
   });
 
-  it("mostDamagedAmount === 0(没人真的挨打)→ 不报", () => {
-    expect(healingGapEvents([gap(10, 0)], owner)).toEqual([]);
+  it("lowestFriendlyHpPct === null(窗口内无采样)→ 不报", () => {
+    expect(healingGapEvents([gap(null, 50_000)], owner)).toEqual([]);
   });
 
-  it("过门槛 → 报;t floor 到渲染网格,durationS/freeS 为整数串", () => {
-    const evts = healingGapEvents([gap(4, 50_000)], owner);
+  it("mostDamagedAmount === 0(没人真的挨打)→ 不报,即使有队友掉进危机线", () => {
+    expect(healingGapEvents([gap(35, 0)], owner)).toEqual([]);
+  });
+
+  it("2.5s 空窗(短于旧 4s 门,但在 detectHealingGaps 自身下限之上)+ 队友掉到 35% → 报,facts.lowestAllyHp === '35'", () => {
+    const evts = healingGapEvents([gap(35, 50_000, "Ally", 2.5)], owner);
     expect(evts).toHaveLength(1);
     expect(evts[0]!.type).toBe("healing-gap");
     expect(evts[0]!.t).toBe(30); // toRenderSecond(30.7) === 30
     expect(evts[0]!.facts["t"]).toBe("30");
     expect(evts[0]!.facts["durationS"]).toBe("9");
-    expect(evts[0]!.facts["freeS"]).toBe("4");
+    expect(evts[0]!.facts["freeS"]).toBe("3"); // Math.round(2.5)
     expect(evts[0]!.facts["pressured"]).toBe("Ally");
     expect(evts[0]!.facts["pressuredSpec"]).toBe("Warrior_Arms");
+    expect(evts[0]!.facts["lowestAllyHp"]).toBe("35");
   });
 
-  it("按 mostDamagedAmount 降序排,截 cap=2(HEALING_GAP_CAP)", () => {
+  it("HP 恰好 40%(HEAL_GAP_CRISIS_HP_PCT 边界)→ 报(<=)", () => {
+    expect(healingGapEvents([gap(40, 50_000)], owner)).toHaveLength(1);
+  });
+
+  it("HP 40.1%(刚过边界)→ 不报", () => {
+    expect(healingGapEvents([gap(40.1, 50_000)], owner)).toEqual([]);
+  });
+
+  it("按 lowestFriendlyHpPct 升序排(最危险优先),截 cap=2(HEALING_GAP_CAP)", () => {
     const evts = healingGapEvents(
-      [gap(5, 10_000, "A"), gap(5, 40_000, "B"), gap(5, 30_000, "C")],
+      [gap(30, 10_000, "A"), gap(5, 40_000, "B"), gap(15, 30_000, "C")],
       owner,
     );
     expect(evts).toHaveLength(2);

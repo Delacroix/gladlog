@@ -185,4 +185,13 @@
 // ruling: root value = reachability, not DR) + three legend lines. Only roots
 // whose target could not reach anyone for >= ROOT_UNREACHABLE_MIN_S (3 s)
 // render; no candidate/accusation → prompt 变 → 旧缓存作废。
-export const PROMPT_VERSION = 42;
+// v43 (2026-08-30): healing-gap (HEAL-001) regated on the lowest friendly HP%
+// reached during the gap instead of gap seconds — A/B change 1/5 (3,000-match
+// outcome probe: friendly-death-within-10s flat across gap length but keyed
+// on lowest HP <=40% 13.0% vs 40-70% 2.8% vs >70% 0.8%). HEAL_GAP_FREE_MIN_S
+// (>=4s) replaced by HEAL_GAP_CRISIS_HP_PCT (<=40%, same line as
+// crisisDecisionPoints' CRISIS_HP_PCT); events gained facts.lowestAllyHp and
+// sort by lowest HP ascending instead of damage descending; legend text
+// changed to match → menu composition unchanged (still one type) but facts
+// shape + selection differ → prompt 变 → 旧缓存作废。
+export const PROMPT_VERSION = 43;

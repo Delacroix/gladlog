@@ -52,6 +52,17 @@ export interface IHealingGap {
   mostDamagedSpec: string;
   /** Raw damage taken by the most-pressured teammate */
   mostDamagedAmount: number;
+  /**
+   * The minimum HP% (0-100) reached by any friendly player's raw advancedAction
+   * sample whose timestamp falls inside [fromMs, effectiveToMs] (the same window
+   * used for the pressure check above). null when no friendly advancedAction
+   * sample landed inside the window at all. 3,000-match outcome probe
+   * (2026-08-30, eval-private/reports/signal-outcomes-2026-08-30/report.md):
+   * friendly-death-within-10s is flat across gap length (2-4s 5.3%, 4-6s 5.4%,
+   * 6+s 5.7%) but steeply keyed on this value (<=40% 13.0%, 40-70% 2.8%,
+   * >70% 0.8%) — gap length is not the criterion, this is.
+   */
+  lowestFriendlyHpPct: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +150,38 @@ function getCCCoveredMs(
   }
   covered += cur.to - cur.from;
   return covered;
+}
+
+// ---------------------------------------------------------------------------
+// Lowest-friendly-HP helper (gap window)
+// ---------------------------------------------------------------------------
+
+/**
+ * The minimum HP% (0-100) across every friendly player's raw advancedAction
+ * samples whose timestamp falls inside [fromMs, toMs]. Unlike
+ * `getUnitHpAtTimestamp` (nearest-sample lookup for a single instant, used by
+ * the render-grid-anchored gate predicates), this scans every sample the
+ * window actually contains — the fact being measured is "how low did anyone
+ * get while the healer sat idle", not "what was the HP at one clock tick".
+ * Returns null when no friendly advancedAction sample lands inside the window.
+ */
+function getLowestFriendlyHpPct(
+  teammates: ICombatUnit[],
+  fromMs: number,
+  toMs: number,
+): number | null {
+  let min: number | null = null;
+  for (const teammate of teammates) {
+    for (const action of teammate.advancedActions) {
+      if (action.logLine.timestamp < fromMs || action.logLine.timestamp > toMs)
+        continue;
+      if (action.advancedActorMaxHp <= 0) continue;
+      const pct =
+        (action.advancedActorCurrentHp / action.advancedActorMaxHp) * 100;
+      if (min === null || pct < min) min = pct;
+    }
+  }
+  return min;
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +290,12 @@ export function detectHealingGaps(
 
     if (!anyUnderPressure) continue;
 
+    const lowestFriendlyHpPct = getLowestFriendlyHpPct(
+      teammates,
+      fromMs,
+      effectiveToMs,
+    );
+
     results.push({
       fromSeconds: (fromMs - matchStartMs) / 1000,
       toSeconds: (effectiveToMs - matchStartMs) / 1000,
@@ -255,6 +304,7 @@ export function detectHealingGaps(
       mostDamagedName,
       mostDamagedSpec,
       mostDamagedAmount,
+      lowestFriendlyHpPct,
     });
   }
 
