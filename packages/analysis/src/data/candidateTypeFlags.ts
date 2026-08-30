@@ -38,7 +38,8 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   | "cdHoarded"
   | "cdSpentIdle"
   | "attemptIntoTrinket"
-  | "mdCycloneWindow",
+  | "mdCycloneWindow"
+  | "missedPurge",
   boolean
 > = {
   // 下架 2026-08-19(GH #13,用户裁定)。判别力实测为负(−4.4pp)的根因
@@ -49,7 +50,13 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   // 窗口前 6s 内团队刚摁过进攻大招。修实现救不回 ②,故下架而非收紧。
   // 纯函数 missedSyncWindowEvents 与其测试保留(测试自行翻 flag)。
   missedSyncWindow: false,
-  unsyncedBurst: true,
+  // 下架 2026-08-29(GH #50 (a),用户逐条裁定「降级为上下文事实」)。技能梯度
+  // 实验(12.1 首周 10,301 场 / 23,056 回合,单排切片 n=15,306):触发率
+  // 62–66%(每个进攻冷却)、分段梯度 +0.1 —— 它在描述常态;已知机制:被指控
+  // 队伍整轮从未控过敌方治疗的占 0%,平均只差 13–18s,可行性门(3ad24bbb)只
+  // 解释 9.5%。时间线上的爆发/控场事实照旧,只撤掉指控。纯函数
+  // unsyncedBurstEvents 与其测试保留(测试自行翻 flag)。
+  unsyncedBurst: false,
   cdHoarded: true,
   cdSpentIdle: true,
   attemptIntoTrinket: true,
@@ -58,4 +65,11 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   // 默认开。红线=默认不指控,四门缺一即静默;S2 语料接地 4 例全为解链形态,
   // 见 candidates/massDispel.ts 模块头。
   mdCycloneWindow: true,
+  // 下架 2026-08-29(GH #50 (a),用户逐条裁定「降级为上下文事实」)。同一实验:
+  // 触发率 63–79%(有高价值可偷增益的回合)、梯度 +4.0 但非单调(峰在中段);
+  // 可行性门(purgeWasOnCD / purgersLockedOut / losReachable)齐全,所以不是
+  // 可行性问题 —— 高分玩家同样不偷,「值不值得偷」这个价值判断不在判据里
+  // (getPriority 是先验非后果)。formatDispelContextForAI 的 [PURGEABLE] 事实行
+  // 照旧进 prompt,只撤掉 missed-purge 候选;missedPurgeEvents 与测试保留。
+  missedPurge: false,
 };

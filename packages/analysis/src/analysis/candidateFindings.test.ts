@@ -3490,10 +3490,20 @@ describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,20
     };
   }
 
-  it("默认态(2026-08-19 missedSyncWindow 下架)→ 同一 fixture 只产出 unsynced-burst,不产出 missed-sync-window", () => {
+  it("默认态(2026-08-19 missedSyncWindow 下架;2026-08-29 unsyncedBurst 降级为上下文事实,GH #50)→ 同一 fixture 两个类型都不产出", () => {
     const evts = extractCandidateFindings(syncFixture(), "h");
     expect(evts.some((e) => e.type === "missed-sync-window")).toBe(false);
-    expect(evts.some((e) => e.type === "unsynced-burst")).toBe(true);
+    expect(evts.some((e) => e.type === "unsynced-burst")).toBe(false);
+  });
+
+  it("显式开 flag → unsynced-burst 仍可产出(纯函数与接线保留,只是默认关,GH #50)", () => {
+    CANDIDATE_TYPE_FLAGS.unsyncedBurst = true;
+    try {
+      const evts = extractCandidateFindings(syncFixture(), "h");
+      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(true);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
+    }
   });
 
   it("显式开 flag → missed-sync-window 仍可产出(纯函数与接线保留,只是默认关)", () => {
@@ -3549,25 +3559,27 @@ describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,20
   // finally 里把开关复位回默认 true(Task 9 上线态),防止状态泄漏给上面的
   // 默认开启正向测试或其它文件的默认态测试(CANDIDATE_TYPE_FLAGS 是模块级可
   // 变单例,和 DISPEL_FEATURE_FLAGS 一样)。
-  it("CANDIDATE_TYPE_FLAGS.missedSyncWindow=false(其余默认 true)→ 只有 missed-sync-window 从产出消失,unsynced-burst 仍出现", () => {
-    CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
+  // Both flags default to false since 2026-08-29; the independence check now
+  // turns each ON alone and expects only that type to appear.
+  it("只开 missedSyncWindow → 只有 missed-sync-window 产出,unsynced-burst 不出现", () => {
+    CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
     try {
       const evts = extractCandidateFindings(syncFixture(), "h");
-      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(false);
-      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(true);
+      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(true);
+      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(false);
     } finally {
-      CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
+      CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
     }
   });
 
-  it("CANDIDATE_TYPE_FLAGS.unsyncedBurst=false(其余默认 true)→ 只有 unsynced-burst 从产出消失,missed-sync-window 仍出现", () => {
-    CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
+  it("只开 unsyncedBurst → 只有 unsynced-burst 产出,missed-sync-window 不出现", () => {
+    CANDIDATE_TYPE_FLAGS.unsyncedBurst = true;
     try {
       const evts = extractCandidateFindings(syncFixture(), "h");
-      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(false);
-      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(true);
+      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(true);
+      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(false);
     } finally {
-      CANDIDATE_TYPE_FLAGS.unsyncedBurst = true;
+      CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
     }
   });
 });
