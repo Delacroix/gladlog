@@ -39,14 +39,15 @@ describe("data layer", () => {
     expect(DISCOVERY_TAG_RULES[0]!.pattern).toBeInstanceOf(RegExp);
     expect(DISPEL_FEATURE_FLAGS).toBeDefined();
   });
-  it("candidateTypeFlags(Task 9,2026-08-15 四个 P1/P2 起爆开关全量上线;2026-08-19 missedSyncWindow、2026-08-29 unsyncedBurst/missedPurge/ccHeld、2026-08-30 killReview 下架);manaPressure/manaEfficiency 两开关已随候选退役删除(2026-08-21 管线审查第 3 条,#26 结案、后继 #33)", () => {
+  it("candidateTypeFlags(Task 9,2026-08-15 四个 P1/P2 起爆开关全量上线;2026-08-19 missedSyncWindow、2026-08-29 unsyncedBurst/missedPurge/ccHeld、2026-08-30 killReview/cdSpentIdle 下架);manaPressure/manaEfficiency 两开关已随候选退役删除(2026-08-21 管线审查第 3 条,#26 结案、后继 #33)", () => {
     expect(CANDIDATE_TYPE_FLAGS).toEqual({
       // 2026-08-19 下架(GH #13,用户裁定)—— 见 candidateTypeFlags.ts 注
       missedSyncWindow: false,
       // 2026-08-29 降级为上下文事实(GH #50 (a),用户裁定)—— 见 candidateTypeFlags.ts 注
       unsyncedBurst: false,
       cdHoarded: true,
-      cdSpentIdle: true,
+      // 2026-08-30 下架(信号结果探针,用户裁定)—— 见 candidateTypeFlags.ts 注
+      cdSpentIdle: false,
       // 2026-08-18 击杀尝试重设计(GH #16):用户当日拍板接线,默认 true
       attemptIntoTrinket: true,
       // 2026-08-21 MD 特例(GH #25):四门判据用户当日拍板,默认 true

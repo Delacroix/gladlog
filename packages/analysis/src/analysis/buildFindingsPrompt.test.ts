@@ -365,7 +365,7 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线;Task 9 �
       CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
       CANDIDATE_TYPE_FLAGS.unsyncedBurst = false; // default since 2026-08-29 (GH #50)
       CANDIDATE_TYPE_FLAGS.cdHoarded = true;
-      CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
+      CANDIDATE_TYPE_FLAGS.cdSpentIdle = false; // default since 2026-08-30 (signal outcome probe)
     }
   });
 
@@ -387,28 +387,33 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线;Task 9 �
     } finally {
       CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
       CANDIDATE_TYPE_FLAGS.unsyncedBurst = false; // default since 2026-08-29 (GH #50)
-      CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
+      CANDIDATE_TYPE_FLAGS.cdSpentIdle = false; // default since 2026-08-30 (signal outcome probe)
     }
   });
 
-  it("cdSpentIdle 图例说明它只在中/高威胁对局里出现", () => {
-    const p = buildFindingsPrompt(
-      [
-        ...candidates,
-        {
-          id: "cd-spent-idle:h:33206:400",
-          type: "cd-spent-idle",
-          t: 400,
-          unitNames: ["Healer-R"],
-          spell: "Pain Suppression",
-          facts: { t: "400", spell: "Pain Suppression", unit: "Healer-R" },
-        },
-      ],
-      "",
-      "Discipline Priest",
-    );
-    expect(p).toMatch(/"cd-spent-idle"/);
-    expect(p).toMatch(/at least medium overall threat/);
+  it("cdSpentIdle 图例说明它只在中/高威胁对局里出现(2026-08-30 起默认关,显式开验证图例文案本身仍在)", () => {
+    CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
+    try {
+      const p = buildFindingsPrompt(
+        [
+          ...candidates,
+          {
+            id: "cd-spent-idle:h:33206:400",
+            type: "cd-spent-idle",
+            t: 400,
+            unitNames: ["Healer-R"],
+            spell: "Pain Suppression",
+            facts: { t: "400", spell: "Pain Suppression", unit: "Healer-R" },
+          },
+        ],
+        "",
+        "Discipline Priest",
+      );
+      expect(p).toMatch(/"cd-spent-idle"/);
+      expect(p).toMatch(/at least medium overall threat/);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
+    }
   });
 
   it("显式关闭 missedSyncWindow,菜单里没有该类型的事件 → 图例仍不出现(presence 依旧把关,与既有类型同规则,避免白占 prompt 字节)", () => {
