@@ -139,6 +139,7 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "207685": cc(), // Sigil of Misery (disorient debuff aura id; duration is taken from measured log aura applied->removed. Found missing by the audit: DH fear was entirely outside CC coverage)
   // -- Roots --
   "122": root(6), // Frost Nova
+  "355689": root(6), // Landslide (Shaman totem root; official Magic/6 s; ×59 in the dispel corpus). Was the one dispellable root with no entry → priority Low → a missed cleanse on it could never be reported (registry rule). User 2026-08-30 (GH #24 tail): "same tier as Frost Nova".
   "33395": root(6), // Freeze (Water Elemental)
   "339": root(8), // Entangling Roots
   "102359": root(8), // Mass Entanglement

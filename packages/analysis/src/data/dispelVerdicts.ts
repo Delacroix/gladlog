@@ -259,6 +259,18 @@ export const DISPEL_VERDICTS: Record<string, IDispelVerdict> = {
     source: SRC,
     approved: OK,
   },
+  // 2026-08-30 追加(GH #24 尾巴):Landslide 是唯一官方可驱散(Magic)却没登记优先级的
+  // 定身 —— 没登记 = 永远 Low = 漏驱永远看不见(登记制规则)。用户裁定「和冰霜新星同档」,
+  // 三格照抄 122;不是 2026-08-19 签字页的一部分,source/approved 单列以免混淆。
+  "355689": {
+    zh: "山崩图腾(Landslide)",
+    healer: "situational",
+    melee: "worth",
+    ranged: "skip",
+    afterDR: null,
+    source: "用户裁定 2026-08-30(GH #24):与冰霜新星同档;语料 ×59",
+    approved: "2026-08-30 user",
+  },
   "102359": {
     zh: "群体缠绕",
     healer: "situational",

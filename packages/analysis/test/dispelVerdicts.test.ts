@@ -2,7 +2,8 @@
  * 驱散裁定册的防腐测试 —— 照 `mitigationVerdicts.test.ts` 的纪律。
  *
  * 钉三件事:签字格式、值域、以及**键集恰好等于 2026-08-19 签字页上的
- * 27 个 id** —— 少一行是丢签字,多一行是没签字就进表,两个方向都得红。
+ * 27 个 id + 2026-08-30 用户单独裁定的 1 个(Landslide 355689)= 28** —— 少一行是丢签字,
+ * 多一行是没签字就进表,两个方向都得红。
  */
 import {
   DISPEL_VERDICTS,
@@ -43,6 +44,7 @@ const SIGNED_IDS = [
   "605",
   // 定身
   "122",
+  "355689", // Landslide — 2026-08-30 user, same tier as Frost Nova (GH #24 tail)
   "102359",
   "339",
   // 诅咒
@@ -75,10 +77,10 @@ describe("驱散裁定册:签字纪律", () => {
     }
   });
 
-  it("键集恰好 = 签字页的 27 个 id(双向)", () => {
+  it("键集恰好 = 签字页的 27 个 id + 2026-08-30 裁定的 1 个 = 28(双向)", () => {
     const have = [...DISPEL_VERDICT_IDS].sort();
     expect(have).toEqual([...SIGNED_IDS].sort());
-    expect(have).toHaveLength(27);
+    expect(have).toHaveLength(28);
   });
 
   it("结构裁定成立:每个 self-impossible 行都是硬控,每个保留 healer 格的行都不禁施法", () => {
