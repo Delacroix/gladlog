@@ -52,6 +52,17 @@
   > …这种状态下没应对的治疗,15 秒内**我方有人阵亡** 25%;出手的 15%;出手者常见应对……
 - 谓词改动 → 表必须重扫重生成(§2 红线)。
 
+## 1d. DPS 视角(GH #59,用户 2026-08-29「做59把」)
+
+探针(旧 DPS 扫描 107,319 个决策点,未被控、承伤 ≥10%):无应对 10 秒内死 单排 15.5% / 2v2 12.6% / 3v3 18.2%,有应对 8.2 / 8.7 / 9.9%(≈2×);
+按单一应对看,开个人减伤的只死 3–6%,施控 9–11%,拉开 7–9%;分段上无应对 3v3 44% → 37%(top10)。结论:**同一条信号加 `role` 维度**,不另造类型。
+
+- `crisisDecisionPoints(owner, combat, role)`:`role: "healer" | "dps"`;门 3(有工具)对 DPS = 未被定身(`rootSpellIds` 光环)**或** 个人减伤就绪 **或** Control 类大 CD 就绪(`extractMajorCooldowns` + `cdAvailableAt`);治疗仍恒真。应对分类不变。
+- 表格键 `${bracket}|${role}|${dmgBin}`,扫描行带 `role`;DPS 的 `outcome` 全赛制 `ownDeath10s`(DPS 是击杀目标);治疗格子不变。
+- 产品:`teamPlayEvents` 的 DPS 分支也挂 producer(同 cap、同排序);legend 用「players of this role」措辞并说明 DPS 的参照口径;facts 不变(`cellKey` 已含 role)。
+- 扫描去掉 `gateFiredThisRound`(death-unused-defensive 已退役,它是 DPS 扫描慢 3 倍的原因)。
+- 价值门:先出 3 场真实 DPS 对局输出给用户。
+
 ## 2. 决策点谓词(分析与扫描共享)
 
 新文件 `packages/analysis/src/analysis/crisisDecisionPoints.ts`,纯函数:
