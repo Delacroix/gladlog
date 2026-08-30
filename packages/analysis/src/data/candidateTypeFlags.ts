@@ -39,7 +39,8 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   | "cdSpentIdle"
   | "attemptIntoTrinket"
   | "mdCycloneWindow"
-  | "missedPurge",
+  | "missedPurge"
+  | "ccHeld",
   boolean
 > = {
   // 下架 2026-08-19(GH #13,用户裁定)。判别力实测为负(−4.4pp)的根因
@@ -72,4 +73,12 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   // (getPriority 是先验非后果)。formatDispelContextForAI 的 [PURGEABLE] 事实行
   // 照旧进 prompt,只撤掉 missed-purge 候选;missedPurgeEvents 与测试保留。
   missedPurge: false,
+  // 下架 2026-08-29(GH #50 (d),用户裁定「梯度仍平则下架」)。机会归一化后
+  // 的技能梯度(12.1 首周归档 10,682 场 / 23,056 回合;分母=我方对齐爆发开启
+  // 时自己的控场大招可用,cdAvailableAt):转化率各分段 20–25%,单排未转化率
+  // 82.8→88.2% 随分数**上升**,胜负差 +2–4pp、2400+ 反转;前置窗口变体
+  // [−10,+5]s(「先控再爆发」假设)每段一致 +6pp、梯度依旧平。「爆发时按控」
+  // 不区分水平,信号前提不成立。时间线冷却台账照旧,只撤掉指控;纯函数
+  // ccHeldEvents 保留。数据:GH #50 评论 + eval-private/skill-gradient/。
+  ccHeld: false,
 };
