@@ -354,6 +354,11 @@ const INDEX: PredicateRow[] = [
   },
   // Position and geometry
   {
+    file: `${A}/analysis/candidateFindings.ts`,
+    symbol: "candidateTypeOfId",
+    mod: candidateFindings,
+  },
+  {
     file: `${A}/utils/positionAnalysis.ts`,
     symbol: "CLOSE_RANGE_YARDS",
     mod: positionAnalysis,

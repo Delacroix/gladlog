@@ -43,6 +43,12 @@ export interface ReviewCard {
   anchorT: number;
   unitNames: string[];
   evidence: Array<EvidenceRef & { verdict: PrescreenVerdict }>;
+  /** baseline only: candidate types named by the stored finding's own
+   * `eventIds` (`candidateTypeOfId`). Present even when `evidence` is empty
+   * — the bench's recomputed candidates can miss an id the app produced
+   * (2026-08-30: 3 cd-hoarded cards in one session), and the alignment scan
+   * must still know the type. */
+  eventTypes?: string[];
 }
 
 /** A saved batch of cards for one review pass over one match/round. */

@@ -254,6 +254,18 @@ export function cdWasteEvents(
  *  - DPS owner only: burst-into-immunity / burst-into-mitigation /
  *    off-target-in-window / juked-kick / dr-clipped-cc / unconverted-burst
  */
+/**
+ * The candidate type encoded in a candidate id — every builder in this file
+ * and candidates/*.ts writes ids as `<type>:<...>` (e.g.
+ * `cd-hoarded:Player-…:5211:0`). Shared inverse for consumers that only have
+ * the id (a stored finding's `eventIds`, GH #18 review bench 2026-08-30);
+ * returns null when the id carries no `:`.
+ */
+export function candidateTypeOfId(id: string): string | null {
+  const i = id.indexOf(":");
+  return i > 0 ? id.slice(0, i) : null;
+}
+
 export function extractCandidateFindings(
   combat: any,
   ownerId?: string,

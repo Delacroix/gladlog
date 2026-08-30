@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+  candidateTypeOfId,
   type CandidateEvent,
   extractCandidateFindings,
   type Finding,
@@ -204,6 +205,13 @@ export function baselineToCards(
     }
 
     const evidence = matched.map(candidateEvidence);
+    const eventTypes = [
+      ...new Set(
+        f.eventIds
+          .map(candidateTypeOfId)
+          .filter((t): t is string => t !== null),
+      ),
+    ];
 
     return {
       source: "baseline" as const,
@@ -211,6 +219,7 @@ export function baselineToCards(
       anchorT,
       unitNames,
       evidence,
+      eventTypes,
     };
   });
 }

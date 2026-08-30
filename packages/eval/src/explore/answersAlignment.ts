@@ -50,7 +50,7 @@ export function joinAnswers(
       unanswered.push(card.cardId);
       continue;
     }
-    const types =
+    const evidenceTypes =
       card.source === "baseline"
         ? [
             ...new Set(
@@ -60,6 +60,10 @@ export function joinAnswers(
             ),
           ]
         : [];
+    // Evidence-less baseline cards (bench candidates missed the app's id)
+    // fall back to the finding's own eventIds types (2026-08-30, GH #18).
+    const types =
+      evidenceTypes.length > 0 ? evidenceTypes : (card.eventTypes ?? []);
     rows.push({
       session: session.name,
       cardId: card.cardId,

@@ -138,6 +138,32 @@ describe("joinAnswers", () => {
   });
 });
 
+describe("joinAnswers — evidence-less baseline card falls back to eventTypes (GH #18, 2026-08-30)", () => {
+  it("uses the finding's own eventIds types when the bench reproduced no candidate", () => {
+    const s: ReviewSession = {
+      ...session,
+      cards: [
+        { ...card("c0", "baseline", []), eventTypes: ["cd-hoarded"] },
+        {
+          ...card("c1", "baseline", ["cc-avoidable A {t=10}"]),
+          eventTypes: ["cc-avoidable", "cc-locked"],
+        },
+      ],
+    };
+    const a: ReviewAnswers = {
+      schemaVersion: 1,
+      name: "s1",
+      answers: [answer("c0"), answer("c1")],
+    };
+    const { rows } = joinAnswers(s, a);
+    expect(rows.find((r) => r.cardId === "c0")?.types).toEqual(["cd-hoarded"]);
+    // evidence wins when present — eventTypes is only the fallback
+    expect(rows.find((r) => r.cardId === "c1")?.types).toEqual([
+      "cc-avoidable",
+    ]);
+  });
+});
+
 describe("summarizeAlignment + renderAlignmentReport", () => {
   it("aggregates per source and per type (multi-type card counted under each)", () => {
     const { rows } = joinAnswers(session, answers);
