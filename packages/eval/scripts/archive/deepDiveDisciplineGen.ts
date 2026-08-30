@@ -2,22 +2,32 @@
 // from the DPS corpus, build the deep-dive evidence pack + prompt, write the
 // prompt to a file for the responder to answer, and serialize the pack for the
 // audit stage.
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
-import { join } from "path";
-import { GladLogParser, type GladMatch } from "@gladlog/parser";
-import { toLegacyMatch, CombatUnitReaction } from "@gladlog/parser-compat";
 import {
-  extractCandidateFindings,
-  isHealerSpec,
   buildDeepDivePack,
   buildDeepDivePrompt,
-  specToString,
+  extractCandidateFindings,
   type Finding,
+  isHealerSpec,
+  specToString,
 } from "@gladlog/analysis";
+import { GladLogParser, type GladMatch } from "@gladlog/parser";
+import { CombatUnitReaction,toLegacyMatch } from "@gladlog/parser-compat";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import { join } from "path";
 
-const dir = "/Users/mingjianliu/code/gladlog-eval-private/corpus/public-dps";
-const outDir = process.argv[2] ?? "/tmp/deepdive-smoke";
-const WANT = Number(process.argv[3] ?? 6);
+import { resolveEvalHome } from "../../src/evalHome";
+
+// Corpus directory resolved from $GLADLOG_EVAL_HOME (never a hardcoded
+// absolute path); --corpus <dir> overrides it.
+const argv = process.argv.slice(2);
+const cIdx = argv.indexOf("--corpus");
+const positional = argv.filter(
+  (a, i) => !a.startsWith("--") && !(cIdx >= 0 && (i === cIdx || i === cIdx + 1)),
+);
+const dir =
+  cIdx >= 0 ? argv[cIdx + 1]! : join(resolveEvalHome(), "corpus", "public-dps");
+const outDir = positional[0] ?? "/tmp/deepdive-smoke";
+const WANT = Number(positional[1] ?? 6);
 mkdirSync(outDir, { recursive: true });
 mkdirSync(join(outDir, "prompts"), { recursive: true });
 

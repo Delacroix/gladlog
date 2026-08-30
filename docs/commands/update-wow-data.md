@@ -198,11 +198,48 @@ npx tsx packages/eval/scripts/drGapScan.ts $GLADLOG_EVAL_HOME/corpus/observedSpe
 npx tsx packages/eval/scripts/dispelCompletenessScan.ts <dispel-counts.txt>
 ```
 
+npm aliases for the same three (identical flags): `npm run -w @gladlog/eval scan:rot` ·
+`scan:dr-gap` · `scan:dispel`.
+
 Read the report top-down: `gone` rows (in the baseline universe, absent this season) are the renumber
 signature and get adjudicated first; `never` rows are either wrong-from-day-one or ids that legitimately don't
 log as events (talent ids, passives). A table at 100% stale is the GH #23 case. When you add a new hand table
 of spell ids anywhere in `packages/analysis`, register it in `curatedIdRegistry.ts` — the registry is the
 index, and the rule was never the missing piece.
+
+### 7c. Standing Prompt-Level Scans (Shared-Predicate Audits)
+
+Steps 7/7b audit the **id tables**. These three audit the **rendered prompt** and are equally standing
+— run them after any data refresh, and after any change to the candidate menu or the timeline.
+Their `--prompts` / `--dir` argument is an **A/B run's `prompts/` directory** (e.g.
+`$GLADLOG_EVAL_HOME/ab/<abId>/treatment/prompts`), **not** the `runs/<runId>` root and not the arm
+root — pointing at the arm root finds zero `.txt` files and exits 1, which reads like "clean".
+
+```bash
+# 1. crisis-HP ⟺ same-second [STATE] tick (11th hardFailure class; flag is --prompts, not --dir)
+npx tsx packages/eval/scripts/crisisHpStateScan.ts \
+  --prompts "$GLADLOG_EVAL_HOME/ab/<abId>/treatment/prompts" [--examples 5]
+# or: npm run -w @gladlog/eval scan:crisis-hp -- --prompts <prompts-dir>
+
+# 2. candidate-menu time facts vs fmtTime-floored timeline markers (13th hardFailure class)
+npx tsx packages/eval/scripts/menuTRenderGridScan.ts \
+  --dir "$GLADLOG_EVAL_HOME/ab/<abId>/treatment/prompts"
+# or: npm run -w @gladlog/eval scan:menu-t -- --dir <prompts-dir>
+```
+
+Both re-run the *same* function their hard-failure gate calls (`crisisHpStateProbes`,
+`scanMenuTRenderGrid` in `promptQualityCheck.ts`) — there is no second implementation to drift.
+The gate answers pass/fail on one prompt; these answer "how many, of what type, and here are
+examples" over a whole corpus, which is what a before/after number needs.
+
+**3. `signalOutcomeProbe.ts` — outcome reference probe for coaching signals.**
+**Not on `main`.** It lives on branch `probe/signal-outcomes` at `abdf08df`; check that branch out to
+run it. It walks the archive corpus (3,000 matches / 272,841 decision points in the 2026-08-30 run)
+and asks, per signal, whether the thing the signal fires on actually precedes a worse outcome —
+the instrument that replaced seven-dimension baselines for signal keep/retire rulings. Output landed
+in `$GLADLOG_EVAL_HOME/reports/signal-outcomes-2026-08-30/`. Run it whenever a new season's data
+could have moved a signal's grounding, and read it next to
+[`docs/coaching-grounding-audit.md`](../coaching-grounding-audit.md).
 
 ### 8. Summary
 

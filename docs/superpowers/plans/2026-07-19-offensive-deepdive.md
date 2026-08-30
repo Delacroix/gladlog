@@ -861,7 +861,7 @@ git commit -m "feat(deepdive): renderer guaranteed offensive deep dive slot (sur
 
 **Files:**
 
-- Create: `packages/eval/scripts/deepDiveOffensiveScan.ts`
+- Create: `packages/eval/scripts/archive/deepDiveOffensiveScan.ts`
 
 **Interfaces:**
 
@@ -1015,7 +1015,7 @@ for (const [t, s] of byType)
 - [ ] **Step 2: Run scan** (four public corpus directories)
 
 ```bash
-npx tsx packages/eval/scripts/deepDiveOffensiveScan.ts \
+npx tsx packages/eval/scripts/archive/deepDiveOffensiveScan.ts \
   /Users/mingjianliu/code/gladlog-eval-private/corpus/deepdive-2v2 \
   /Users/mingjianliu/code/gladlog-eval-private/corpus/deepdive-220 \
   /Users/mingjianliu/code/gladlog-eval-private/corpus/deepdive-hi \
@@ -1027,8 +1027,8 @@ Expected: `packCrash 0`, `missingRole 0`, `factsMismatch 0`, `digitInName 0`. If
 - [ ] **Step 3: typecheck (eval) + eslint + commit**
 
 ```bash
-npm run typecheck --workspace=packages/eval && npx eslint packages/eval/scripts/deepDiveOffensiveScan.ts --quiet
-git add packages/eval/scripts/deepDiveOffensiveScan.ts
+npm run typecheck --workspace=packages/eval && npx eslint packages/eval/scripts/archive/deepDiveOffensiveScan.ts --quiet
+git add packages/eval/scripts/archive/deepDiveOffensiveScan.ts
 git commit -m "test(eval): offensive deep dive deterministic robustness scan (per-type gate pass rate + leftover digit/crash assertions)"
 ```
 

@@ -15,6 +15,35 @@ All artifacts land in the private eval repository (`$GLADLOG_EVAL_HOME`, default
 - `/eval-baseline <runId>` and the run directory already contains `prompts/` + `index.json` → **Reuse mode**: Skips Step 1 corpus building (used for testing rubric drift: re-evaluating the same set of old prompts).
 - `/eval-baseline` (no arguments) → **New mode**: `runId` defaults to `YYYY-MM-DD-baseline`, starting from Step 1.
 
+## Which manifest after a season change
+
+> **The two manifests this document has always named are pre-12.1 (2026-06) logs.**
+> `corpus/manifest-coverage.txt` (1 log — the A3 minimum-coverage set, by design) and
+> `corpus/manifest-fullscale.txt` (70 logs, used by `/pipeline-audit`) were both cut from the
+> 2026-06 season. They still exercise every corner case they were built for, but nothing in them
+> reflects 12.1 spell ids, DR windows, or candidate types. For anything whose conclusion is about
+> the **current** season, use the new-season equivalents:
+>
+> | Purpose | Pre-12.1 (2026-06) | New season (12.1) |
+> | --- | --- | --- |
+> | Sampled / A/B corpus | `corpus/manifest-coverage.txt` (1 log) · `corpus/manifest.txt` (8) | **`corpus/manifest-ab-newseason.txt`** — 17 logs → 309 prompts |
+> | Full-corpus audit | `corpus/manifest-fullscale.txt` (70 logs) | **`corpus/manifest-archive-2026-08-28-newseason.txt`** — the PvP archive manifest (18,134 `.gz` entries) |
+>
+> Say which one a run used, in the ledger row and in the report — "70 matches" means two different
+> things before and after the season boundary.
+
+> **Both of these workflows have been idle since 2026-07/08.** The last `## Baseline evals` ledger
+> row is **2026-07-22** and the newest `runs/` artifact is **2026-08-06**; `/pipeline-audit` last
+> really ran **2026-07-22**. That is not neglect: since then, decisions about whether a coaching
+> signal stays or goes have been made on a different instrument — the **outcome probe** (does the
+> thing the signal fires on actually precede a worse outcome?), **deterministic metrics** (hard
+> failures, coverage counts, `audit-summary.json` kept/dropped), and the **opportunity-normalised
+> skill gradient** (`packages/eval/src/explore/signalSkillGradient.ts`, stratified by rating
+> bracket — never pooled). The provenance of every signal's grounding lives in
+> [`docs/coaching-grounding-audit.md`](../coaching-grounding-audit.md). Use this seven-dimension
+> baseline when you want to know *how good the prompt/response text is*; do not use it to
+> adjudicate whether a signal earns its place — see CLAUDE.md's Value-Gate Rule, points 4 and 5.
+
 ## Step 1: Build Corpus (New Mode)
 
 Log manifest **prefers the A3 coverage manifest** `$GLADLOG_EVAL_HOME/corpus/manifest-coverage.txt`——
@@ -26,7 +55,13 @@ If the coverage manifest does not exist or this round needs to reproduce an old 
 
 ```bash
 npx tsx packages/eval/scripts/buildCorpus.ts --manifest "$GLADLOG_EVAL_HOME/corpus/manifest-coverage.txt" --run <runId>
+# or: npm run -w @gladlog/eval corpus:build -- --manifest … --run <runId>
 ```
+
+> The workflow entry points have npm aliases in `packages/eval/package.json`, so a long path is not
+> the only way to name them: `corpus:build` · `quality` · `ab:interpolate` · `ab:pool` · `ab:stats` ·
+> `scan:crisis-hp` · `scan:menu-t` · `scan:rot` · `scan:dr-gap` · `scan:dispel` · `acceptance:hash`
+> (`npm run -w @gladlog/eval <name> -- <flags>`; flags are unchanged).
 
 Non-zero exit aborts immediately. Once completed, verify that `runs/<runId>/index.json` exists and read the item list (each entry: `ordinal`, `file`, `matchId`, `spec`, `result`). The builder also writes the coverage manifest `manifests/NNN.json`.
 
@@ -34,6 +69,7 @@ Then run deterministic quality checks and read the output:
 
 ```bash
 BASE_DIR="$GLADLOG_EVAL_HOME/runs/<runId>" npx tsx packages/eval/scripts/qualityCheck.ts
+# or: BASE_DIR=… npm run -w @gladlog/eval quality
 ```
 
 Writes `runs/<runId>/quality-report.json` (per-match coverage: friendly deaths/CC/kicks/dispels/trinkets; noise ratio; bias word hits). The judge in Step 3 **must** use these measured numbers to anchor sufficiency/noise/labelBias, without visual estimation.

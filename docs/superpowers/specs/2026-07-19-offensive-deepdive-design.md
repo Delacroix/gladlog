@@ -141,7 +141,7 @@ Initial findings
    - `buildOffensiveDeepDivePack` produces the expected kind + facts (target-hp, enemy-defensive, immunity) on synthetic unconverted-burst / burst-into-immunity fixtures.
    - `hasOffensiveCoachableSignal`: target bottoms out+defensive answers → true; off-target → true; juked → true; purely neutral → false.
    - Dispatcher routing: death finding → survival; unconverted-burst finding → offensive; mixed → dominant.
-2. **Deterministic Scan** (`packages/eval/scripts/deepDiveOffensiveScan.ts`, mirroring `deepDiveScan`): Run the full buildOffensiveDeepDivePack + gate on each non-death candidate in the corpus, asserting no crashes / missing roles / facts↔items inconsistencies / residual numbers (name-related), calculating pass rates per type and mean items per pack. Add `hpStart/hpEnd/onTargetPct/dr/overlap` to `NUMERIC_FIELDS`.
+2. **Deterministic Scan** (`packages/eval/scripts/archive/deepDiveOffensiveScan.ts`, mirroring `deepDiveScan`): Run the full buildOffensiveDeepDivePack + gate on each non-death candidate in the corpus, asserting no crashes / missing roles / facts↔items inconsistencies / residual numbers (name-related), calculating pass rates per type and mean items per pack. Add `hpStart/hpEnd/onTargetPct/dr/overlap` to `NUMERIC_FIELDS`.
 3. **Single Source Predicate Unit Test**: Assert that the offensive pack's target HP / defensives are identical to `analyzeBurstLedger` (or directly consumed, inherently from the same source).
 
 ---

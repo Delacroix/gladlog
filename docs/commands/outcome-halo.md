@@ -1,5 +1,7 @@
 # outcome-halo — Judge Outcome Halo Experiment Execution Protocol
 
+> **One-off experiment playbook (2026-08-05), completed; not a standing workflow.** It is kept so the run is reproducible — do not schedule it, and do not treat it as a peer of `/eval-baseline` · `/eval-ab` · `/calibrate-judge` · `/pipeline-audit`. Result: recorded in `$GLADLOG_EVAL_HOME/ledger.md` and written back into the design spec.
+
 One-time experiment (design: docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md).
 Tools reside in packages/eval; this document is the execution playbook.
 

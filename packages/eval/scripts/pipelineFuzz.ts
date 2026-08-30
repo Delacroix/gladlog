@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+ 
 /**
  * CLI: full-pipeline health check (fuzz/audit) over a thousand wild matches.
  *
@@ -11,7 +11,13 @@
  * sane duration/timestamps, no CJK leakage.
  * Output: $GLADLOG_EVAL_HOME/runs/<runId>/fuzz-findings.jsonl plus a summary.
  *
- * Usage: tsx packages/eval/scripts/pipelineFuzz.ts --count 1000 [--run <id>] [--skip-harvest]
+ * Usage: tsx packages/eval/scripts/pipelineFuzz.ts --count 1000 [--run <id>]
+ *          [--skip-harvest] [--corpus <dir>]
+ *
+ * `--corpus` defaults to `$GLADLOG_EVAL_HOME/corpus/fuzz-1000`, the 2026-07
+ * (pre-12.1) thousand-log harvest. That directory was deleted from the eval
+ * repo's working tree in 2026-08, so a bare `--skip-harvest` run now fails
+ * fast with instructions instead of crashing on readdir.
  */
 
 import {
@@ -31,17 +37,22 @@ import {
 import fs from "fs-extra";
 import path from "path";
 
+import {
+  defaultFuzzCorpusDir,
+  requireCorpusLogs,
+} from "../src/corpus/requireCorpusLogs";
 import { resolveEvalHome } from "../src/evalHome";
 
 const CJK = /[一-鿿぀-ヿ가-힯]/;
 
 function parseArgs() {
   const a = process.argv.slice(2);
-  const out = { count: 1000, run: "", skipHarvest: false };
+  const out = { count: 1000, run: "", skipHarvest: false, corpus: "" };
   for (let i = 0; i < a.length; i++) {
     if (a[i] === "--count") out.count = Number(a[i + 1]);
     else if (a[i] === "--run") out.run = a[i + 1];
     else if (a[i] === "--skip-harvest") out.skipHarvest = true;
+    else if (a[i] === "--corpus") out.corpus = a[i + 1] ?? "";
   }
   return out;
 }
@@ -228,18 +239,16 @@ function auditCombat(
 }
 
 async function main() {
-  const { count, run, skipHarvest } = parseArgs();
+  const { count, run, skipHarvest, corpus } = parseArgs();
   const evalHome = resolveEvalHome();
-  const logDir = path.join(evalHome, "corpus", "fuzz-1000");
+  const logDir = corpus || defaultFuzzCorpusDir(evalHome);
   const runId = run || "fuzz-1000";
   const outDir = path.join(evalHome, "runs", runId);
   await fs.ensureDir(outDir);
 
   if (!skipHarvest) await harvest(logDir, count);
 
-  const files = (await fs.readdir(logDir))
-    .filter((f) => f.endsWith(".txt"))
-    .sort();
+  const files = (await requireCorpusLogs(logDir, "pipelineFuzz.ts")).sort();
   const findings: Finding[] = [];
   const counters = {
     files: 0,

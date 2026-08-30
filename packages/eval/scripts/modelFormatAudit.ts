@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+ 
 /**
  * CLI: audit of the model output's SHAPE (the findings JSON path).
  *
@@ -21,7 +21,12 @@
  *
  * Usage:
  *   tsx packages/eval/scripts/modelFormatAudit.ts \
- *     --count 40 [--backend agy|claudeCli] [--concurrency 4] [--run <id>]
+ *     --count 40 [--backend agy|claudeCli] [--concurrency 4] [--run <id>] \
+ *     [--corpus <dir of raw .txt logs>]
+ *
+ * `--corpus` defaults to `$GLADLOG_EVAL_HOME/corpus/fuzz-1000`, which was
+ * deleted from the eval repo's working tree in 2026-08; the run now fails fast
+ * with instructions (`requireCorpusLogs`) instead of throwing ENOENT.
  */
 
 import {
@@ -37,6 +42,10 @@ import { CombatUnitReaction, toLegacyMatch } from "@gladlog/parser-compat";
 import fs from "fs-extra";
 import path from "path";
 
+import {
+  defaultFuzzCorpusDir,
+  requireCorpusLogs,
+} from "../src/corpus/requireCorpusLogs";
 import { resolveEvalHome } from "../src/evalHome";
 
 /** The pre-fix predicate: the old main/analysis.ts code, verbatim. */
@@ -64,12 +73,14 @@ function parseArgs() {
     backend: "agy" as "agy" | "claudeCli",
     concurrency: 4,
     run: "",
+    corpus: "",
   };
   for (let i = 0; i < a.length; i++) {
     if (a[i] === "--count") o.count = Number(a[i + 1]);
     else if (a[i] === "--backend") o.backend = a[i + 1] as typeof o.backend;
     else if (a[i] === "--concurrency") o.concurrency = Number(a[i + 1]);
     else if (a[i] === "--run") o.run = a[i + 1];
+    else if (a[i] === "--corpus") o.corpus = a[i + 1] ?? "";
   }
   return o;
 }
@@ -134,9 +145,9 @@ interface Row {
 }
 
 async function main() {
-  const { count, backend, concurrency, run } = parseArgs();
+  const { count, backend, concurrency, run, corpus } = parseArgs();
   const evalHome = resolveEvalHome();
-  const logDir = path.join(evalHome, "corpus", "fuzz-1000");
+  const logDir = corpus || defaultFuzzCorpusDir(evalHome);
   const runId = run || `modelformat-${backend}`;
   const outDir = path.join(evalHome, "runs", runId);
   await fs.ensureDir(outDir);
@@ -155,9 +166,7 @@ async function main() {
       : claudeCliClientFactory({ cmd: "claude" });
   const model = backend === "agy" ? "flash" : "claude-sonnet-5";
 
-  const files = (await fs.readdir(logDir))
-    .filter((f) => f.endsWith(".txt"))
-    .sort();
+  const files = (await requireCorpusLogs(logDir, "modelFormatAudit.ts")).sort();
 
   // Build all the prompts first (pure CPU), then hit the model concurrently —
   // parsing is heavy, so don't interleave it with network work

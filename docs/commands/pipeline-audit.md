@@ -12,6 +12,23 @@ Perform **full-corpus** (every match, no sampling) bug hunting on the prompt pip
 
 Artifacts are written to `$GLADLOG_EVAL_HOME/runs/<YYYY-MM-DD-slug>`.
 
+> **Which manifest after a season change.** `corpus/manifest-fullscale.txt` (70 logs) used below is
+> a **2026-06, pre-12.1** set, as is `corpus/manifest-coverage.txt` (1 log) in `/eval-baseline`. The
+> new-season equivalents are `corpus/manifest-ab-newseason.txt` (17 logs → 309 prompts, the sampled
+> / A/B set) and `corpus/manifest-archive-2026-08-28-newseason.txt` (the 12.1 PvP archive manifest,
+> 18,134 `.gz` entries — the full-corpus one). A "full corpus" audit run on `manifest-fullscale.txt`
+> after the season boundary audits the previous season; say which manifest a run used, in the report
+> and in the ledger row.
+>
+> **Cadence, honestly stated:** this workflow last really ran **2026-07-22**, and `/eval-baseline`'s
+> last ledger row is **2026-07-22** with its newest `runs/` artifact **2026-08-06**. Signal-level
+> rulings since then have gone through the outcome probe + deterministic metrics + the
+> opportunity-normalised skill gradient (`packages/eval/src/explore/signalSkillGradient.ts`,
+> stratified by rating bracket) rather than through a seven-dimension full-corpus pass; see
+> [`docs/coaching-grounding-audit.md`](../coaching-grounding-audit.md). Layer A's deterministic
+> gates are still the right tool for "is the rendered artifact self-consistent" and are unaffected
+> by that shift.
+
 ## Two-Layer Structure
 
 - **Layer A — Deterministic prompt-vs-log** (full corpus). Raw logs are too large to feed into LLMs; the prompt→log direction must be checked programmatically: oracle (`coverageManifest.ts`, built independently from raw parser events, intentionally bypassing prompt builders) + gate scripts.
@@ -30,6 +47,10 @@ BASE_DIR="$GLADLOG_EVAL_HOME/runs/<runId>" MANIFEST="$GLADLOG_EVAL_HOME/corpus/m
   npx tsx packages/eval/scripts/positioningScan.ts --mutate                          # Geometric grounding (--mutate is diagnostic only, see Iron Rule 6)
 npx tsx packages/eval/scripts/qualityCheck.ts --run <runId>                          # Coverage hard gate
 ```
+
+npm aliases for the two eval entry points above (same flags): `npm run -w @gladlog/eval corpus:build`
+and `npm run -w @gladlog/eval quality`; the full list is in `packages/eval/package.json` and in
+`/eval-baseline` Step 1.
 
 Green = CJK 0, death-trace 0, geometry 0 violations, qualityCheck 0 hard failures. Check any red against Iron Rule 2 before reporting as a bug.
 

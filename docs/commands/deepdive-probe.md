@@ -165,7 +165,9 @@ node ~/.claude/skills/agy/scripts/agy-run.mjs review --model flash \
 
 ## Step 5: Single Match Wrap-Up — Update the Ledger
 
-Regardless of whether Step 4 was done, **this step cannot be skipped**: The score/session files will be overwritten by the next round of experiments, and the ledger is the only record that accumulates across rounds. Append a line to `$GLADLOG_EVAL_HOME/ledger.md` (start a new section `## Deepdive probe runs`, with headers identical to below, append-only, do not modify old lines):
+Regardless of whether Step 4 was done, **this step cannot be skipped**: The score/session files will be overwritten by the next round of experiments, and the ledger is the only record that accumulates across rounds. **Append a prose section to `$GLADLOG_EVAL_HOME/ledger.md` dated with this round's date** (`## <YYYY-MM-DD> deep-dive probe — <name>`, append-only, do not modify old lines), covering the fields below in sentences. This matches what the 2026-08-12 and 2026-08-14 rounds actually wrote: the ledger has **no** `## Deepdive probe runs` table and never had one — a deep-dive round produces one match's worth of narrative (what the dive found that the baseline missed, where the blind reviewer disagreed) that a fixed-width row cannot hold. Do not create the table now; a table with two rows in it and the real findings in prose beside it is worse than either.
+
+Cover every one of these, in order:
 
 | Field                 | Content                                                                                                            |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------ |

@@ -5,18 +5,25 @@
 // candidates land in the last third; after death-setup shipped, the menu went
 // from avg 5.7 to 6.3 per match (38 chain candidates over 60 matches:
 // healer-locked 25 / trinket-early 8 / defensive-early 5).
+import { extractCandidateFindings, isHealerSpec } from "@gladlog/analysis";
+import { GladLogParser, type GladMatch } from "@gladlog/parser";
+import { CombatUnitReaction,toLegacyMatch } from "@gladlog/parser-compat";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { GladLogParser, type GladMatch } from "@gladlog/parser";
-import { toLegacyMatch, CombatUnitReaction } from "@gladlog/parser-compat";
-import { extractCandidateFindings, isHealerSpec } from "@gladlog/analysis";
+
+import { resolveEvalHome } from "../src/evalHome";
 
 // With --manifest <file>, read the logs listed in that manifest instead (e.g.
 // the A3 coverage manifest → a healer-perspective corpus); the default is
-// still the public DPS corpus directory.
+// still the public DPS corpus directory, resolved from $GLADLOG_EVAL_HOME
+// (never a hardcoded absolute path) and overridable with --corpus <dir>.
 const argv = process.argv.slice(2);
 const mIdx = argv.indexOf("--manifest");
-const dir = "/Users/mingjianliu/code/gladlog-eval-private/corpus/public-dps";
+const cIdx = argv.indexOf("--corpus");
+const dir =
+  cIdx >= 0
+    ? argv[cIdx + 1]!
+    : join(resolveEvalHome(), "corpus", "public-dps");
 const files: string[] =
   mIdx >= 0
     ? readFileSync(argv[mIdx + 1]!, "utf8")

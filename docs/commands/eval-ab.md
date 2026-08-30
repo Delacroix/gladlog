@@ -1,6 +1,6 @@
 # eval-ab — A/B Validation for Prompt Builder Changes
 
-Validates whether a specific _prompt builder code_ change (`buildMatchContext` and its dependencies) truly improves scores: same batch of local logs, two-arm build, blind evaluation, paired statistics. Stateful — reads `$GLADLOG_EVAL_HOME/ab/<abId>/state.json` to determine which phase to run.
+Validates whether a specific _prompt builder code_ change (`buildMatchContext`, the candidate menu, and their dependencies) truly improves scores: same batch of local logs, two-arm build, blind evaluation, paired statistics. Stateful — reads `$GLADLOG_EVAL_HOME/ab/<abId>/state.json` to determine which phase to run.
 
 > Use `/eval-baseline` to find "what to fix next"; run `/calibrate-judge` before trusting the judge.
 
@@ -11,32 +11,69 @@ Suggested `abId` format: `YYYY-MM-DD-<change-slug>`. gladlog simplification comp
 - No arguments → Automatically determine phase from state: no state → Phase 1 (Control); `control-ready`/`treatment-ready` → Phase 2 (Treatment)
 - `adopt` / `abandon` → Phase 3 (Wrap-up)
 
+## The Standard Form (2026-08-30)
+
+The five candidate-layer A/Bs run on 2026-08-30 (`healing-gap-hp`, `cd-hoarded-dp`, `retire-cd-spent-idle`, `trinket-ref`, `kick-eaten-ref`) established the shape this document now describes. Four things differ from the pre-2026-08 form, and all four exist because the change under test lives in the **candidate menu**, not in the bare match context:
+
+1. **Both arms are built with `GLADLOG_CORPUS_PROMPT=findings`.** The env var is read in `packages/eval/src/corpus/buildCorpus.ts` (`GLADLOG_CORPUS_PROMPT === "findings"`) and switches the corpus builder from the bare rich context to the **production single-shot prompt** — candidate menu + legend + rich context, byte-for-byte what `packages/desktop/src/main/analysis.ts` sends.
+   **Abort rule:** in the default raw-context mode a candidate-layer change produces **0 prompt diffs** — both arms come out byte-identical and the Phase 2 pre-flight diff correctly aborts. If you see "no differences" on a change you know touches the candidate menu, the cause is almost always a missing `GLADLOG_CORPUS_PROMPT=findings`, not a broken arm. (All five 2026-08-30 A/Bs hit exactly this.)
+2. **One shared control arm per batch.** When several treatments are tested against the _same_ control commit and the _same_ manifest, build the control **once** and reuse it.
+3. **The pair set is a subset**, not the whole corpus: prompts that actually differ between the arms ∩ ordinals that already have a control response.
+4. **Responders return findings JSON, and the JSON is rendered before judging** — `interpolateResponses.ts` runs the product's own `auditFindings` gate and placeholder interpolation, so blind judges score the text a player would actually read.
+
 ## Shared: Response Generation (Common to Both Arms)
 
 Execute `eval-baseline.md` Step 2 (including `MATCHID:` header and ordinal integrity checks) on arm directory `BASE` (Phase 1 = `ab/<abId>/control`, Phase 2 = `ab/<abId>/treatment`), writing responses to `BASE/responses/NNN.txt`; then run deterministic quality checks:
 
 ```bash
 BASE_DIR="<BASE>" npx tsx packages/eval/scripts/qualityCheck.ts
+# or: npm run -w @gladlog/eval quality        (BASE_DIR still comes from the env)
 ```
 
-**Neither arm is scored individually.** All rubric scoring is performed only once during blind evaluation in Phase 2 Step 2.4 — scoring while knowing the arm identity (or having implemented the test change) = unblinding bias, forbidden.
+Write the responder instructions **once per abId**, to `ab/<abId>/responder-brief.md`, and dispatch every responder subagent with that file's text (one agent per ordinal per arm). One file instead of N inlined copies is what keeps the two arms' instructions provably identical — a wording drift between arms is an uncontrolled variable.
+
+In findings mode the responder returns the **findings JSON array** (the production output contract), not prose. Post-process it before anything reads it as coaching text:
+
+```bash
+npx tsx packages/eval/scripts/interpolateResponses.ts --arm "$GLADLOG_EVAL_HOME/ab/<abId>/control"
+npx tsx packages/eval/scripts/interpolateResponses.ts --arm "$GLADLOG_EVAL_HOME/ab/<abId>/treatment"
+# or: npm run -w @gladlog/eval ab:interpolate -- --arm <armDir>
+```
+
+It reconstructs each prompt's candidate menu, runs the product's `auditFindings` gate, interpolates `{{placeholders}}` from the cited events' facts, and writes:
+
+- `<arm>/responses-interpolated/NNN.txt` — the rendered coaching text;
+- `<arm>/audit-summary.json` — per ordinal: `kept`, `dropped`, `dropReasons`, `unresolvedPlaceholders`, `typesCited`. **These are deterministic metrics**, on the same footing as `quality-report.json`: kept/dropped counts and drop reasons are reproducible from the arm's own files and carry adjudicative weight, unlike the blind sufficiency/noise rows.
+
+Then make the interpolated text the thing that gets judged:
+
+```bash
+mv "<arm>/responses" "<arm>/responses-raw"          # the model's JSON, kept
+cp -R "<arm>/responses-interpolated" "<arm>/responses"
+```
+
+`blindPool` reads `<arm>/responses/NNN.txt` and nothing else — so `responses/` must hold the interpolated text by the time Phase 2 Step 5 runs, and `responses-raw/` preserves what the model actually returned (needed to re-interpolate if the interpolation itself changes).
+
+**Neither arm is scored individually.** All rubric scoring is performed only once during blind evaluation in Phase 2 Step 5 — scoring while knowing the arm identity (or having implemented the test change) = unblinding bias, forbidden.
 
 ## Phase 1 — Control
 
 1. **Ask the user two things** (in a single message): What change is being tested? Which dimension is targeted for improvement? Wait for response.
 2. **On control code** (usually = main, without the tested change), build the control arm:
    ```bash
-   npx tsx packages/eval/scripts/buildCorpus.ts --manifest "$GLADLOG_EVAL_HOME/corpus/manifest.txt" --run <temp>  # or direct
-   BASE_DIR version: If builder doesn't support arbitrary dirs, run with --run first then move to ab/<abId>/control/
+   GLADLOG_CORPUS_PROMPT=findings npx tsx packages/eval/scripts/buildCorpus.ts \
+     --manifest "$GLADLOG_EVAL_HOME/corpus/manifest-ab-newseason.txt" --run ab-<abId>-control
+   mv "$GLADLOG_EVAL_HOME/runs/ab-<abId>-control" "$GLADLOG_EVAL_HOME/ab/<abId>/control"
    ```
-   In practice: `buildCorpus --manifest … --run ab-<abId>-control` followed by `mv "$GLADLOG_EVAL_HOME/runs/ab-<abId>-control" "$GLADLOG_EVAL_HOME/ab/<abId>/control"`.
-3. Shared response generation (BASE=control). **Do not score.**
+   (`npm run -w @gladlog/eval corpus:build -- --manifest … --run …` is the same thing.) See `/eval-baseline` for which manifest a new season calls for — `manifest-ab-newseason.txt` is the 12.1 set (17 logs → 309 prompts); `manifest-coverage.txt` and `manifest-fullscale.txt` are 2026-06 pre-12.1 logs.
+3. Shared response generation (BASE=control), including `interpolateResponses`. **Do not score.**
 4. Write `ab/<abId>/state.json`:
    ```json
    {
      "phase": "control-ready",
      "manifest": "<path to used log manifest>",
      "fingerprint": "<control fingerprint.txt content>",
+     "promptMode": "findings",
      "controlRunDate": "YYYY-MM-DD",
      "controlCommit": "<git rev-parse --short HEAD>",
      "treatmentRuns": 0,
@@ -46,35 +83,70 @@ BASE_DIR="<BASE>" npx tsx packages/eval/scripts/qualityCheck.ts
    ```
 5. Report: control ready (N matches, unscored), prompt user to implement the change before running `/eval-ab` again.
 
+### Shared control arm (a batch of treatments against one control)
+
+When the next A/B in the batch has the **same `controlCommit` and the same manifest**, do not rebuild — copy:
+
+```bash
+SRC="$GLADLOG_EVAL_HOME/ab/<first-abId>/control"
+DST="$GLADLOG_EVAL_HOME/ab/<next-abId>/control"
+mkdir -p "$DST"
+cp -R "$SRC"/{prompts,index.json,manifests,quality-report.json,responses-raw} "$DST"/
+```
+
+Then re-run the two interpolation/`responses/` steps in the new arm (cheap, deterministic — no model calls), and record the provenance in the new `state.json` so nobody later mistakes it for an independent build:
+
+```json
+"controlCommit": "641f683f (shared control arm, copied from 2026-08-30-healing-gap-hp)",
+"note": "control arm shared across the five 2026-08-30 A/Bs (same control commit + manifest)"
+```
+
+`fingerprint` must be copied verbatim too; Phase 2's fingerprint check then still does its job. Rebuilding an identical control five times is the cost this avoids — it is not a shortcut around the comparison, because a shared control is _more_ controlled, not less.
+
 ## Phase 2 — Treatment
 
 1. Read state, print change / target dimension / control information.
-2. **On code containing the tested change**, rebuild the treatment arm using the **exact same manifest** (same method as Phase 1 Step 2, directory `ab/<abId>/treatment`). Verify that treatment `fingerprint.txt` matches the control fingerprint in state — **mismatch = differing corpus, comparison rejected, abort**.
-3. **Both arms must genuinely differ (pre-flight, prior to response generation):** When the tested change modifies the prompt builder, diff prompts between both arms — if all are verbatim identical = one arm used the wrong code, abort and investigate. Known pitfall (experienced 2026-07-15): **git worktree + symlinked root node_modules** — workspace package symlink (`node_modules/@gladlog/analysis → ../../packages/analysis`) resolves relatively back to main tree source, causing control arm to silently build using HEAD. Must run `npm ci` in worktree to install its own node_modules.
+2. **On code containing the tested change**, rebuild the treatment arm using the **exact same manifest and the same `GLADLOG_CORPUS_PROMPT=findings`** (same method as Phase 1 Step 2, directory `ab/<abId>/treatment`). Verify that treatment `fingerprint.txt` matches the control fingerprint in state — **mismatch = differing corpus, comparison rejected, abort**.
+3. **Both arms must genuinely differ (pre-flight, prior to response generation):** diff prompts between both arms — if all are verbatim identical = one arm used the wrong code (or the corpus was built in raw-context mode, see the abort rule above), abort and investigate. Known pitfall (experienced 2026-07-15): **git worktree + symlinked root node_modules** — workspace package symlink (`node_modules/@gladlog/analysis → ../../packages/analysis`) resolves relatively back to main tree source, causing control arm to silently build using HEAD. Must run `npm install` in the worktree to install its own node_modules.
    ```bash
    diff -qr ab/<abId>/control/prompts ab/<abId>/treatment/prompts | head -3   # differences expected; no difference = abort
    ```
-4. Shared response generation (BASE=treatment).
-5. **Blind Evaluation:**
+4. **Fix the pair set and record it.** The pair set is
+   **{ ordinals whose prompt actually differs between the arms } ∩ { ordinals that already have a control response }**.
+   Everything outside it is a pair of identical prompts: it costs two responder calls and two judge calls to measure a guaranteed zero, and it dilutes the paired statistics. Write the list to `ab/<abId>/ab-ordinals.json` (a flat JSON array, e.g. `[9, 10, 17, 24, 30, …]`) and set in state:
+   ```json
+   "subsetOrdinals": "<path to the batch's subset-ordinals file, when one gates the whole batch>",
+   "pairs": 16,
+   "pairOrdinals": "ab-ordinals.json (the 16 prompts the change touches)"
+   ```
+   If the intersection is too small to clear the MDE for the target dimension (see below), **sample extra ordinals** from the corpus at random, add them to `ab-ordinals.json`, and say in the report that they were added as sampled extras — never silently pad, and never report the padded n as if every pair were change-touching.
+5. Shared response generation (BASE=treatment), including `interpolateResponses`.
+6. **Blind Evaluation:**
 
    ```bash
    AB_DIR="$GLADLOG_EVAL_HOME/ab/<abId>" npx tsx packages/eval/scripts/blindPool.ts
+   # or: npm run -w @gladlog/eval ab:pool
    ```
 
    > **Blind Evaluation Cardinal Rule (Non-negotiable):** Do NOT read `blind/mapping.json` until all blind scores are written — not now, not "just to verify", not even on error. Having implemented the tested change, knowing which item is treatment destroys the comparison. Only `abStats` reads `mapping.json`.
    >
    > **Equal Cardinal Rule — Blind Item Content:** The orchestrator must only **list directories** in `blind/items/` to obtain `ITEMID`s; never read any `prompt.txt`/`response.txt` content, nor read `blind/scores/*.json` (contents or sha256 can be reverse-mapped to arm identities using the files you just built). Check whether score files are complete solely via file existence (`ls`); defer integrity validation until after unblinding.
 
-   Launch one background scoring subagent for each directory in `blind/items/` (self-contained, one agent per item — never feed two items to one agent, or it will recognize pairs):
+   Write the judge instructions once, to `ab/<abId>/judge-brief.md`, and dispatch one background scoring subagent per directory in `blind/items/` with that text (self-contained, one agent per item — never feed two items to one agent, or it will recognize pairs):
 
    > You are scoring a WoW arena coaching prompt/response pair. Read
    > `$GLADLOG_EVAL_HOME/ab/<abId>/blind/items/ITEMID/prompt.txt` and `.../ITEMID/response.txt`.
    > Apply the scoring rubric from `docs/commands/eval-baseline.md` Step 3 exactly (three-pass
    > process, 1/3/5 anchors; there is no quality-report.json for this item — skip the consistency
-   > rules that reference it). Do not read any other file or directory. Write ONLY the score JSON
-   > (standard 7-dimension format, factAudit + provenance included) to
+   > rules that reference it). The response is a numbered list of coaching findings (already rendered
+   > from the prompt's event menu); audit every factual claim in it against the prompt's timeline and
+   > event-menu lines. **Do not read any other file under `blind/`, not even as a format reference** —
+   > not another item, not `mapping.json`, not another item's score file; a second item is enough to
+   > recognize the pair, and a "format reference" is the excuse under which that happens. Write ONLY
+   > the score JSON (standard 7-dimension format, factAudit + provenance included) to
    > `$GLADLOG_EVAL_HOME/ab/<abId>/blind/scores/ITEMID.json`. In that JSON set `matchId` to
    > exactly `ITEMID` — the blind item id. Do not guess, invent, or go looking for a real match id.
+   > Reply with one line: `scored ITEMID`.
 
    (matchId=ITEMID is a fixed placeholder convention — blind items by design omit the `MATCHID:` header; in the 2026-07-20 run, judges
    invented three different variations: `null`/`"unknown"`/`"NO_MATCHID_HEADER_FOUND"`. abStats checks this field during unblinding:
@@ -95,23 +167,37 @@ BASE_DIR="<BASE>" npx tsx packages/eval/scripts/qualityCheck.ts
 
    ```bash
    AB_DIR="$GLADLOG_EVAL_HOME/ab/<abId>" npx tsx packages/eval/scripts/abStats.ts
+   # or: npm run -w @gladlog/eval ab:stats
    ```
 
    Outputs per-dimension mean Δ, SD, 95% bootstrap CI, sign test p-value, verdict (improved/regressed = CI excludes 0), and writes `comparison-stats.json`.
 
-6. **Comparison Report** `ab/<abId>/comparison-report.md`, two categories of evidence:
-   - **Deterministic Metrics** (basis for adjudicating sufficiency/noise/labelBias): diff `quality-report.json` across both arms — coverage, repetition rate, spammy lines, biased terms, hard failures, approximate token count.
+7. **Comparison Report** `ab/<abId>/comparison-report.md`, two categories of evidence:
+   - **Deterministic Metrics** (basis for adjudicating sufficiency/noise/labelBias): diff `quality-report.json` across both arms — coverage, repetition rate, spammy lines, biased terms, hard failures, approximate token count — **and diff `audit-summary.json` across both arms**: menu lines of the changed type, findings kept/dropped by `auditFindings` with drop reasons, unresolved placeholders, responses that failed to parse as JSON.
    - **Blind Evaluation Statistics** (basis for adjudicating accuracy/outcomeAlignment/focusCalibration/inferenceScaffolding): abStats table.
      The sufficiency/noise rows in the blind evaluation table are for display only with **no adjudicative authority** — blind evaluators review prompts individually without quality-report anchors, unable to see what the builder change added/removed (upstream empirical evidence: F20 pilot, where kick-interrupt coverage differed by 88 percentage points yet both arms received judge sufficiency 4.9). These dimensions rely on deterministic diffs.
-     Report structure: Deterministic Metrics table → Target dimension per-ordinal table (after unblinding) → All-dimension blind eval stats table → Regressions (dimensions where CI is entirely negative + clearly worsened deterministic metrics; inconclusive dimensions with negative point estimates are labeled "(inconclusive — monitor)" and not counted as regressions) → New Issues (items where treatment blind score ≤2 while paired control >2) → Triage (fix now / next cycle / backlog) → Rubric Feedback → Decision (IMPROVED/INCONCLUSIVE/REGRESSED + recommendation ADOPT/ABANDON/ITERATE; state inconclusive plainly, adopting based on deterministic reasons is user discretion — never package inconclusive as a win).
-7. Increment `treatmentRuns` in state by 1, keep phase as `treatment-ready`; print summary.
+   - **Non-verified claims table (mandatory).** List every claim the judges' `factAudit` marked non-verified, per ordinal and per arm, and classify each one as exactly one of:
+     **responder error** (the model asserted something the prompt does not support) · **judge misread** (the prompt does support it; the judge read the line wrong) · **genuine prompt contradiction** (the prompt really is self-inconsistent — this one is a bug in the builder and outranks any score).
+     Without this column an accuracy delta is uninterpretable: on 2026-08-30 the entire negative accuracy point estimate of the `healing-gap-hp` A/B was **one judge misread of a gap's start timestamp, present identically in both arms**. Do the classification by re-reading the cited prompt lines yourself — after unblinding, so it costs nothing.
+     Report structure: Deterministic Metrics table → Target dimension per-ordinal table (after unblinding) → Non-verified claims table → All-dimension blind eval stats table → Regressions (dimensions where CI is entirely negative + clearly worsened deterministic metrics; inconclusive dimensions with negative point estimates are labeled "(inconclusive — monitor)" and not counted as regressions) → New Issues (items where treatment blind score ≤2 while paired control >2) → Triage (fix now / next cycle / backlog) → Rubric Feedback → Decision (IMPROVED/INCONCLUSIVE/REGRESSED + recommendation ADOPT/ABANDON/ITERATE; state inconclusive plainly, adopting based on deterministic reasons is user discretion — never package inconclusive as a win).
+8. Increment `treatmentRuns` in state by 1, keep phase as `treatment-ready`; print summary.
 
 ## Phase 3 — Wrap-up (adopt / abandon)
 
 1. Read state and print summary; if `abandon`, remind to revert code changes.
-2. **Write ledger before deleting artifacts**: Append a row to the A/B cycles table in `$GLADLOG_EVAL_HOME/ledger.md` (date, commit, change description, target dimension, pairs n, target mean Δ (95% CI), verdict, decision, notes — including justification when adopting on deterministic grounds). `ab/<abId>/` is about to be deleted; the ledger row is the only persistent record of this run.
-3. Extract and preserve the Rubric Feedback section from comparison-report, then `rm -rf "$GLADLOG_EVAL_HOME/ab/<abId>"`.
-4. Print rubric feedback and next steps (adopt → change is live, run `/eval-baseline` to establish a new baseline; abandon → revert then run `/eval-baseline` to confirm baseline unchanged).
+2. **Write ledger before deleting artifacts**: Append a row to the A/B cycles table in `$GLADLOG_EVAL_HOME/ledger.md` (date, commit, change description, target dimension, pairs n, target mean Δ (95% CI), verdict, decision, notes — including justification when adopting on deterministic grounds).
+3. **Set the terminal phase and prune, do not delete the directory.** Write into `state.json`:
+   ```json
+   "phase": "done",
+   "treatmentCommit": "<sha> (<branch> <sha> + main)",
+   "pairs": <n>,
+   "result": "<one-line verdict> — see comparison-report.md"
+   ```
+   `done` is the phase that says "adjudicated". Leaving a wrapped-up run at `treatment-ready` is what made the five 2026-08-30 runs look like pending treatments to the next argument-less `/eval-ab`.
+   Then delete the bulky untracked artifacts — `prompts/`, `manifests/`, `responses*/`, `blind/`, `index.json`, `quality-report.json`, `fingerprint.txt` — and **keep**:
+   `comparison-report.md` · `comparison-stats.json` · `state.json` · `ab-ordinals.json` · `{control,treatment}/audit-summary.json` · `responder-brief.md` · `judge-brief.md`.
+   That set is ~40 KB per run and is what makes a ruling re-readable a month later: the decision, the numbers behind it, the exact pair set, the deterministic per-ordinal audit, and the verbatim instructions both models were given. The ledger row alone cannot reconstruct any of them.
+4. Print rubric feedback and next steps (adopt → change is live; abandon → revert).
 
 ## Must Do Before Starting: Calculate Minimum Detectable Effect (MDE)
 
@@ -138,6 +224,10 @@ SD of per-pair differences across dimensions (2026-07-20, 50 pairs, sonnet judge
 
 **accuracy is an outlier** — SD is 2x the second highest dimension and 9x the lowest, with 36 out of 50 pairs varying.
 When choosing it as the target dimension, `|Δ| < 0.36` is completely undetectable at n=50; detecting Δ=0.2 requires n≈331 pairs.
+
+A subset pair set makes this sharper, not laxer: at n=16 (the 2026-08-30 median) the accuracy MDE is ≈0.65, so the blind
+dimensions cannot adjudicate anything at all and the decision rests on deterministic metrics. Say so in the report up front,
+as those runs did, instead of discovering it after 32 judge calls.
 
 ### When Target Dimension is accuracy, Anchor on factAudit Instead
 
@@ -173,3 +263,4 @@ point estimate, CI, and MDE for that n, enabling readers to distinguish "measure
   improved**, which is a harder and noisier question. A null obtained from an instrument with an already-measured high noise floor
   **is not evidence of absence of effect**. Cross-AI review previously offered an opposing opinion on this point (advocating REJECT),
   but its argument rested on misinterpreting "reducing 185 hard failure lines to zero" as "a line number", and was rejected.
+- npm aliases for the entry points (all take the same flags): `npm run -w @gladlog/eval corpus:build` · `quality` · `ab:interpolate` · `ab:pool` · `ab:stats`.

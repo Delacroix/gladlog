@@ -6,7 +6,18 @@
   "scripts": {
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "corpus:build": "tsx scripts/buildCorpus.ts",
+    "quality": "tsx scripts/qualityCheck.ts",
+    "ab:pool": "tsx scripts/blindPool.ts",
+    "ab:stats": "tsx scripts/abStats.ts",
+    "ab:interpolate": "tsx scripts/interpolateResponses.ts",
+    "scan:crisis-hp": "tsx scripts/crisisHpStateScan.ts",
+    "scan:menu-t": "tsx scripts/menuTRenderGridScan.ts",
+    "scan:rot": "tsx scripts/curatedRotScan.ts",
+    "scan:dr-gap": "tsx scripts/drGapScan.ts",
+    "scan:dispel": "tsx scripts/dispelCompletenessScan.ts",
+    "acceptance:hash": "tsx scripts/acceptanceHash.ts"
   },
   "dependencies": {
     "@gladlog/parser": "0.0.1",

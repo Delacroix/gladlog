@@ -4,18 +4,26 @@
 // not present in the first-round menu can be deterministically dug up around a
 // single anchor" plus the type distribution. Answers: can multi-round follow-up
 // dig deeper at the mechanical level.
+import {
+  buildDeepDivePack,
+  extractCandidateFindings,
+  type Finding,
+  isHealerSpec,
+} from "@gladlog/analysis";
+import { GladLogParser, type GladMatch } from "@gladlog/parser";
+import { CombatUnitReaction,toLegacyMatch } from "@gladlog/parser-compat";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
-import { GladLogParser, type GladMatch } from "@gladlog/parser";
-import { toLegacyMatch, CombatUnitReaction } from "@gladlog/parser-compat";
-import {
-  extractCandidateFindings,
-  isHealerSpec,
-  buildDeepDivePack,
-  type Finding,
-} from "@gladlog/analysis";
 
-const dir = "/Users/mingjianliu/code/gladlog-eval-private/corpus/public-dps";
+import { resolveEvalHome } from "../../src/evalHome";
+
+// Corpus directory resolved from $GLADLOG_EVAL_HOME (never a hardcoded
+// absolute path); --corpus <dir> overrides it.
+const cIdx = process.argv.indexOf("--corpus");
+const dir =
+  cIdx >= 0
+    ? process.argv[cIdx + 1]!
+    : join(resolveEvalHome(), "corpus", "public-dps");
 const files = readdirSync(dir).filter((f) => f.endsWith(".txt"));
 
 let matches = 0;

@@ -148,7 +148,7 @@ export function parseCandidateEvidenceLine(
  *   present) appended as a further paragraph.
  * - `anchorT`/`unitNames` prefer `deepDive.chips` (`min(chips[].t)`, the
  *   union of their `unitNames`); when there are no chips, candidate events
- *   are reconstructed the same way `packages/eval/scripts/deepDiveScan.ts`
+ *   are reconstructed the same way `packages/eval/scripts/archive/deepDiveScan.ts`
  *   does (`extractCandidateFindings(legacy, owner?.id)`, owner resolution
  *   included) and the finding's `eventIds` are matched against them — the
  *   minimum `t` among matches becomes `anchorT` — floored onto the render
