@@ -36,6 +36,7 @@ import {
 import { classMetadata } from "@gladlog/analysis/src/data/classSpells";
 import { ATTEMPT_INTO_TRINKET_OUTCOME_REF } from "@gladlog/analysis/src/data/outcomeRefs";
 import { canHelpAnotherUnit } from "@gladlog/analysis/src/utils/cooldowns";
+import { fmtTime } from "@gladlog/analysis/src/utils/renderGrid";
 import fs from "fs-extra";
 import path from "path";
 
@@ -438,7 +439,7 @@ interface SnapshotItem {
   facts: Record<string, string>;
 }
 
-function parseFactsBlock(raw: string): Record<string, string> {
+export function parseFactsBlock(raw: string): Record<string, string> {
   const out: Record<string, string> = {};
   if (!raw) return out;
   for (const token of raw.split(", ")) {
@@ -847,6 +848,127 @@ function fmtMmSs(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+// A candidate-menu line: "  - id=… type=death-setup t=140.2s units=…
+// facts={t=140.2, kind=trinket-early, deathT=145.9, …}". `type=` gives the
+// candidate type; the fact block (parsed by `parseFactsBlock`) gives every
+// named time fact, not just the leading `t=` the "when" prefix shows.
+const MENU_LINE_TYPE = /\btype=(\S+)/;
+const MENU_LINE_FACTS = /facts=\{(.*)\}\s*$/;
+
+/**
+ * (candidate type, fact key) -> the timeline marker rendering the SAME
+ * instant that fact describes, one candidate to one marker line at the same
+ * rendered second. Only facts with such an unambiguous 1:1 marker are listed
+ * here; `menuTRenderGridScan.ts` documents the ones left out (death-setup's
+ * OWN `t` -- the setup moment -- whose marker varies by `kind`;
+ * crisis-no-response's `t` -- a derived HP threshold, not a printed event)
+ * and why. `death-setup`'s `deathT` fact IS listed: it names the same later
+ * death `death`'s own `t` names, so it shares that marker.
+ */
+export interface MenuTRenderGridSpec {
+  readonly type: string;
+  readonly factKey: string;
+  readonly marker: string;
+}
+export const MENU_T_RENDER_GRID_SPECS: readonly MenuTRenderGridSpec[] = [
+  { type: "kick-eaten", factKey: "t", marker: "[KICK]" },
+  { type: "death", factKey: "t", marker: "[DEATH]" },
+  { type: "missed-cleanse", factKey: "t", marker: "[UNCLEANSED DEBUFF]" },
+  { type: "death-setup", factKey: "deathT", marker: "[DEATH]" },
+];
+
+export type MenuTRenderGridStatus = "ok" | "off-by-one" | "no-marker";
+
+export interface MenuTRenderGridResult {
+  type: string;
+  factKey: string;
+  lineIndex: number;
+  t: number;
+  flooredSecond: number;
+  status: MenuTRenderGridStatus;
+}
+
+/**
+ * 13th hardFailure class (2026-08-30, kick-eaten render-grid bug): a
+ * candidate-menu line's time fact and its matching timeline marker are two
+ * renderings of the same instant (the fact via `fmtFactNum`/`fmtFactTime`,
+ * the marker via `fmtTime`) and must floor onto the same rendered second, per
+ * CLAUDE.md's Shared-Predicate Rule ("anchored to the rendered value …
+ * floored to the rendering grid"). `fmtFactNum`'s `toFixed(1)` rounds instead
+ * of floors, so a raw value in x.95–x.99 rendered `(x+1).0` one second past
+ * where `fmtTime` still floors its marker — measured on the 2026-08-30 A/B
+ * corpus: kick-eaten 20/209 (9.6%), death 23/375 (6.1%), missed-cleanse
+ * 3/58 (5.2%, the other 8/58 are late-cleanse windows that legitimately have
+ * no `[UNCLEANSED DEBUFF]` marker — see menuTRenderGridScan.ts), death-setup
+ * `deathT` 10/129 (7.8%) — always this exact shape. `Math.floor(t) - 1`
+ * matching the marker (not just "no marker anywhere") is the fingerprint of
+ * the rounding-up bug specifically, vs. a marker missing for some unrelated
+ * reason (e.g. the late-cleanse case above).
+ */
+export function scanMenuTRenderGrid(
+  lines: string[],
+  specs: readonly MenuTRenderGridSpec[] = MENU_T_RENDER_GRID_SPECS,
+): MenuTRenderGridResult[] {
+  const hasMarkerAt = (sec: number, marker: string): boolean =>
+    sec >= 0 &&
+    lines.some(
+      (l) => l.trimStart().startsWith(fmtTime(sec)) && l.includes(marker),
+    );
+
+  const results: MenuTRenderGridResult[] = [];
+  lines.forEach((line, i) => {
+    if (!line.trimStart().startsWith("- id=")) return;
+    const typeM = line.match(MENU_LINE_TYPE);
+    const factsM = line.match(MENU_LINE_FACTS);
+    if (!typeM || !factsM) return;
+    const type = typeM[1]!;
+    const relevant = specs.filter((s) => s.type === type);
+    if (relevant.length === 0) return;
+    const facts = parseFactsBlock(factsM[1]!);
+    for (const spec of relevant) {
+      const raw = facts[spec.factKey];
+      if (raw === undefined || !/^\d+(?:\.\d+)?$/.test(raw)) continue;
+      const t = Number(raw);
+      const flooredSecond = Math.floor(t);
+      const status: MenuTRenderGridStatus = hasMarkerAt(
+        flooredSecond,
+        spec.marker,
+      )
+        ? "ok"
+        : hasMarkerAt(flooredSecond - 1, spec.marker)
+          ? "off-by-one"
+          : "no-marker";
+      results.push({
+        type,
+        factKey: spec.factKey,
+        lineIndex: i,
+        t,
+        flooredSecond,
+        status,
+      });
+    }
+  });
+  return results;
+}
+
+/** Gate wrapper: kick-eaten's `t` only. The other specs
+ * (death/missed-cleanse's `t`, death-setup's `deathT`) are real,
+ * corpus-verified instances of the SAME bug (see the doc comment above) and
+ * were fixed the same way, but this particular hardFailure text is
+ * kick-eaten-specific per the fix's scope; `scanMenuTRenderGrid`'s full
+ * spec list is what `menuTRenderGridScan.ts` audits going forward. */
+export function checkMenuTRenderGrid(lines: string[]): string[] {
+  return scanMenuTRenderGrid(
+    lines,
+    MENU_T_RENDER_GRID_SPECS.filter((s) => s.type === "kick-eaten"),
+  )
+    .filter((r) => r.status === "off-by-one")
+    .map(
+      (r) =>
+        `line ${r.lineIndex + 1}: type=kick-eaten t=${r.t} floors to ${fmtTime(r.flooredSecond)} but its [KICK] marker sits one render-grid second earlier at ${fmtTime(r.flooredSecond - 1)} (fmtFactNum's toFixed(1) rounded an x.95–x.99 timestamp up past the whole-second boundary fmtTime floors to)`,
+    );
+}
+
 export function checkSelfOnlyDefensiveClaims(lines: string[]): string[] {
   const violations: string[] = [];
   lines.forEach((line, i) => {
@@ -1092,6 +1214,7 @@ export function checkMatch(
   hardFailures.push(...checkBehaviorPriorConsistency(lines));
   hardFailures.push(...checkCrisisHpStateConsistency(lines));
   hardFailures.push(...checkOutcomeRefConsistency(lines));
+  hardFailures.push(...checkMenuTRenderGrid(lines));
 
   return {
     ordinal: entry.ordinal,

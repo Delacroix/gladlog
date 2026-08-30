@@ -23,7 +23,7 @@ import {
 } from "../../utils/cooldowns";
 import { isStunCcInstance } from "../../utils/drAnalysis";
 import { castFailedInWindow, type RawStreams } from "../../utils/rawStreams";
-import { fmtFactNum as fmt } from "../factFormat";
+import { fmtFactNum as fmt, fmtFactTime } from "../factFormat";
 import { CandidateEvent } from "../types";
 import { filterIntentGuardEvidence, formatAttemptedFact } from "./shared";
 
@@ -214,7 +214,12 @@ export function deathSetupEvents(parts: DeathSetupParts): CandidateEvent[] {
       facts: {
         t: fmt(lock.atSeconds),
         kind: "healer-locked",
-        deathT: fmt(deathT),
+        // Render-grid fix (2026-08-30, same bug/fix as kick-eaten): deathT
+        // names the SAME instant the later "death" candidate's own t names,
+        // and must floor onto the same [DEATH] marker second -- 10/129
+        // (7.8%) death-setup deathT facts on the 2026-08-30 A/B corpus
+        // rounded up past it before this.
+        deathT: fmtFactTime(deathT),
         victim: victim.name,
         healer: parts.healerCC!.healerName,
         cc: lock.spellName,
@@ -243,7 +248,12 @@ export function deathSetupEvents(parts: DeathSetupParts): CandidateEvent[] {
         facts: {
           t: fmt(trinketT),
           kind: "trinket-early",
-          deathT: fmt(deathT),
+          // Render-grid fix (2026-08-30, same bug/fix as kick-eaten): deathT
+          // names the SAME instant the later "death" candidate's own t names,
+          // and must floor onto the same [DEATH] marker second -- 10/129
+          // (7.8%) death-setup deathT facts on the 2026-08-30 A/B corpus
+          // rounded up past it before this.
+          deathT: fmtFactTime(deathT),
           victim: victim.name,
           ccAtDeath: deadInCC.spellName,
           gapS: fmt(deathT - trinketT),
@@ -288,7 +298,12 @@ export function deathSetupEvents(parts: DeathSetupParts): CandidateEvent[] {
       facts: {
         t: fmt(last.timeSeconds),
         kind: "defensive-early",
-        deathT: fmt(deathT),
+        // Render-grid fix (2026-08-30, same bug/fix as kick-eaten): deathT
+        // names the SAME instant the later "death" candidate's own t names,
+        // and must floor onto the same [DEATH] marker second -- 10/129
+        // (7.8%) death-setup deathT facts on the 2026-08-30 A/B corpus
+        // rounded up past it before this.
+        deathT: fmtFactTime(deathT),
         victim: victim.name,
         spell: cd.spellName,
         gapS: fmt(deathT - last.timeSeconds),
@@ -454,7 +469,9 @@ export function deathUnusedDefensiveEvents(
       t: deathT,
       unitNames: [parts.victim.name],
       facts: {
-        t: fmt(deathT),
+        // Render-grid fix (2026-08-30, same bug/fix as kick-eaten): t IS the
+        // death instant, matched against the [DEATH] marker.
+        t: fmtFactTime(deathT),
         unit: parts.victim.name,
         walls: listedWalls.map((w) => w.spellName).join(", "),
         free: freeState ?? "usable_in_cc",
@@ -530,7 +547,9 @@ export function externalUnusedEvents(input: {
       spell: avail.spellName,
       spellId: avail.spellId,
       facts: {
-        t: fmt(deathT),
+        // Render-grid fix (2026-08-30, same bug/fix as kick-eaten): t IS the
+        // death instant, matched against the [DEATH] marker.
+        t: fmtFactTime(deathT),
         victim: victim.name,
         owner: owner.name,
         external: avail.spellName,
