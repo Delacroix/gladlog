@@ -90,7 +90,7 @@
       "producer": "packages/eval/scripts/observedSpellIds.ts"
     },
     "behaviorPriorGenerated.json": {
-      "entries": 9,
+      "entries": 18,
       "producer": "packages/eval/scripts/behaviorPriorScan.ts emit-table"
     },
     "usableWhileCcGenerated.ts": {
