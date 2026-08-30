@@ -299,9 +299,21 @@ describe("countsAtThresholds — cd-hoarded wiring", () => {
     }[],
     neverUsed: true,
   };
-  function advancedAction(t: number, currentHp: number, maxHp = 100) {
+  // `logLine.timestamp` + `advancedActorId` are what `gridHpPct`
+  // (analysis/src/utils/cooldowns.ts) reads — the [STATE] tick's sampler that
+  // crisisDecisionPoints' render-grid anchor shares; flat `timestamp` is what
+  // that module's own `samplesOf` reads. A fixture must carry both, and the
+  // actor id must be the owning unit's, or no decision point can be anchored.
+  function advancedAction(
+    t: number,
+    currentHp: number,
+    maxHp = 100,
+    actorId = "f1",
+  ) {
     return {
       timestamp: START + t,
+      logLine: { timestamp: START + t },
+      advancedActorId: actorId,
       advancedActorMaxHp: maxHp,
       advancedActorCurrentHp: currentHp,
     } as never;
@@ -365,10 +377,10 @@ describe("countsAtThresholds — cd-hoarded wiring", () => {
       name: "Mate-Realm",
       reaction: CombatUnitReaction.Friendly,
       advancedActions: [
-        advancedAction(0, 100),
-        advancedAction(1000, 70),
-        advancedAction(2000, 38),
-        advancedAction(3000, 35),
+        advancedAction(0, 100, 100, "f2"),
+        advancedAction(1000, 70, 100, "f2"),
+        advancedAction(2000, 38, 100, "f2"),
+        advancedAction(3000, 35, 100, "f2"),
       ],
       damageIn: [damageAction(1500, "e1", 30)],
     });

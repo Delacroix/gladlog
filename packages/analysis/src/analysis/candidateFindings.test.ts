@@ -1111,10 +1111,13 @@ describe("crisis-no-response wiring(菜单接线 + death-unused-defensive preced
           spec: "577", // Demon_Hunter_Havoc — non-healer
           class: CombatUnitClass.DemonHunter,
           advancedActions: [
-            hp(0, 100),
-            hp(1000, 70),
-            hp(2000, 38),
-            hp(3000, 35),
+            // 4th arg = advancedActorId: these samples belong to E1, and
+            // `gridHpPct` (the [STATE] sampler the crisis anchor now shares)
+            // rejects any sample whose advancedActorId is not the unit's own.
+            hp(0, 100, 100, "E1"),
+            hp(1000, 70, 100, "E1"),
+            hp(2000, 38, 100, "E1"),
+            hp(3000, 35, 100, "E1"),
           ],
           damageIn: [
             {

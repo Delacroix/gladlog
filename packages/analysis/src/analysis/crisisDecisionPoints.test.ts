@@ -5,6 +5,8 @@ import {
 } from "@gladlog/parser-compat";
 import { describe, expect, it } from "vitest";
 
+// the [STATE] renderer's own HP sampler — imported, not re-derived
+import { gridHpPct } from "../utils/cooldowns";
 import {
   CRISIS_HP_PCT,
   CRISIS_MIN_DMG2S,
@@ -15,8 +17,22 @@ import {
 } from "./crisisDecisionPoints";
 
 const T0 = 1_000_000;
-const hp = (t: number, cur: number, max = 100, x = 0, y = 0) => ({
+// `logLine.timestamp` + `advancedActorId` are what `gridHpPct`
+// (utils/cooldowns.ts) reads — the [STATE] tick's sampler that the render-grid
+// re-anchor now shares; `timestamp` is what this module's own `samplesOf`
+// reads. A fixture must carry both or the two halves disagree about when the
+// sample happened, which is the very defect the anchor exists to remove.
+const hp = (
+  t: number,
+  cur: number,
+  max = 100,
+  x = 0,
+  y = 0,
+  actorId = "H",
+) => ({
   timestamp: T0 + t,
+  logLine: { timestamp: T0 + t },
+  advancedActorId: actorId,
   advancedActorCurrentHp: cur,
   advancedActorMaxHp: max,
   advancedActorPositionX: x,
@@ -334,7 +350,7 @@ describe("crisisDecisionPoints", () => {
     const t = T0 + 2000; // the crossing timestamp for the default unit()
     const atEdge = unit({ deathRecords: [{ timestamp: t + 10_000 }] });
     const justPast = unit({ deathRecords: [{ timestamp: t + 10_001 }] });
-    const atCrossing = unit({ deathRecords: [{ timestamp: t }] }); // (t, …] excludes t itself
+    const atCrossing = unit({ deathRecords: [{ timestamp: t }] });
     const none = unit({ deathRecords: [] });
     expect(
       crisisDecisionPoints(atEdge, combat(atEdge, [enemy()]))[0]!.diedWithin10s,
@@ -343,10 +359,15 @@ describe("crisisDecisionPoints", () => {
       crisisDecisionPoints(justPast, combat(justPast, [enemy()]))[0]!
         .diedWithin10s,
     ).toBe(false);
+    // A death AT the crossing second is no longer a `diedWithin10s=false`
+    // point — it is no point at all. `[STATE]` renders `unit:dead` from
+    // Math.floor(deathSeconds) on (isDeadAtRenderSecond), so the render-grid
+    // anchor refuses to place a numeric HP claim on that second: the
+    // `(t, t+10000]` window's exclusion of `t` itself is now enforced one
+    // layer earlier, by dropping the crossing.
     expect(
-      crisisDecisionPoints(atCrossing, combat(atCrossing, [enemy()]))[0]!
-        .diedWithin10s,
-    ).toBe(false);
+      crisisDecisionPoints(atCrossing, combat(atCrossing, [enemy()])),
+    ).toEqual([]);
     expect(
       crisisDecisionPoints(none, combat(none, [enemy()]))[0]!.diedWithin10s,
     ).toBe(false);
@@ -590,5 +611,64 @@ describe("crisisDecisionPoints — role='dps' gate 3 (spec §1d, GH #59)", () =>
     // hasTool reduces to !rooted, which is false here.
     expect(rooted.hasTool).toBe(false);
     expect(rooted.feasible).toBe(false);
+  });
+});
+
+/**
+ * Render-grid anchoring (2026-08-30, CLAUDE.md Shared-Predicate Rule).
+ *
+ * A decision point's `hpPct` is rendered next to a floored second, and
+ * `matchTimeline.ts`'s `[STATE]` tick renders `gridHpPct(unit, matchStartMs +
+ * s*1000)` next to the same displayed second. Sampling the raw advancedAction
+ * instead put the two in contradiction on 155/167 covered cd-hoarded lines and
+ * 7/8 crisis-no-response lines across the 309-prompt A/B corpus; these cases
+ * pin the anchor that removed it. The equality assertion imports `gridHpPct`
+ * from utils/cooldowns — literally the symbol the STATE renderer calls, so a
+ * change to either side can only move both together.
+ */
+describe("crisisDecisionPoints — render-grid anchoring", () => {
+  it("a crossing sampled between two whole seconds reports the grid second, not the raw instant", () => {
+    const o = unit({
+      advancedActions: [hp(0, 100), hp(1000, 70), hp(2400, 38), hp(3000, 35)],
+    });
+    const p = crisisDecisionPoints(o, combat(o, [enemy()]))[0]!;
+    // raw crossing is at 2.4s; the rendered second is 2
+    expect(p.tSec).toBe(2);
+    expect(Number.isInteger(p.tSec)).toBe(true);
+    expect(p.tMs).toBe(T0 + 2000);
+  });
+
+  it("hpPct IS the [STATE] tick's own reading at tSec (same sampler, same instant)", () => {
+    for (const actions of [
+      [hp(0, 100), hp(1000, 70), hp(2400, 38), hp(3000, 35)],
+      [hp(0, 100), hp(900, 90), hp(1800, 27), hp(4000, 22)],
+    ]) {
+      const o = unit({ advancedActions: actions });
+      for (const p of crisisDecisionPoints(o, combat(o, [enemy()]))) {
+        expect(p.hpPct).toBe(gridHpPct(o as never, T0 + p.tSec * 1000));
+        expect(p.hpPct).toBeLessThanOrEqual(Math.round(CRISIS_HP_PCT * 100));
+      }
+    }
+  });
+
+  it("a dip that no whole second can see is dropped — the rendered prompt cannot support it", () => {
+    // HP is only below 40% between 1.4s and 1.45s; every grid second in reach
+    // samples a 100% reading nearer than the dip, so no [STATE] tick would
+    // ever show a crisis and no candidate may cite one.
+    const o = unit({
+      advancedActions: [
+        hp(0, 100),
+        hp(1000, 100),
+        hp(1400, 38),
+        hp(1450, 100),
+        hp(2000, 100),
+        hp(3000, 100),
+        hp(4000, 100),
+        hp(5000, 100),
+        hp(6000, 100),
+        hp(7000, 100),
+      ],
+    });
+    expect(crisisDecisionPoints(o, combat(o, [enemy()]))).toEqual([]);
   });
 });

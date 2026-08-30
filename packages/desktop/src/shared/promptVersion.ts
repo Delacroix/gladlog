@@ -195,4 +195,16 @@
 // Defensive-tagged, non-throughput cooldowns count now (previously any major
 // CD) → 菜单未变(仍是 "cd-hoarded"),但该类型的 facts/legend 全变 → prompt 变
 // → 旧缓存作废。
-export const PROMPT_VERSION = 43;
+// v44 (2026-08-30): crisis decision points are re-anchored onto the prompt's
+// render grid (crisisDecisionPoints' anchorToRenderGrid + the shared
+// `gridHpPct` sampler in utils/cooldowns.ts, the same one matchTimeline's
+// [STATE] tick uses). cd-hoarded's `crisisHpPct` / crisis-no-response's
+// `hpPct` are now the [STATE] tick's own reading at the displayed second
+// instead of the raw advancedAction sample, `t` is a whole second on both
+// types (crisis-no-response used to render one decimal, e.g. `t=116.9`), and
+// a crossing no whole second can see is dropped. Measured contradiction
+// against the same-second [STATE] line over the 309-prompt A/B corpus:
+// cd-hoarded 155/167 covered lines → 0, crisis-no-response 7/8 → 0
+// (packages/eval/scripts/crisisHpStateScan.ts). facts 变 → prompt 变 → 旧缓存
+// 作废。
+export const PROMPT_VERSION = 44;
