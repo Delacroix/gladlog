@@ -1,4 +1,8 @@
-import { CombatUnitReaction, LogEvent } from "@gladlog/parser-compat";
+import {
+  CombatUnitClass,
+  CombatUnitReaction,
+  LogEvent,
+} from "@gladlog/parser-compat";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -479,5 +483,112 @@ describe("crisisDecisionPoints", () => {
     };
     const p = crisisDecisionPoints(o, combat(o, [e, p1, p2]))[0]!;
     expect(p.attackers2s).toBe(1);
+  });
+});
+
+describe("crisisDecisionPoints — role='dps' gate 3 (spec §1d, GH #59)", () => {
+  // A DPS owner (Rogue, any spec — class-wide ability list). Root spell 339
+  // (Entangling Roots) is a real official "roots"-typed spell; Cloak of
+  // Shadows 31224 is a real Rogue Defensive ability in bigDefensiveSpellIds;
+  // Kidney Shot 408 is a real Rogue Control ability. `unit()`'s default owner
+  // fixture is reused verbatim (same HP/damage crossing shape), only
+  // `class`/`spec`/response evidence differ per test.
+  const dpsUnit = (over: Record<string, unknown> = {}) =>
+    unit({
+      class: CombatUnitClass.Rogue,
+      spec: "259", // Assassination — non-healer, irrelevant to classMetadata (keyed by class only)
+      ...over,
+    });
+  const rootedFromE1 = (extraApplied: number = T0 + 1200) => [
+    {
+      timestamp: extraApplied,
+      spellId: "339", // Entangling Roots
+      srcUnitId: "E1",
+      destUnitId: "H",
+      auraType: "DEBUFF",
+      logLine: { event: "SPELL_AURA_APPLIED" },
+    },
+    {
+      timestamp: T0 + 6000,
+      spellId: "339",
+      srcUnitId: "E1",
+      destUnitId: "H",
+      auraType: "DEBUFF",
+      logLine: { event: "SPELL_AURA_REMOVED" },
+    },
+  ];
+  // A cast far enough before combat start that any real cooldown has long
+  // since elapsed by the crossing (t=T0+2000) — puts the ability in the
+  // ledger via cast evidence, and cdAvailableAt reads it as long available,
+  // without needing to know the ability's exact cooldown length.
+  const castLongAgo = (spellId: string) => [
+    {
+      timestamp: T0 - 200_000,
+      spellId,
+      logLine: { event: LogEvent.SPELL_CAST_SUCCESS },
+    },
+  ];
+
+  it("rooted, no wall/control ready → hasTool=false, feasible=false", () => {
+    const o = dpsUnit({ auraEvents: rootedFromE1() });
+    const p = crisisDecisionPoints(o, combat(o, [enemy()]), "dps")[0]!;
+    expect(p.hasTool).toBe(false);
+    expect(p.feasible).toBe(false);
+  });
+
+  it("rooted but a personal wall (Cloak of Shadows, bigDefensiveSpellIds) is ready → hasTool=true, feasible=true", () => {
+    const o = dpsUnit({
+      auraEvents: rootedFromE1(),
+      spellCastEvents: castLongAgo("31224"),
+    });
+    const p = crisisDecisionPoints(o, combat(o, [enemy()]), "dps")[0]!;
+    expect(p.hasTool).toBe(true);
+    expect(p.feasible).toBe(true);
+  });
+
+  it("rooted but a Control-tagged major CD (Kidney Shot) is ready → hasTool=true, feasible=true", () => {
+    const o = dpsUnit({
+      auraEvents: rootedFromE1(),
+      spellCastEvents: castLongAgo("408"),
+    });
+    const p = crisisDecisionPoints(o, combat(o, [enemy()]), "dps")[0]!;
+    expect(p.hasTool).toBe(true);
+    expect(p.feasible).toBe(true);
+  });
+
+  it("not rooted, nothing ready → hasTool=true trivially (still free to move) → feasible=true", () => {
+    const o = dpsUnit();
+    const p = crisisDecisionPoints(o, combat(o, [enemy()]), "dps")[0]!;
+    expect(p.hasTool).toBe(true);
+    expect(p.feasible).toBe(true);
+  });
+
+  it("healer role: rooted still doesn't affect gate 3 — hasTool=true, feasible unaffected by root (gate 3 trivially true for a healer)", () => {
+    const o = unit({ auraEvents: rootedFromE1() }); // role defaults to "healer"
+    const p = crisisDecisionPoints(o, combat(o, [enemy()]))[0]!;
+    expect(p.hasTool).toBe(true);
+    expect(p.feasible).toBe(true);
+  });
+
+  it("kit not resolvable (no class on the unit) → wallReady/controlReady stay false, gate 3 reduces to !rooted", () => {
+    // dpsUnit() without a `class` override still carries no `class` unless
+    // set — construct directly so extractMajorCooldowns' classMetadata.find
+    // returns undefined and the ledger comes back empty, exercising the same
+    // "kit not resolvable" path the try/catch around extractMajorCooldowns
+    // guards.
+    const o = unit({ spellCastEvents: castLongAgo("31224") }); // no `class` at all
+    const rooted = crisisDecisionPoints(
+      unit({
+        auraEvents: rootedFromE1(),
+        spellCastEvents: castLongAgo("31224"),
+      }),
+      combat(o, [enemy()]),
+      "dps",
+    )[0]!;
+    // no class → extractMajorCooldowns' classMetadata.find(...) finds
+    // nothing → wallCds/controlCds stay empty regardless of cast evidence →
+    // hasTool reduces to !rooted, which is false here.
+    expect(rooted.hasTool).toBe(false);
+    expect(rooted.feasible).toBe(false);
   });
 });

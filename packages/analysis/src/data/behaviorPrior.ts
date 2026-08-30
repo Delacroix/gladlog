@@ -13,6 +13,13 @@
  */
 import raw from "./behaviorPriorGenerated.json";
 
+/** Which population a decision point / reference cell belongs to (spec §1d,
+ * GH #59). Declared here (data/) rather than in crisisDecisionPoints.ts
+ * (analysis/) — analysis already imports from data/, so an analysis → data
+ * import is the non-cyclic direction; the reverse (data importing the type
+ * from analysis/crisisDecisionPoints.ts) would cycle. crisisDecisionPoints.ts
+ * re-exports this same type rather than declaring its own. */
+export type CrisisRole = "healer" | "dps";
 export const BEHAVIOR_PRIOR_N_FLOOR = 50;
 export type DmgBin = "<10%" | "10-20%" | ">=20%";
 export function dmgBinOf(dmg2s: number): DmgBin {
@@ -37,8 +44,13 @@ function isValidOutcome(v: unknown): v is BehaviorPriorOutcome {
  * through the same function — one place, both sides (CLAUDE.md
  * shared-predicate rule). The enum itself still travels as
  * `facts.refOutcomeKey` for anything that needs to branch on it. */
+// Role-neutral (spec §1d, GH #59): `ownDeath10s` is now the outcome for
+// BOTH a healer's non-Solo-Shuffle crossing and every DPS crossing (dps
+// cells are always ownDeath10s, spec §1d — outcomeOf), so its phrase can no
+// longer say "healer". `teamDeath15s` stays healer-only (outcomeOf never
+// returns it for a dps role), so its wording is unaffected.
 export const OUTCOME_PHRASE: Record<BehaviorPriorOutcome, string> = {
-  ownDeath10s: "this healer died within 10 s",
+  ownDeath10s: "this player died within 10 s",
   teamDeath15s: "a teammate (or the healer) died within 15 s",
 };
 export function outcomePhrase(o: BehaviorPriorOutcome): string {
@@ -70,7 +82,7 @@ export interface BehaviorPriorRef {
   /** ALL ranked players who DID respond, and their 10s death rate (int %) */
   nResp: number;
   deathRespPct: number;
-  /** among healers who DID respond, the most common answers, shares as int %
+  /** among players of this role who DID respond, the most common answers, shares as int %
    * (no rank filter — the rating line is out entirely, 2026-08-29 amendment) */
   top: [string, number][];
   /** which death predicate deathNoRespPct/deathRespPct were computed under
@@ -81,7 +93,7 @@ const pct = (f: number) => Math.round(f * 100);
 
 export function lookupBehaviorPrior(
   bracket: string,
-  role: "healer",
+  role: CrisisRole,
   dmg2s: number,
 ): BehaviorPriorRef | null {
   const fineKey = `${bracket}|${role}|${dmgBinOf(dmg2s)}`;

@@ -13,6 +13,7 @@
  */
 import { LogEvent } from "@gladlog/parser-compat";
 
+import { type CrisisRole } from "../data/behaviorPrior";
 import { classMetadata } from "../data/classSpells";
 import { spellClassMap } from "../data/drCategories";
 import spellIdLists from "../data/spellIdLists";
@@ -22,7 +23,18 @@ import {
   spells as spellMeta,
 } from "../data/spellTags";
 import { SpellTag } from "../data/spellTypes";
+import {
+  cdAvailableAt,
+  extractMajorCooldowns,
+  type IMajorCooldownInfo,
+  isProcOnlyActivation,
+} from "../utils/cooldowns";
 import { buildFilteredAuraIntervals } from "../utils/utils";
+
+/** Re-exported from data/behaviorPrior.ts (the non-cyclic home for this
+ * type — see its doc comment) so callers of this module don't need a second
+ * import just to name a role. */
+export type { CrisisRole };
 
 /** A friendly at or below this HP fraction opens a "crisis" (moved here from
  * packages/eval/src/explore/signalSkillGradient.ts, which now re-exports). */
@@ -88,8 +100,12 @@ export interface DecisionPoint {
    * (peel is a teammate's action — rendered, never credited to the owner) */
   responded: boolean;
   selfHealPct: number;
-  /** gates 1, 2 and 4 all pass (gate 3, "has a tool", is trivially true for a
-   * healer — v1 is healer-only, spec §2) */
+  /** gate 3, "has a tool" (spec §1d, GH #59): trivially true for a healer
+   * (self-heal always exists). For a DPS owner: `!rooted || wallReady ||
+   * controlReady` — not rooted (still free to move/act), or a personal wall
+   * is off cooldown, or a Control-tagged major CD is off cooldown. */
+  hasTool: boolean;
+  /** gates 1, 2, 3 and 4 all pass */
   feasible: boolean;
   /** gate 5: dmg2s >= CRISIS_MIN_DMG2S (spec §1b). Independent of `feasible`
    * — a point can be dangerous but infeasible (e.g. CC'd), or feasible but
@@ -202,7 +218,11 @@ function nearestSample(
   return best;
 }
 
-export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
+export function crisisDecisionPoints(
+  owner: any,
+  combat: any,
+  role: CrisisRole = "healer",
+): DecisionPoint[] {
   const start: number = combat?.startTime ?? 0;
   const samples = samplesOf(owner);
   if (samples.length < 2) return [];
@@ -270,6 +290,33 @@ export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
   // over it, already used by candidateFindings.ts's burst-ledger path.
   const cc = buildFilteredAuraIntervals(owner, ccSpellIds, combat);
   const silence = buildFilteredAuraIntervals(owner, SILENCE_IDS, combat);
+
+  // Gate 3 for a DPS owner (spec §1d, GH #59): rooted intervals + the
+  // owner's Defensive-wall / Control-CD ledger, both computed once for the
+  // whole round (not per-crossing) the same way `cc`/`silence` are above.
+  // Skipped entirely for a healer owner — gate 3 is trivially true there.
+  let rootIntervals: ReturnType<typeof buildFilteredAuraIntervals> = [];
+  let wallCds: IMajorCooldownInfo[] = [];
+  let controlCds: IMajorCooldownInfo[] = [];
+  if (role === "dps") {
+    rootIntervals = buildFilteredAuraIntervals(owner, rootSpellIds, combat);
+    let cds: IMajorCooldownInfo[] = [];
+    try {
+      cds = extractMajorCooldowns(owner, combat);
+    } catch {
+      // kit not resolvable (e.g. unknown class/spec) → both stay empty,
+      // hasTool then reduces to `!rooted`.
+      cds = [];
+    }
+    wallCds = cds.filter(
+      (cd) =>
+        cd.tag === "Defensive" &&
+        !cd.isThroughput &&
+        !isProcOnlyActivation(cd.spellId) &&
+        PERSONAL_WALL_IDS.has(cd.spellId),
+    );
+    controlCds = cds.filter((cd) => cd.tag === "Control");
+  }
 
   const enemyBurstCasts: number[] = [];
   const friendControlCasts: { t: number; dest: string }[] = [];
@@ -365,9 +412,21 @@ export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
       responses.external ||
       responses.control ||
       responses.kite;
+    const tSec = (t - start) / 1000;
+    // Gate 3 (spec §1d): trivially true for a healer (self-heal is always a
+    // tool). For a DPS owner, `!rooted` alone already satisfies it — being
+    // free to move/act is a tool — so `rooted` only matters when a wall or a
+    // Control CD could substitute for mobility.
+    let hasTool = true;
+    if (role === "dps") {
+      const rooted = rootIntervals.some((i) => i.startMs <= t && i.endMs >= t);
+      const wallReady = wallCds.some((cd) => cdAvailableAt(cd, tSec));
+      const controlReady = controlCds.some((cd) => cdAvailableAt(cd, tSec));
+      hasTool = !rooted || wallReady || controlReady;
+    }
     out.push({
       tMs: t,
-      tSec: (t - start) / 1000,
+      tSec,
       hpPct: Math.round(x.hp * 100),
       dmg2s: dmg2sRounded,
       attackers2s: attackers.size,
@@ -383,7 +442,8 @@ export function crisisDecisionPoints(owner: any, combat: any): DecisionPoint[] {
       responses,
       responded,
       selfHealPct: Math.round(selfHeal * 100),
-      feasible: !inCC && !lockedOut && !diedInWindow,
+      hasTool,
+      feasible: !inCC && !lockedOut && !diedInWindow && hasTool,
     });
   }
   return out;

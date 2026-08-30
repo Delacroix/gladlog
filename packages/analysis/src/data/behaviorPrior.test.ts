@@ -13,11 +13,31 @@ import {
 import raw from "./behaviorPriorGenerated.json";
 
 describe("behaviorPrior lookup", () => {
-  it("every bracket has a star cell with nNoResp ≥ floor (table health — regenerate when red)", () => {
+  it("every bracket has a healer star cell with nNoResp ≥ floor (table health — regenerate when red)", () => {
     for (const b of ["Rated Solo Shuffle", "2v2", "3v3"]) {
       const c = (raw as any).cells[`${b}|healer|*`];
       expect(c, b).toBeDefined();
       expect(c.nNoResp).toBeGreaterThanOrEqual(BEHAVIOR_PRIOR_N_FLOOR);
+    }
+  });
+
+  // TRANSITIONAL §1d (GH #59): the dps behavior-prior scan hasn't landed
+  // yet, so today's real behaviorPriorGenerated.json carries zero `|dps|`
+  // cells — asserting their presence unconditionally would be red from the
+  // moment §1d's plumbing merges, before there is any dps data to generate.
+  // Once the dps scan lands and the JSON gains `|dps|*` cells, this check
+  // tightens itself automatically (the `some` guard flips true) — no code
+  // change needed, but TIGHTEN THIS to an unconditional assertion (drop the
+  // `if`) once that happens, so a future regenerate can't silently drop the
+  // dps cells again.
+  it("every bracket has a dps star cell with nNoResp ≥ floor, once any dps cell exists in the table (table health — regenerate when red)", () => {
+    const cells = (raw as any).cells as Record<string, unknown>;
+    const hasAnyDpsCell = Object.keys(cells).some((k) => k.includes("|dps|"));
+    if (!hasAnyDpsCell) return; // TRANSITIONAL — see comment above
+    for (const b of ["Rated Solo Shuffle", "2v2", "3v3"]) {
+      const c = cells[`${b}|dps|*`] as { nNoResp: number } | undefined;
+      expect(c, b).toBeDefined();
+      expect(c!.nNoResp).toBeGreaterThanOrEqual(BEHAVIOR_PRIOR_N_FLOOR);
     }
   });
 
