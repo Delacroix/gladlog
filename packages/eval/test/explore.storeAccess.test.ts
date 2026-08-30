@@ -89,3 +89,29 @@ describe.skipIf(!hasLibrary)("storeAccess against real library", () => {
     expect(lines.some((l) => /\d:\d\d/.test(l))).toBe(true);
   });
 });
+
+describe.skipIf(!hasLibrary)(
+  "loadLegacyRound.analysisId — a shuffle round's cache id is the ROUND id (GH #18 bench fix, 2026-08-30)",
+  () => {
+    it("round 0 shares the storage id; round 1 does not", () => {
+      const shuffle = loadIndex(DEFAULT_MATCH_DIR).find(
+        (r) => r.kind === "shuffle" && (r.durationS ?? 0) > 300,
+      );
+      if (!shuffle) return; // library without a multi-round shuffle: nothing to pin
+      const r0 = loadLegacyRound(DEFAULT_MATCH_DIR, shuffle.id, 0);
+      expect(r0.kind).toBe("shuffle");
+      expect(r0.analysisId).toBe(shuffle.id);
+      const r1 = loadLegacyRound(DEFAULT_MATCH_DIR, shuffle.id, 1);
+      expect(r1.analysisId).not.toBe(shuffle.id);
+      expect(r1.analysisId.length).toBeGreaterThan(0);
+      const plain = loadIndex(DEFAULT_MATCH_DIR).find(
+        (r) => r.kind === "match",
+      );
+      if (plain) {
+        expect(loadLegacyRound(DEFAULT_MATCH_DIR, plain.id).analysisId).toBe(
+          plain.id,
+        );
+      }
+    });
+  },
+);

@@ -60,11 +60,12 @@ try {
   const deepPath = join(reviewSessionsDir, `${name}.deep.json`);
   const deep = JSON.parse(readFileSync(deepPath, "utf8")) as DeepFindingInput[];
 
-  const { legacy } = loadLegacyRound(matchesDir, matchId, roundSeq);
+  const { legacy, analysisId } = loadLegacyRound(matchesDir, matchId, roundSeq);
   const session = buildSession({
     name,
     matchId,
     roundSeq,
+    analysisId,
     deep,
     legacy,
     matchesDir,

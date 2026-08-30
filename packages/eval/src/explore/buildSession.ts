@@ -126,6 +126,10 @@ export function buildSession(opts: {
   name: string;
   matchId: string;
   roundSeq?: number;
+  /** Id the analysis cache lives under (`loadLegacyRound().analysisId`):
+   * a shuffle round's own id — only round 0 shares the storage id. Defaults
+   * to `matchId`, which is correct for non-shuffle matches and round 0. */
+  analysisId?: string;
   deep: DeepFindingInput[];
   legacy: LegacyRound;
   matchesDir: string;
@@ -141,7 +145,10 @@ export function buildSession(opts: {
   }));
 
   const { owner } = splitTeams(opts.legacy);
-  const activeResult = readActiveAnalysisResult(opts.matchesDir, opts.matchId);
+  const activeResult = readActiveAnalysisResult(
+    opts.matchesDir,
+    opts.analysisId ?? opts.matchId,
+  );
   const baselineCards: Array<Omit<ReviewCard, "cardId">> = activeResult
     ? baselineToCards(activeResult.findings, opts.legacy, owner).map((c) => ({
         ...c,
