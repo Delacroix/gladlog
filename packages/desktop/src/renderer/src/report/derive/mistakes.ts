@@ -550,7 +550,8 @@ export const MISTAKE_DISCRIMINATION_PP: Readonly<Record<string, number>> = {
   "cd-hoarded": 22.7,
   "external-unused": 14.6,
   "cc-avoidable": 7.7,
-  "death-unused-defensive": 3.8,
+  // death-unused-defensive (3.8) removed 2026-08-29 with its rule (GH #58 retirement) —
+  // the discrimination table may only list types that still have a MISTAKE_RULES entry.
   "missed-purge-kill-window": 2.6,
 };
 
