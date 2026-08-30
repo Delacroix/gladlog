@@ -104,8 +104,17 @@ export const DENOMINATOR_OF: Record<string, keyof RoundExposure> = {
   // (a point in CC, locked out, where the friendly died in-window, or below
   // the dmg2s danger floor is not an opportunity).
   "crisis-no-response": "crisisDecisionPoints",
+  // added 2026-08-29 (GH #50 (a), user ruling): the cc-held family gets an
+  // opportunity denominator — a friendly ALIGNED BURST window (>=2 friendly
+  // offensive CDs overlapping) that opens while the owner has a CC major
+  // available. `cc-held-burst` counts the opportunities the owner did NOT
+  // convert (no own CC landing within 5 s after the burst opens); it is a
+  // scan-side signal, not a candidate type. Round 1 ("kill window" = enemy
+  // defenseless) was rejected as a denominator: 92 % of held windows carried
+  // one (kill windows cover ~118 s per round).
+  "cc-held-burst": "ccBurstOpportunities",
   // Still no honest denominator (kept on `rounds` and flagged, not guessed):
-  //   cc-held          — needs "offensive windows where a CC was worth pressing"
+  //   cc-held          — the candidate itself (>=90 s idle); see cc-held-burst
   //   position-mistake — needs LoS/positioning opportunities, not events
   //   death            — a timeline marker, not an accusation; never interpret it
 };
@@ -131,6 +140,9 @@ export interface RoundExposure {
   enemyCyclones: number;
   /** feasible AND dangerous crisis decision points (`crisisDecisionPoints(owner, legacy).filter((p) => p.feasible && p.dangerous).length`) — the candidate's own opportunity gate */
   crisisDecisionPoints: number;
+  /** friendly aligned burst windows opening while the owner had a CC major
+   * available (cc-held-burst's denominator, 2026-08-29) */
+  ccBurstOpportunities: number;
 }
 
 /** Single-source (spec 2026-08-29): the crisis threshold and merge gap live
