@@ -22,7 +22,10 @@
  *     end to end, each with a negative control so it cannot silently no-op.
  */
 import { ensureAnalysisData } from "@gladlog/analysis";
+import * as candidateTypeFlags from "@gladlog/analysis/src/data/candidateTypeFlags";
+import * as death from "@gladlog/analysis/src/analysis/candidates/death";
 import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFindings";
+import * as bracketKey from "@gladlog/analysis/src/utils/bracketKey";
 import * as cooldownTiming from "@gladlog/analysis/src/analysis/candidates/cooldownTiming";
 import * as candidatesShared from "@gladlog/analysis/src/analysis/candidates/shared";
 import * as crisisDecisionPoints from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
@@ -353,6 +356,21 @@ const INDEX: PredicateRow[] = [
     mod: killWindowTargetSelection,
   },
   // Position and geometry
+  {
+    file: `${A}/utils/bracketKey.ts`,
+    symbol: "bracketKey",
+    mod: bracketKey,
+  },
+  {
+    file: `${A}/data/candidateTypeFlags.ts`,
+    symbol: "BRACKET_TYPE_ALLOWLIST",
+    mod: candidateTypeFlags,
+  },
+  {
+    file: `${A}/analysis/candidates/death.ts`,
+    symbol: "IMMUNITY_BREAKERS",
+    mod: death,
+  },
   {
     file: `${A}/analysis/candidateFindings.ts`,
     symbol: "candidateTypeOfId",

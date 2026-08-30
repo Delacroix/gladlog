@@ -11,6 +11,7 @@
  * used by buildArchetypePrompts.ts. Any change to that vector must be mirrored here.
  */
 
+import { bracketKey } from "./bracketKey";
 import model3v3 from "../data/archetypes/archetype_model_3v3.json";
 import modelSoloShuffle from "../data/archetypes/archetype_model_solo_shuffle.json";
 import prompts3v3 from "../data/archetypes/archetype_prompts_3v3.json";
@@ -74,10 +75,11 @@ export type ArchetypeBracket = "3v3" | "solo_shuffle";
 export function bracketToArchetypeSlug(
   bracket: string | undefined | null,
 ): ArchetypeBracket | null {
-  if (!bracket) return null;
-  const lower = bracket.toLowerCase();
-  if (lower.includes("solo")) return "solo_shuffle";
-  if (lower.includes("3v3")) return "3v3";
+  // Shared bracket predicate (utils/bracketKey.ts, 2026-08-30) — 2v2 and
+  // unknown brackets have no archetype model.
+  const key = bracketKey(bracket);
+  if (key === "solo") return "solo_shuffle";
+  if (key === "3v3") return "3v3";
   return null;
 }
 

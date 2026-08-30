@@ -40,7 +40,8 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   | "attemptIntoTrinket"
   | "mdCycloneWindow"
   | "missedPurge"
-  | "ccHeld",
+  | "ccHeld"
+  | "killReview",
   boolean
 > = {
   // 下架 2026-08-19(GH #13,用户裁定)。判别力实测为负(−4.4pp)的根因
@@ -81,4 +82,26 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   // 不区分水平,信号前提不成立。时间线冷却台账照旧,只撤掉指控;纯函数
   // ccHeldEvents 保留。数据:GH #50 评论 + eval-private/skill-gradient/。
   ccHeld: false,
+  // 下架 2026-08-30(GH #18 人工标注裁定 (d))。`death` 候选里 side=enemy 的那一半
+  // ——「你们打出的击杀值得复刻」——三张盲评卡全被标「泛泛/不可执行、低或无影响」,
+  // 其中一张用户直接质疑因果(「伤害不够还是没打出来」)。击杀事实照旧进时间线,
+  // 只撤掉这条候选;side=friendly 的死亡不受影响。
+  killReview: false,
+};
+
+/**
+ * Per-bracket candidate allow-list (GH #18 human-label ruling 2026-08-30 (a)).
+ * Key = `bracketKey(startInfo.bracket)`; a bracket listed here keeps ONLY the
+ * named types in its candidate menu, everything else becomes context. A
+ * bracket not listed is untouched.
+ *
+ * 2v2: of the 6 blind-labelled 2v2 cards (one match, one player) 4 were
+ * "no impact" and 1 was judged false ("22 直接干,没那么多策略"); the only
+ * cards with adopt value across all 43 labelled were cd-hoarded (9/9 concrete)
+ * and missed-cleanse. n is small — this is a reversible switch, not a law.
+ */
+export const BRACKET_TYPE_ALLOWLIST: Readonly<
+  Partial<Record<"2v2" | "3v3" | "solo", ReadonlySet<string>>>
+> = {
+  "2v2": new Set(["cd-hoarded", "missed-cleanse"]),
 };

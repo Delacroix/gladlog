@@ -6,6 +6,9 @@
  * theme); logic moved verbatim. These four share the death window and the
  * free-to-act predicates, which is why they travel together.
  */
+import { CombatUnitClass } from "@gladlog/parser-compat";
+import { spellEffectData } from "../../data/spellEffectData";
+import { immunitySchoolMask } from "../../data/spellSchools";
 import { DEATH_CC_LOOKBACK_S } from "../../context/criticalMoments";
 import { lastCastBefore } from "../../context/timelineHelpers";
 import { costNormPhrase } from "../../data/curatedAbilityFacts";
@@ -89,6 +92,9 @@ export interface DeathSetupParts {
     >
   >;
   /** CC summary for the friendly healer (when the healer is not the victim). */
+  /** Enemy players who can break an immunity, with their breaker's cast
+   * times (seconds) — `enemyImmunityBreakers()`; GH #18 ruling (c). */
+  enemyImmunityBreakers?: Array<{ spellId: string; castTimesS: number[] }>;
   healerCC?: {
     healerName: string;
     ccInstances: Array<{
@@ -117,6 +123,71 @@ export interface DeathSetupParts {
  *    its last use was labeled Early by the timing audit (the trace's
  *    [last use: EARLY] row); the precursor moment is that cast.
  */
+/**
+ * Immunity breakers (hand table, registered in curatedIdRegistry): the enemy
+ * CLASS that carries each — a warrior always has Shattering Throw, a priest
+ * always has Mass Dispel, whether or not the log ever saw it cast. Cooldowns
+ * come from the official spell data (fallbacks are the 12.x values).
+ * Both ids are in observedSpellIdsGenerated (corpus-verified 2026-08-30).
+ */
+export const IMMUNITY_BREAKERS: ReadonlyArray<{
+  spellId: string;
+  name: string;
+  cls: CombatUnitClass;
+  fallbackCooldownS: number;
+}> = [
+  {
+    spellId: "64382",
+    name: "Shattering Throw",
+    cls: CombatUnitClass.Warrior,
+    fallbackCooldownS: 180,
+  },
+  {
+    spellId: "32375",
+    name: "Mass Dispel",
+    cls: CombatUnitClass.Priest,
+    fallbackCooldownS: 120,
+  },
+];
+
+function breakerCooldownS(b: (typeof IMMUNITY_BREAKERS)[number]): number {
+  return spellEffectData[b.spellId]?.cooldownSeconds ?? b.fallbackCooldownS;
+}
+
+/** Enemy players' breakers with cast times (seconds from match start). */
+export function enemyImmunityBreakers(
+  enemies: ReadonlyArray<{ class?: CombatUnitClass; spellCastEvents?: any[] }>,
+  startMs: number,
+): Array<{ spellId: string; castTimesS: number[] }> {
+  const out: Array<{ spellId: string; castTimesS: number[] }> = [];
+  for (const e of enemies) {
+    for (const b of IMMUNITY_BREAKERS) {
+      if (e.class !== b.cls) continue;
+      out.push({
+        spellId: b.spellId,
+        castTimesS: (e.spellCastEvents ?? [])
+          .filter((c: any) => String(c.spellId) === b.spellId)
+          .map((c: any) => (c.timestamp - startMs) / 1000),
+      });
+    }
+  }
+  return out;
+}
+
+/** True when some enemy breaker is off cooldown at `tSeconds` — i.e. an
+ * immunity pressed then could have been broken. */
+export function enemyHoldsImmunityBreakerAt(
+  breakers: ReadonlyArray<{ spellId: string; castTimesS: number[] }>,
+  tSeconds: number,
+): boolean {
+  return breakers.some((br) => {
+    const def = IMMUNITY_BREAKERS.find((b) => b.spellId === br.spellId);
+    if (!def) return false;
+    const cd = breakerCooldownS(def);
+    return !br.castTimesS.some((c) => c <= tSeconds && tSeconds - c < cd);
+  });
+}
+
 export function deathSetupEvents(parts: DeathSetupParts): CandidateEvent[] {
   const { deathT, victim } = parts;
   const out: CandidateEvent[] = [];
@@ -193,6 +264,20 @@ export function deathSetupEvents(parts: DeathSetupParts): CandidateEvent[] {
     if (cdAvailableAt(cd as IMajorCooldownInfo, deathT)) continue;
     if (last.timingLabel !== "Early") continue;
     if (last.timeSeconds < deathT - DEATH_SETUP_LOOKBACK_S) continue;
+    // Feasibility (GH #18 human label 2026-08-30, ruling (c)): an IMMUNITY
+    // "traded early" is not a mistake while an enemy still holds a breaker
+    // for it (Shattering Throw / Mass Dispel) — the player's own words:
+    // "shattering throw 都留着破无敌". Only official immunities
+    // (spellSchools immuneSchools) are exempted; ordinary defensives keep
+    // the timing verdict.
+    if (
+      immunitySchoolMask(cd.spellId) !== undefined &&
+      enemyHoldsImmunityBreakerAt(
+        parts.enemyImmunityBreakers ?? [],
+        last.timeSeconds,
+      )
+    )
+      continue;
     out.push({
       id: `death-setup:${victim.id}:${Math.round(deathT)}:defensive-early`,
       type: "death-setup",

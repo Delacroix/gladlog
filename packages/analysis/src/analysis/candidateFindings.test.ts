@@ -1,7 +1,10 @@
 import { CombatUnitClass, LogEvent } from "@gladlog/parser-compat";
 import { describe, expect, it, vi } from "vitest";
 
-import { CANDIDATE_TYPE_FLAGS } from "../data/candidateTypeFlags";
+import {
+  BRACKET_TYPE_ALLOWLIST,
+  CANDIDATE_TYPE_FLAGS,
+} from "../data/candidateTypeFlags";
 import {
   extractMajorCooldowns,
   FORBEARANCE_GATED_IDS,
@@ -95,12 +98,36 @@ describe("extractCandidateFindings", () => {
     expect(death!.type).toBe("death");
     expect(death!.facts["t"]).toBe("30");
   });
-  it("tags each death friendly/enemy so the LLM knows a kill from a loss", () => {
+  it("friendly deaths stay in the menu; enemy deaths (kill review) are demoted by default — killReview flag, GH #18 ruling (d) 2026-08-30", () => {
     const evts = extractCandidateFindings(combat());
     const mine = evts.find((e) => e.id === "death:a:30");
-    const theirs = evts.find((e) => e.id === "death:b:45");
     expect(mine!.facts["side"]).toBe("friendly");
-    expect(theirs!.facts["side"]).toBe("enemy");
+    expect(evts.find((e) => e.id === "death:b:45")).toBeUndefined();
+  });
+  it("tags each death friendly/enemy so the LLM knows a kill from a loss (killReview flipped on)", () => {
+    CANDIDATE_TYPE_FLAGS.killReview = true;
+    try {
+      const evts = extractCandidateFindings(combat());
+      const mine = evts.find((e) => e.id === "death:a:30");
+      const theirs = evts.find((e) => e.id === "death:b:45");
+      expect(mine!.facts["side"]).toBe("friendly");
+      expect(theirs!.facts["side"]).toBe("enemy");
+    } finally {
+      CANDIDATE_TYPE_FLAGS.killReview = false;
+    }
+  });
+  it("2v2 allow-list (GH #18 ruling (a)): only cd-hoarded / missed-cleanse survive; 3v3 untouched", () => {
+    const c3 = combat();
+    (c3 as any).startInfo = { bracket: "3v3" };
+    const all = extractCandidateFindings(c3);
+    expect(all.some((e) => e.type === "death")).toBe(true);
+    const c2 = combat();
+    (c2 as any).startInfo = { bracket: "2v2" };
+    const kept = extractCandidateFindings(c2);
+    expect(kept.every((e) => BRACKET_TYPE_ALLOWLIST["2v2"]!.has(e.type))).toBe(
+      true,
+    );
+    expect(kept.some((e) => e.type === "death")).toBe(false);
   });
   it("excludes pet/guardian deaths (no COMBATANT_INFO) — players only", () => {
     const c = combat();
@@ -115,7 +142,13 @@ describe("extractCandidateFindings", () => {
       spellCastEvents: [],
       advancedActions: [],
     };
-    const evts = extractCandidateFindings(c);
+    CANDIDATE_TYPE_FLAGS.killReview = true; // both player deaths visible for the count below
+    let evts: ReturnType<typeof extractCandidateFindings>;
+    try {
+      evts = extractCandidateFindings(c);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.killReview = false;
+    }
     expect(evts.some((e) => e.unitNames.includes("Gzaadym"))).toBe(false);
     // The two real player deaths are still present.
     expect(evts.filter((e) => e.type === "death")).toHaveLength(2);

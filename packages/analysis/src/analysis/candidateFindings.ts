@@ -6,7 +6,11 @@ import {
 } from "@gladlog/parser-compat";
 
 import { lookupBehaviorPrior } from "../data/behaviorPrior";
-import { CANDIDATE_TYPE_FLAGS } from "../data/candidateTypeFlags";
+import {
+  BRACKET_TYPE_ALLOWLIST,
+  CANDIDATE_TYPE_FLAGS,
+} from "../data/candidateTypeFlags";
+import { bracketKey } from "../utils/bracketKey";
 import { costNormPhrase } from "../data/curatedAbilityFacts";
 import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
 import { MITIGATION_TABLE } from "../data/mitigationData";
@@ -92,6 +96,7 @@ import {
   deathUnusedDefensiveEvents,
   externalUnusedEvents,
   questionableExternalEvents,
+  enemyImmunityBreakers,
 } from "./candidates/death";
 import {
   CYCLONE_SPELL_ID,
@@ -294,6 +299,8 @@ export function extractCandidateFindings(
       const t = ((d.timestamp ?? 0) - start) / 1000;
       const side =
         u.reaction === CombatUnitReaction.Friendly ? "friendly" : "enemy";
+      // Enemy-side deaths (kill review) demoted 2026-08-30 — see the flag.
+      if (side === "enemy" && !CANDIDATE_TYPE_FLAGS.killReview) continue;
       out.push({
         id: `death:${u.id}:${Math.round(t)}`,
         type: "death",
@@ -373,7 +380,11 @@ export function extractCandidateFindings(
     }
   }
 
-  return out;
+  // Per-bracket allow-list (GH #18 ruling 2026-08-30): a listed bracket keeps
+  // only its named types; the rest of the menu becomes context.
+  const bk = bracketKey(combat?.startInfo?.bracket);
+  const allow = bk ? BRACKET_TYPE_ALLOWLIST[bk] : undefined;
+  return allow ? out.filter((e) => allow.has(e.type)) : out;
 }
 
 /** Per-match cap for each team-play type (sorted by coaching value, then
@@ -2198,6 +2209,7 @@ function extractDeathSetups(
       }
       try {
         parts.victimCDs = cdsOf(u);
+        parts.enemyImmunityBreakers = enemyImmunityBreakers(enemies, start);
       } catch {
         /* same as above */
       }
