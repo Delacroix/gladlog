@@ -163,4 +163,5 @@
 // facts.precededBy。菜单变 → prompt 变 → 旧缓存作废。
 // v38 (2026-08-29): death-unused-defensive 退役(GH #58,用户裁定)—— 菜单少
 // 一类 → prompt 变 → 旧缓存作废;crisis-no-response 的 precededBy 标记随之摘除。
-export const PROMPT_VERSION = 38;
+// v39 (2026-08-29): crisis-no-response legend gains refOutcome (Solo Shuffle reference = any friendly death within 15 s, §1c) → prompt 变 → 旧缓存作废。
+export const PROMPT_VERSION = 39;

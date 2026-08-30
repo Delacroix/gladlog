@@ -22,10 +22,9 @@ export function dmgBinOf(dmg2s: number): DmgBin {
  * §1c): `ownDeath10s` = the owner's own death within 10 s;
  * `teamDeath15s` = ANY friendly player's death within 15 s (Rated Solo
  * Shuffle — a healer diving to 40% there usually isn't the kill target, the
- * cost lands on a teammate instead). Must match
- * packages/eval/src/explore/behaviorPriorTable.ts's `BehaviorPriorOutcome` —
- * that module is the table builder, this is the reader, same two literals.
- */
+ * cost lands on a teammate instead). Exported for
+ * packages/eval/src/explore/behaviorPriorTable.ts (the table builder) to
+ * import — one type, not two kept in sync by convention. */
 export type BehaviorPriorOutcome = "ownDeath10s" | "teamDeath15s";
 function isValidOutcome(v: unknown): v is BehaviorPriorOutcome {
   return v === "ownDeath10s" || v === "teamDeath15s";

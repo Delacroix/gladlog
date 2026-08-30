@@ -31,9 +31,9 @@
  * say so.
  */
 import type { DecisionPoint } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
+import type { BehaviorPriorOutcome } from "@gladlog/analysis/src/data/behaviorPrior";
 import { dmgBinOf } from "@gladlog/analysis/src/data/behaviorPrior";
 
-export type BehaviorPriorOutcome = "ownDeath10s" | "teamDeath15s";
 /** Brackets whose cells count any friendly death (spec §1c). Everything else
  * counts the owner's own death. */
 export const TEAM_OUTCOME_BRACKETS = new Set<string>(["Rated Solo Shuffle"]);
