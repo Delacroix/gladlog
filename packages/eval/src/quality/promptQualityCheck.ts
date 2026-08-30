@@ -34,6 +34,7 @@ import {
   outcomePhrase,
 } from "@gladlog/analysis/src/data/behaviorPrior";
 import { classMetadata } from "@gladlog/analysis/src/data/classSpells";
+import { ATTEMPT_INTO_TRINKET_OUTCOME_REF } from "@gladlog/analysis/src/data/outcomeRefs";
 import { canHelpAnotherUnit } from "@gladlog/analysis/src/utils/cooldowns";
 import fs from "fs-extra";
 import path from "path";
@@ -775,6 +776,70 @@ export function checkCrisisHpStateConsistency(lines: string[]): string[] {
   return failures;
 }
 
+/**
+ * Which candidate types render a corpus-wide OUTCOME reference, and which
+ * `facts.*` key carries which field of which constant. One row per type; the
+ * check below is type-agnostic, so registering a new reference (the planned
+ * `kick-eaten` one, for instance) is one entry here plus the producer
+ * rendering the same numbers — no new gate code.
+ *
+ * The values are the CONSTANTS THEMSELVES, imported from
+ * `@gladlog/analysis/src/data/outcomeRefs` — never re-typed literals. That is
+ * the whole point of this class (CLAUDE.md shared-predicate rule): analysis
+ * renders from the constant, this gate re-parses the rendered text and
+ * compares against the same constant, so a drifting producer, a stale cached
+ * round, or a model-edited prompt all go red.
+ */
+export const OUTCOME_REF_FACTS: {
+  type: string;
+  facts: Record<string, number>;
+}[] = [
+  {
+    type: "attempt-into-trinket",
+    facts: {
+      refN: ATTEMPT_INTO_TRINKET_OUTCOME_REF.n,
+      refKillTrinketDown: ATTEMPT_INTO_TRINKET_OUTCOME_REF.killPctTrinketDown,
+      refKillTrinketUp: ATTEMPT_INTO_TRINKET_OUTCOME_REF.killPctTrinketUp,
+    },
+  },
+];
+
+/** 12th hardFailure class (2026-08-30 outcome probe wiring): every menu line
+ * of a type registered in OUTCOME_REF_FACTS must render that type's reference
+ * numbers exactly as the constant does. Fails closed — a registered fact that
+ * is MISSING from the line is a failure too, otherwise a producer that simply
+ * stopped emitting the reference would leave the legend citing facts that do
+ * not exist. */
+export function checkOutcomeRefConsistency(lines: string[]): string[] {
+  const failures: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    for (const entry of OUTCOME_REF_FACTS) {
+      // `type=<t> ` — the menu renderer always follows the type with a space
+      // (`type=${c.type} ${when}`), so this cannot prefix-match a longer type.
+      if (!line.includes(`type=${entry.type} `)) continue;
+      const m = line.match(/facts=\{(.*)\}\s*$/);
+      if (!m) {
+        failures.push(`line ${i + 1}: ${entry.type} 行无 facts`);
+        continue;
+      }
+      const f = parseFactsBlock(m[1]!);
+      for (const [key, value] of Object.entries(entry.facts)) {
+        const want = String(value);
+        if (f[key] === undefined)
+          failures.push(
+            `line ${i + 1}: ${entry.type} 缺少语料参照事实 ${key}(应为 ${want})`,
+          );
+        else if (f[key] !== want)
+          failures.push(
+            `line ${i + 1}: ${entry.type} ${key}=${f[key]} 与语料参照常量 ${want} 不一致`,
+          );
+      }
+    }
+  }
+  return failures;
+}
+
 /** `95` → `1:35` — the gate's own rendering of a rendered second, only for
  * failure messages (the analysis side's `fmtTime` is the authority on the
  * text itself). */
@@ -1026,6 +1091,7 @@ export function checkMatch(
   hardFailures.push(...checkHealedThroughConsistency(lines));
   hardFailures.push(...checkBehaviorPriorConsistency(lines));
   hardFailures.push(...checkCrisisHpStateConsistency(lines));
+  hardFailures.push(...checkOutcomeRefConsistency(lines));
 
   return {
     ordinal: entry.ordinal,
