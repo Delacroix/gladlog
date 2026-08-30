@@ -304,8 +304,15 @@ const RULE_BY_TYPE = new Map(MISTAKE_RULES.map((r) => [r.type, r]));
 export function candidateDetail(c: CandidateEvent): string {
   const f = c.facts as Record<string, string | undefined>;
   switch (c.type) {
-    case "attempt-into-trinket":
-      return `${f.stun ?? ""} 开在 ${f.target ?? ""} 身上(徽章还在),当时 ${f.primeAlt ?? ""} 无徽章无控中减伤;失败原因 ${f.failedBy ?? "?"}`;
+    case "attempt-into-trinket": {
+      // 语料参照(2026-08-30 结果探针)是可选字段:老缓存的回合没有这三个
+      // fact,缺一个就整句不渲染 —— 只补一句对照,不改原有措辞。
+      const ref =
+        f.refKillTrinketDown && f.refKillTrinketUp && f.refN
+          ? `;语料参照:徽章已交时 15 秒内击杀 ${f.refKillTrinketDown}%,徽章还在时 ${f.refKillTrinketUp}%(n=${f.refN} 次尝试)`
+          : "";
+      return `${f.stun ?? ""} 开在 ${f.target ?? ""} 身上(徽章还在),当时 ${f.primeAlt ?? ""} 无徽章无控中减伤;失败原因 ${f.failedBy ?? "?"}${ref}`;
+    }
     case "burst-into-immunity":
       return `${f.spell ?? ""} 打进 ${f.target ?? ""} 的 ${f.immunity ?? ""}(重叠 ${f.overlap ?? "?"}s)`;
     case "burst-into-mitigation":

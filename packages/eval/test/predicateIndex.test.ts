@@ -42,6 +42,7 @@ import { DISPEL_FEATURE_FLAGS } from "@gladlog/analysis/src/data/dispelFeatureFl
 import * as dispelObservedGenerated from "@gladlog/analysis/src/data/dispelObservedGenerated";
 import * as dispelVerdicts from "@gladlog/analysis/src/data/dispelVerdicts";
 import * as healingVerdicts from "@gladlog/analysis/src/data/healingVerdicts";
+import * as outcomeRefs from "@gladlog/analysis/src/data/outcomeRefs";
 import * as racialAbilities from "@gladlog/analysis/src/data/racialAbilities";
 import * as spellCategories from "@gladlog/analysis/src/data/spellCategories";
 import * as spellEffectData from "@gladlog/analysis/src/data/spellEffectData";
@@ -597,6 +598,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/data/behaviorPrior.ts`,
     symbol: "BEHAVIOR_PRIOR_N_FLOOR",
     mod: behaviorPrior,
+  },
+  {
+    file: `${A}/data/outcomeRefs.ts`,
+    symbol: "ATTEMPT_INTO_TRINKET_OUTCOME_REF",
+    mod: outcomeRefs,
   },
   // Formatting and notation
   {
@@ -1423,6 +1429,41 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
     const mutatedLine = `  - id=crisis-no-response:1:42 type=crisis-no-response t=42s units=Healer-Realm-US facts={${mutatedFactsStr}}`;
     expect(
       promptQualityCheck.checkBehaviorPriorConsistency([mutatedLine]),
+    ).toHaveLength(1);
+  });
+
+  it("attempt-into-trinket 渲染出的语料参照数字,门规零违规;改一个数就被抓住(反向对照)", () => {
+    // Same constant both sides — the producer (utils/killAttempts.ts's
+    // attemptIntoTrinketEvents) renders String(...) of these exact fields and
+    // this gate re-parses them (docs/predicate-index.md's outcomeRefs row).
+    // Fuller cases live in packages/eval/test/outcomeRefGate.test.ts.
+    const REF = outcomeRefs.ATTEMPT_INTO_TRINKET_OUTCOME_REF;
+    const facts: Record<string, string> = {
+      t: "1:12",
+      target: "Enemy-Realm-US",
+      stun: "Kidney Shot",
+      stunsN: "2",
+      focusPct: "78",
+      dmgM: "1.24",
+      primeAlt: "Other-Realm-US",
+      failedBy: "pressure",
+      refN: String(REF.n),
+      refKillTrinketDown: String(REF.killPctTrinketDown),
+      refKillTrinketUp: String(REF.killPctTrinketUp),
+    };
+    const render = (f: Record<string, string>): string =>
+      `  - id=attempt-into-trinket:1:72 type=attempt-into-trinket t=1:12s units=Enemy-Realm-US/Other-Realm-US facts={${Object.entries(
+        f,
+      )
+        .map(([k, v]) => `${k}=${v}`)
+        .join(", ")}}`;
+    expect(
+      promptQualityCheck.checkOutcomeRefConsistency([render(facts)]),
+    ).toEqual([]);
+    expect(
+      promptQualityCheck.checkOutcomeRefConsistency([
+        render({ ...facts, refKillTrinketUp: "4.8" }),
+      ]),
     ).toHaveLength(1);
   });
 });

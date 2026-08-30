@@ -64,6 +64,7 @@ import {
 } from "@gladlog/parser-compat";
 
 import { MITIGATION_TABLE } from "../data/mitigationData";
+import { ATTEMPT_INTO_TRINKET_OUTCOME_REF } from "../data/outcomeRefs";
 import spellIdListsData from "../data/spellIdLists";
 
 import { analyzeOutgoingCCChains, drResetMsAt, DRLevel } from "./drAnalysis";
@@ -519,6 +520,17 @@ export function attemptIntoTrinketEvents(
         dmgM: (a.teamDamageToTarget / 1e6).toFixed(2),
         primeAlt: alt.name,
         failedBy: a.attribution!.primary,
+        // Corpus outcome reference (2026-08-30 probe), rendered verbatim from
+        // data/outcomeRefs.ts — packages/eval's checkOutcomeRefConsistency
+        // re-parses these three facts and compares them against that same
+        // constant, so never format them any other way here.
+        refN: String(ATTEMPT_INTO_TRINKET_OUTCOME_REF.n),
+        refKillTrinketDown: String(
+          ATTEMPT_INTO_TRINKET_OUTCOME_REF.killPctTrinketDown,
+        ),
+        refKillTrinketUp: String(
+          ATTEMPT_INTO_TRINKET_OUTCOME_REF.killPctTrinketUp,
+        ),
       },
     });
   }
