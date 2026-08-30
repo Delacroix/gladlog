@@ -3628,13 +3628,21 @@ describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,20
   });
 });
 
-describe("cd-hoarded / cd-spent-idle 接线(extractCandidateFindings,2026-08-15,Task 9 默认开启)", () => {
+describe("cd-hoarded / cd-spent-idle 接线(extractCandidateFindings,2026-08-15,Task 9 默认开启;2026-08-30 cd-spent-idle 下架)", () => {
   // Task 4 把两个新 P2 类型接进了 teamPlayEvents/extractCandidateFindings 的
   // 菜单,但 CANDIDATE_TYPE_FLAGS 默认全 false,A/B 阶段仍不出现。Task 9(用户
   // 裁决全量上线)把四开关翻 true —— 本块用真实数据条件证明"条件满足且默认
   // 开启 → 出现",再用同一 fixture 直调真实谓词链(extractMajorCooldowns + 真实
   // friendlyCrisisMomentInWindow/threatActiveAt/matchThreatLevel,不是手搭
   // stub)证明底层数据本身是通的。
+  //
+  // cd-spent-idle 下架(2026-08-30,信号结果探针,用户裁定,CLAUDE.md 价值门
+  // 第 4 条):19,019 个决策点(3,000 场新赛季归档)—— 威胁下按出之后 30s
+  // 内"被罚"(敌方进攻大 CD 命中且 10s 内有人阵亡)3.6%,空当按出之后仅
+  // 3.1%(Δ +0.5pp;前 10% 分段 −0.8pp;单排 −0.2pp)—— 指控没有可测量的
+  // 代价。CANDIDATE_TYPE_FLAGS.cdSpentIdle 翻 false;纯函数 cdSpentIdleEvents
+  // 与其测试保留(测试自行翻 flag,同 missedSyncWindow/unsyncedBurst/
+  // missedPurge/ccHeld 先例)。cd-hoarded 不受影响,继续默认开启。
   //
   // 团队编成:治疗 owner(Healer-R,Priest_Discipline)+ 敌方(Enemy-E)。
   // Healer-R 真实施放圣言术:屏障(62618,180s CD)两次(t=0、t≈250.4s)——
@@ -3741,13 +3749,13 @@ describe("cd-hoarded / cd-spent-idle 接线(extractCandidateFindings,2026-08-15,
     };
   }
 
-  it("条件完全满足,且默认开关全 true(Task 9)→ extractCandidateFindings 产出 cd-hoarded/cd-spent-idle", () => {
+  it("默认态(cd-hoarded 默认开启;cd-spent-idle 2026-08-30 下架)→ 同一 fixture 只产出 cd-hoarded,不产出 cd-spent-idle", () => {
     const evts = extractCandidateFindings(p2Fixture(), "h");
     expect(evts.some((e) => e.type === "cd-hoarded")).toBe(true);
-    expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(true);
+    expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(false);
   });
 
-  it("同一 fixture 直调真实谓词链(extractMajorCooldowns + 真实 friendlyCrisisMomentInWindow/threatActiveAt/matchThreatLevel)仍各产出 1 条——证明底层数据/谓词本身没坏,菜单接线已按「退役到零件」摘除", () => {
+  it("同一 fixture 直调真实谓词链(extractMajorCooldowns + 真实 friendlyCrisisMomentInWindow/threatActiveAt/matchThreatLevel)仍各产出 1 条——证明底层数据/谓词本身没坏;cd-spent-idle 菜单接线已按「退役到零件」摘除(2026-08-30),cd-hoarded 菜单接线仍在", () => {
     const c = p2Fixture();
     const units = Object.values(c.units) as any[];
     const friends = units.filter((u) => u.reaction === 1);
@@ -3781,31 +3789,35 @@ describe("cd-hoarded / cd-spent-idle 接线(extractCandidateFindings,2026-08-15,
     ).toHaveLength(1);
   });
 
-  // Task 4(2026-08-15,特性开关接线,更新于 Task 9 默认全 true 上线): 同上一
-  // describe 块的分开开关验证,方向翻成"关掉一个 → 只有它消失"——注意生产
-  // 接线传入的是完整 ownerCds(barrierCd + painCd 一起),不是上面直调测试里
-  // 为了断言干净而各自隔离传入的单元素数组,所以这里只断言"该类型消失/另一
-  // 类型仍出现",不钉具体条数(条数取决于两个 CD 互相产生的窗口叠加,细节见
-  // 实现者报告)。finally 里复位开关回默认 true,防止状态泄漏。
-  it("CANDIDATE_TYPE_FLAGS.cdHoarded=false(其余默认 true)→ 只有 cd-hoarded 从产出消失,cd-spent-idle 仍出现", () => {
+  // Task 4(2026-08-15,特性开关接线,更新于 Task 9 默认全 true 上线;2026-08-30
+  // cd-spent-idle 下架后重写): 同上一 describe 块的分开开关验证。cd-hoarded
+  // 保持默认 true,cd-spent-idle 保持默认 false(下架态)——两个方向各测一条:
+  // 关掉 cd-hoarded 时 cd-spent-idle 依旧不出现(默认已关,不受影响);显式开
+  // cd-spent-idle 时它照常出现且不影响 cd-hoarded(纯函数与接线保留,只是默认
+  // 关,同 missedSyncWindow/unsyncedBurst 先例)。注意生产接线传入的是完整
+  // ownerCds(barrierCd + painCd 一起),不是上面直调测试里为了断言干净而各自
+  // 隔离传入的单元素数组,所以这里只断言"该类型消失/出现",不钉具体条数
+  // (条数取决于两个 CD 互相产生的窗口叠加,细节见实现者报告)。finally 里
+  // 复位开关回默认值,防止状态泄漏。
+  it("CANDIDATE_TYPE_FLAGS.cdHoarded=false(cd-spent-idle 保持默认 false)→ 两者都不产出", () => {
     CANDIDATE_TYPE_FLAGS.cdHoarded = false;
     try {
       const evts = extractCandidateFindings(p2Fixture(), "h");
       expect(evts.some((e) => e.type === "cd-hoarded")).toBe(false);
-      expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(true);
+      expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(false);
     } finally {
       CANDIDATE_TYPE_FLAGS.cdHoarded = true;
     }
   });
 
-  it("CANDIDATE_TYPE_FLAGS.cdSpentIdle=false(其余默认 true)→ 只有 cd-spent-idle 从产出消失,cd-hoarded 仍出现", () => {
-    CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
+  it("显式开 CANDIDATE_TYPE_FLAGS.cdSpentIdle → cd-spent-idle 仍可产出(纯函数与接线保留,只是默认关);cd-hoarded 默认 true 不受影响", () => {
+    CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
     try {
       const evts = extractCandidateFindings(p2Fixture(), "h");
-      expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(false);
+      expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(true);
       expect(evts.some((e) => e.type === "cd-hoarded")).toBe(true);
     } finally {
-      CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
+      CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
     }
   });
 });

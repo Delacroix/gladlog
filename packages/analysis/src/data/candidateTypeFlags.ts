@@ -59,7 +59,13 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   // unsyncedBurstEvents 与其测试保留(测试自行翻 flag)。
   unsyncedBurst: false,
   cdHoarded: true,
-  cdSpentIdle: true,
+  // 下架 2026-08-30(信号结果探针,用户裁定,CLAUDE.md 价值门第 4 条):
+  // 19,019 个决策点(3,000 场新赛季归档)—— 威胁下按出之后 30s 内"被罚"
+  // (敌方进攻大 CD 命中且 10s 内有人阵亡)3.6%,空当按出之后仅 3.1%
+  // (Δ +0.5pp;前 10% 分段 −0.8pp;单排 −0.2pp)—— 指控没有可测量的代价。
+  // 时间线冷却台账照旧,只撤掉指控;纯函数 cdSpentIdleEvents 与测试保留
+  // (测试自行翻 flag)。数据:eval-private/reports/signal-outcomes-2026-08-30/report.md。
+  cdSpentIdle: false,
   attemptIntoTrinket: true,
   // md-cyclone-window(2026-08-21,GH #25 MD 特例):用户当日拍板四门判据
   // (链条/压力/战略预留/可用)并签字 15s 缓冲与 CD_HOARD_CRISIS_HP_PCT 对齐,
