@@ -266,111 +266,134 @@ function makeCtx(overrides: Partial<RoundContext> = {}): RoundContext {
   };
 }
 
-describe("countsAtThresholds — cd-hoarded threshold threading", () => {
-  const cd = {
-    spellId: "1",
-    spellName: "Wall",
+// 2026-08-30 (GH #34 cd-hoarded decision-point rewrite): the retired
+// minLateS/crisisHpPct threshold-threading tests are gone along with the
+// threshold pair itself (see cooldownTiming.ts's `cdHoardedEvents` doc
+// comment) — `countsAtThresholds` no longer takes a `cdHoardThresholds`
+// override at all. This block now only exercises `countsAtThresholds`' OWN
+// wiring glue (building crisisDecisionPoints sources for the owner + every
+// teammate, threading raw-vs-capped through the real builder) — the
+// predicate's own filtering rules (ready/spent/own-vs-teammate) are
+// candidateFindings.test.ts's/cdHoardedSelfOnly.test.ts's job, same
+// division of labor the module header above describes.
+describe("countsAtThresholds — cd-hoarded wiring", () => {
+  // A real HP crossing (100%→38%, well under crisisDecisionPoints'
+  // CRISIS_HP_PCT=40%) with damage right before it (dangerous=true) — same
+  // shape crisisDecisionPoints.test.ts's own default fixture uses. "642"
+  // (Divine Shield) is a real `bigDefensiveSpellIds` entry so the OWN-crisis
+  // help-gate (`PERSONAL_WALL_IDS`) actually admits it.
+  const wall = {
+    spellId: "642",
+    spellName: "Divine Shield",
     tag: "Defensive",
     cooldownSeconds: 300,
     maxChargesDetected: 1,
-    casts: [],
-    availableWindows: [{ fromSeconds: 0, toSeconds: 25, durationSeconds: 25 }],
+    casts: [] as { timeSeconds: number }[],
+    // RoundContext.ownerCds is typed as the full IMajorCooldownInfo[] (the
+    // retired predicate's own `availableWindows` shape) even though
+    // cdHoardedEvents itself no longer reads this field — kept empty/unused.
+    availableWindows: [] as {
+      fromSeconds: number;
+      toSeconds: number;
+      durationSeconds: number;
+    }[],
     neverUsed: true,
   };
-  // A synthetic ctx with a 25s-idle window; friendlyCrisisMomentInWindow is
-  // the REAL predicate (not mocked) — no advancedActions on the fixture
-  // friend means it will return null (no HP data), so this specific fixture
-  // alone can't exercise the crisis gate. That gate is candidateFindings.
-  // test.ts's job; here we only need the minLateS gate to differ, which
-  // requires a crisis to exist at all — so give the friend a real HP dip.
+  // `logLine.timestamp` + `advancedActorId` are what `gridHpPct`
+  // (analysis/src/utils/cooldowns.ts) reads — the [STATE] tick's sampler that
+  // crisisDecisionPoints' render-grid anchor shares; flat `timestamp` is what
+  // that module's own `samplesOf` reads. A fixture must carry both, and the
+  // actor id must be the owning unit's, or no decision point can be anchored.
   function advancedAction(
-    timestamp: number,
+    t: number,
     currentHp: number,
-    maxHp = 100_000,
+    maxHp = 100,
+    actorId = "f1",
   ) {
     return {
-      logLine: { timestamp },
-      advancedActorId: "f1",
+      timestamp: START + t,
+      logLine: { timestamp: START + t },
+      advancedActorId: actorId,
       advancedActorMaxHp: maxHp,
       advancedActorCurrentHp: currentHp,
     } as never;
   }
-
-  function ctxWithDip(troughPct: number): RoundContext {
+  function damageAction(t: number, srcUnitId: string, amount: number) {
+    return {
+      timestamp: START + t,
+      srcUnitId,
+      effectiveAmount: -amount,
+    } as never;
+  }
+  function ctxWithOwnCrisis(cds: (typeof wall)[]): RoundContext {
+    const enemy = unit({ id: "e1", reaction: CombatUnitReaction.Hostile });
     const friend = unit({
       id: "f1",
       reaction: CombatUnitReaction.Friendly,
       advancedActions: [
-        advancedAction(START, 100_000),
-        advancedAction(START + 10_000, (troughPct / 100) * 100_000),
+        advancedAction(0, 100),
+        advancedAction(1000, 70),
+        advancedAction(2000, 38),
+        advancedAction(3000, 35),
       ],
+      damageIn: [damageAction(1500, "e1", 30)],
     });
-    const enemy = unit({ id: "e1", reaction: CombatUnitReaction.Hostile });
     return makeCtx({
       friends: [friend],
       owner: friend,
-      ownerCds: [cd],
+      ownerCds: cds,
       legacy: legacyOf([friend, enemy]),
     });
   }
 
-  it("minLateS gate: a 25s window counts at minLateS=10 but not at minLateS=30", () => {
-    const ctx = ctxWithDip(30);
-    const loose = countsAtThresholds(ctx, {
-      cdHoardThresholds: { minLateS: 10, crisisHpPct: 45 },
-    });
-    const strict = countsAtThresholds(ctx, {
-      cdHoardThresholds: { minLateS: 30, crisisHpPct: 45 },
-    });
-    expect(loose.cdHoardedCapped).toBe(1);
-    expect(strict.cdHoardedCapped).toBe(0);
+  it("a ready personal wall not cast → 1 capped candidate", () => {
+    const ctx = ctxWithOwnCrisis([wall]);
+    expect(countsAtThresholds(ctx).cdHoardedCapped).toBe(1);
   });
 
-  it("crisisHpPct gate: a 30% trough counts against a 45% bar but not a 20% bar", () => {
-    const ctx = ctxWithDip(30);
-    const permissive = countsAtThresholds(ctx, {
-      cdHoardThresholds: { minLateS: 10, crisisHpPct: 45 },
-    });
-    const strict = countsAtThresholds(ctx, {
-      cdHoardThresholds: { minLateS: 10, crisisHpPct: 20 },
-    });
-    expect(permissive.cdHoardedCapped).toBe(1);
-    expect(strict.cdHoardedCapped).toBe(0);
+  it("the same wall cast inside the response window → 0 (spent, not hoarded)", () => {
+    const cast = { ...wall, casts: [{ timeSeconds: 3 }] }; // crossing tSec=2, +1s is inside CD_HOARD_RESPONSE_S
+    const ctx = ctxWithOwnCrisis([cast]);
+    expect(countsAtThresholds(ctx).cdHoardedCapped).toBe(0);
   });
 
   it("raw count is read through the same builder with an uncapped override, never a second rule", () => {
-    const twoWindowCd = {
-      ...cd,
-      availableWindows: [
-        { fromSeconds: 0, toSeconds: 25, durationSeconds: 25 },
-        { fromSeconds: 30, toSeconds: 60, durationSeconds: 30 },
-      ],
-    };
-    // A crisis dip inside EACH window (t=10 for the first, t=40 for the
-    // second) so both windows independently qualify.
-    const friend = unit({
+    // Two independent decision points (owner's own crisis + a teammate's),
+    // each with its own ready, uncast wall — raw must see both.
+    const enemy = unit({ id: "e1", reaction: CombatUnitReaction.Hostile });
+    const owner = unit({
       id: "f1",
       reaction: CombatUnitReaction.Friendly,
       advancedActions: [
-        advancedAction(START, 100_000),
-        advancedAction(START + 10_000, 10_000),
-        advancedAction(START + 20_000, 100_000),
-        advancedAction(START + 40_000, 10_000),
+        advancedAction(0, 100),
+        advancedAction(1000, 70),
+        advancedAction(2000, 38),
+        advancedAction(3000, 35),
       ],
+      damageIn: [damageAction(1500, "e1", 30)],
     });
-    const enemy = unit({ id: "e1", reaction: CombatUnitReaction.Hostile });
+    const mate = unit({
+      id: "f2",
+      name: "Mate-Realm",
+      reaction: CombatUnitReaction.Friendly,
+      advancedActions: [
+        advancedAction(0, 100, 100, "f2"),
+        advancedAction(1000, 70, 100, "f2"),
+        advancedAction(2000, 38, 100, "f2"),
+        advancedAction(3000, 35, 100, "f2"),
+      ],
+      damageIn: [damageAction(1500, "e1", 30)],
+    });
     const ctx = makeCtx({
-      friends: [friend],
-      owner: friend,
-      ownerCds: [twoWindowCd],
-      legacy: legacyOf([friend, enemy]),
+      friends: [owner, mate],
+      owner,
+      // "740" Tranquility is a real ally-reaching external — qualifies for
+      // the mate's TEAMMATE-crisis help-gate (canHelpAnotherUnit) as well as
+      // owner's own-crisis gate.
+      ownerCds: [{ ...wall, spellId: "740", spellName: "Tranquility" }],
+      legacy: legacyOf([owner, mate, enemy]),
     });
-    const counts = countsAtThresholds(ctx, {
-      cdHoardThresholds: { minLateS: 10, crisisHpPct: 45 },
-    });
-    // Both windows qualify (raw=2); production's own default cap (2) doesn't
-    // truncate here, so capped also reads 2 — the assertion that matters is
-    // raw>=capped and both come from the real builder, not a hand count.
+    const counts = countsAtThresholds(ctx);
     expect(counts.cdHoardedRaw).toBeGreaterThanOrEqual(counts.cdHoardedCapped);
     expect(counts.cdHoardedRaw).toBe(2);
   });

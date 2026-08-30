@@ -21,6 +21,7 @@ import {
   type IMajorCooldownInfo,
   isHealerSpec,
   isProcOnlyActivation,
+  SELF_CAST_NOOP_EXTERNAL_IDS,
   THROUGHPUT_EMPOWER_DEFENSIVE_IDS,
 } from "../../utils/cooldowns";
 import {
@@ -30,6 +31,7 @@ import {
 import { castFailedInWindow, type RawStreams } from "../../utils/rawStreams";
 import { renderedWindowSeconds, toRenderSecond } from "../../utils/renderGrid";
 import { type MatchThreatLevel } from "../../utils/threatAssessment";
+import { type DecisionPoint, RESPONSE_PRE_MS } from "../crisisDecisionPoints";
 import { fmtFactNum as fmt } from "../factFormat";
 import { CandidateEvent } from "../types";
 import { filterIntentGuardEvidence, formatAttemptedFact } from "./shared";
@@ -418,24 +420,6 @@ export function unsyncedBurstEvents(
     });
 }
 
-/** cd-hoarded (P2 起爆-1, 2026-08-15): minimum idle-then-late gap before a "CD
- * sat ready" claim is worth surfacing — a CD used a few seconds after
- * readiness is normal button-press latency, not hoarding. <标定定稿
- * 2026-08-15,报告 p1p2-calibration.md>: raised from the 20s placeholder to
- * 45s. Sensitivity grid (H∈{10,20,30,45}s × crisis HP∈{35,45}%, 210
- * matches/400 rounds swept) found EVERY cell in-band on 场均条数 (1.19–1.71,
- * comfortably inside the 0.5–2 target) but every cell's 发生率 (67.0–89.5%)
- * sat above this repo's highest prior candidate-type precedent (63.6%,
- * arenacoach batch-1's COOLDOWN class) — the grid's own strictest corner
- * (H45/C35, 67.0%) was the only one close to that ceiling, so it was picked
- * rather than a middle cell. 双向误差注: a shorter H (the 20s placeholder,
- * 88.5% at its paired C45) risks flooding the menu the way this file's own
- * MISSED_CLEANSE/MISSED_PURGE/CC_LOCKED/WASTED_TRINKET throttling block
- * (above) already documents as a real failure mode; a longer H than tested
- * would start excluding genuine hoards resolved just past the 45s mark,
- * understating the pattern. */
-export const CD_HOARD_MIN_LATE_S = 45; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>
-
 /** cd-hoarded: the own-team HP floor a hoarded window's worst moment must
  * have crossed to count as a "crisis" happened during the hoard, not just
  * "someone took a scratch". Deliberately a separate number/constant from
@@ -443,25 +427,293 @@ export const CD_HOARD_MIN_LATE_S = 45; // <标定定稿 2026-08-15,报告 p1p2-c
  * pressured", this one asks "was THIS SPECIFIC hoarded window a crisis" —
  * same shape as the cd-waste/cd-hoarded split documented on
  * `THREAT_LEVEL_LOW_MIN_HP_PCT` in threatAssessment.ts. <标定定稿 2026-08-15,
- * 报告 p1p2-calibration.md>: lowered from the 45% placeholder to 35%,
- * paired with `CD_HOARD_MIN_LATE_S`'s own strictest-tested-corner choice
- * above (same sensitivity grid, see that constant's doc comment for the
- * full occurrence-rate citation). 双向误差注: a higher bar (45%, the
- * placeholder) admits moderate-pressure dips that are not really a
- * "crisis" as a hoarding crisis, pushing 发生率 up toward 88.5%; a bar
- * below 35% (untested) would start excluding real near-death windows that
- * bottomed out in the high-20s/low-30s rather than under 35, understating
- * the pattern the same direction as too-large an H. */
-export const CD_HOARD_CRISIS_HP_PCT = 35; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>
+ * 报告 p1p2-calibration.md>: lowered from the 45% placeholder to 35%.
+ * 双向误差注: a higher bar (45%, the placeholder) admits moderate-pressure
+ * dips that are not really a "crisis"; a bar below 35% (untested) would
+ * start excluding real near-death windows that bottomed out in the
+ * high-20s/low-30s rather than under 35.
+ *
+ * NOT cd-hoarded's own gate any more (2026-08-30, GH #34 decision-point
+ * rewrite): `cdHoardedEvents` below now keys its crisis moment on
+ * `crisisDecisionPoints`' own `CRISIS_HP_PCT` (40%, crisisDecisionPoints.ts)
+ * — the same predicate `crisis-no-response` uses, so "was there a crisis"
+ * is one shared fact instead of two competing HP floors. This constant is
+ * kept, exported, and UNCHANGED for its one remaining consumer:
+ * `mdCycloneWindowEvents` (candidates/massDispel.ts), which still gates on
+ * `friendlyCrisisMomentInWindow` + this 35% floor for its own, unrelated
+ * four-gate criterion (GH #25). Do not fold the two back together — they
+ * are independently calibrated for different candidate types that happen to
+ * share a number by coincidence, not by predicate. */
+export const CD_HOARD_CRISIS_HP_PCT = 35; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>; consumer since 2026-08-30 is md-cyclone-window only
 
-/** Per-match cap for cd-hoarded. <标定定稿 2026-08-15,报告
- * p1p2-calibration.md>: confirmed adequate at its 2-per-round placeholder —
- * raw (pre-cap) counts routinely exceed 2 even at the tightened H45/C35
- * thresholds above, so the cap is doing real truncation work, not sitting
- * unused; kept at 2 to match every other per-round-capped type in this file
- * rather than inventing a type-specific number with no comparative
- * justification. */
-const CD_HOARD_CAP = 2; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>;at-cap 体检 2026-08-26:302/482 有产出回合打到上限(63%,GH #34)
+/** Per-match cap for cd-hoarded. Carried forward from the retired
+ * window-shaped predicate's <标定定稿 2026-08-15,报告 p1p2-calibration.md>
+ * (kept at 2 to match every other per-round-capped type in this file) — the
+ * 2026-08-30 decision-point rewrite (GH #34) changes WHAT fires, not the
+ * shipping cap, and has not itself been re-swept against a fresh corpus
+ * (docs/BACKLOG.md #34 tracks that follow-up). at-cap 体检 2026-08-26
+ * (pre-rewrite): 302/482 有产出回合打到上限(63%)。 */
+const CD_HOARD_CAP = 2;
+
+/** cd-hoarded's own "was the ready cooldown actually pressed" window
+ * (2026-08-30 decision-point rewrite, GH #34; 3,000-match outcome probe
+ * "cd-hoarded", eval-private/reports/signal-outcomes-2026-08-30/report.md):
+ * a press landing up to `RESPONSE_PRE_MS` (crisisDecisionPoints.ts, the same
+ * "a response landed just before the sampled crossing still counts"
+ * convention) BEFORE the crossing still counts as answering it, through
+ * this many seconds AFTER. This is cd-hoarded's own, corpus-measured number
+ * — deliberately not crisisDecisionPoints' 3s `RESPONSE_WINDOW_MS` (a
+ * different question: "did the crisis unit do ANYTHING" vs. "did the OWNER
+ * spend THIS specific ready cooldown"). */
+export const CD_HOARD_RESPONSE_S = 5;
+
+/**
+ * Corpus-derived outcome reference for cd-hoarded (2026-08-30, GH #34):
+ * 3,000-match outcome probe "cd-hoarded"
+ * (eval-private/reports/signal-outcomes-2026-08-30/report.md). Decision
+ * point = every friendly crisis (`crisisDecisionPoints` on the owner for
+ * their own crises, and on each teammate as owner for theirs; HP crossed
+ * <=40%, 5s merge — `CRISIS_HP_PCT`/`CRISIS_WINDOW_GAP_MS`,
+ * crisisDecisionPoints.ts) at which the owner had >=1 usable major
+ * Defensive cooldown ready (a personal wall or a self-castable external for
+ * the owner's own crisis; any cooldown `canHelpAnotherUnit` says can reach
+ * the crisis unit for a teammate's). Across 16,960 such decision points,
+ * the crisis unit died within 10s **4.5%** of the time when a ready
+ * cooldown was spent within `CD_HOARD_RESPONSE_S` vs **11.4%** when every
+ * ready cooldown was held (share acted 29%; 3v3 5.2% vs 22.2%; own-crisis
+ * 4.0% vs 16.8%; teammate-crisis 4.7% vs 10.5%).
+ *
+ * Descriptive, never causal — the legend (buildFindingsPrompt.ts) says so
+ * explicitly and the reference does not identify WHICH cooldown mattered.
+ * Corpus-derived, not typed in from intuition; a table-based refresh (the
+ * same shape as `data/behaviorPriorGenerated.json`) is the follow-up, not
+ * yet built — until then this is a fixed constant block, not a per-cell
+ * lookup keyed on bracket/role/damage the way that table is.
+ */
+export const CD_HOARDED_OUTCOME_REF = {
+  refDeathSpent: "4.5",
+  refDeathHeld: "11.4",
+  refN: "16960",
+} as const;
+
+/** One crisis-decision-point SOURCE cd-hoarded scans: the unit in crisis
+ * (the owner or a named teammate), whether it is the OWNER's own crisis,
+ * and that unit's full (UNFILTERED) `crisisDecisionPoints` output —
+ * `cdHoardedEvents` applies its own `dangerous && !inCC` filter itself (see
+ * its doc comment for why not the fuller `feasible` flag: gate 4,
+ * death-in-window, must NOT exclude a crisis unit who died inside the
+ * window — a crisis unit who died within the response window is exactly
+ * the shape this type exists to catch). Only the seven fields the predicate
+ * actually reads are required, not the whole `DecisionPoint` shape, so a
+ * caller/test never has to hand-build the entire interface. */
+export interface ICdHoardedCrisisSource {
+  crisisUnit: { id: string; name: string };
+  /** true when crisisUnit IS the cd-hoarded owner (their own crisis). */
+  own: boolean;
+  points: Pick<
+    DecisionPoint,
+    | "tSec"
+    | "hpPct"
+    | "dmg2s"
+    | "attackers2s"
+    | "enemyBurst"
+    | "inCC"
+    | "dangerous"
+  >[];
+}
+
+/** The shape `cdHoardedEvents` needs from each of the owner's cooldowns —
+ * `tag` required (the base gate hard-requires `=== "Defensive"`, unlike the
+ * retired predicate's optional hint-only tag). */
+type CdHoardCandidateCd = Pick<
+  IMajorCooldownInfo,
+  "spellId" | "spellName" | "casts" | "cooldownSeconds" | "neverUsed" | "tag"
+> &
+  Partial<Pick<IMajorCooldownInfo, "isThroughput" | "charges">>;
+
+/** Base "can this Defensive CD be pressed at all right now" gate — the part
+ * of the readiness predicate that does NOT depend on whose crisis this is;
+ * `helps` layers the own-crisis-vs-teammate-crisis distinction on top. */
+function readyDefensiveCds(
+  cds: CdHoardCandidateCd[],
+  tSec: number,
+  helps: (cd: CdHoardCandidateCd) => boolean,
+): CdHoardCandidateCd[] {
+  return cds.filter(
+    (cd) =>
+      cd.tag === "Defensive" &&
+      !cd.isThroughput &&
+      !isProcOnlyActivation(cd.spellId) &&
+      cdAvailableAt(cd, tSec) &&
+      helps(cd),
+  );
+}
+
+/**
+ * cd-hoarded (2026-08-30 rewrite, GH #34, decision-point shaped): "a
+ * teammate (or you) hit a crisis while you had a usable major defensive CD
+ * ready and you did not spend it within `CD_HOARD_RESPONSE_S`". Replaces
+ * the retired `availableWindows`-shaped predicate ("a CD sat ready >=45s
+ * while a friendly crossed <35%"), whose own intent-guard measurement found
+ * 35.6% of its accusations wrong (the player DID press) — this version
+ * anchors on the same `crisisDecisionPoints` moment `crisis-no-response`
+ * already uses, so "was there a crisis" is one shared predicate instead of
+ * a second HP-floor gate invented just for this type.
+ *
+ * Scope narrows on purpose versus the retired predicate: only
+ * Defensive-tagged, non-throughput cooldowns count now (`readyDefensiveCds`'s
+ * base gate) — the old version could cite ANY major CD, offensive or
+ * defensive (Avenging Wrath was its own flagship example). The 3,000-match
+ * outcome probe behind `CD_HOARDED_OUTCOME_REF` was run against this
+ * narrower, Defensive-only shape, so widening back out would attach the
+ * reference numbers to a candidate they were never measured against.
+ *
+ * `own` decides which help-gate applies at each source's points (GH #28's
+ * lesson, carried into the rewrite): for the OWNER's own crisis, a
+ * cooldown only counts if it is not a confirmed self-cast no-op
+ * (`!SELF_CAST_NOOP_EXTERNAL_IDS.has`, e.g. Blessing of Sacrifice's
+ * damage-redirect is a mechanical no-op when self-targeted) — the same
+ * "does this help ME" predicate `findCheaperDefensiveAlternatives`
+ * (cooldowns.ts) already uses in its own self-cast-context branch, reused
+ * rather than re-derived from a curated membership list (a `bigDefensive
+ * SpellIds`/`externalDefensiveSpellIds` membership check would silently
+ * reject a real self-wall the two lists haven't caught up with yet — e.g.
+ * Ultimate Penitence, a runtime-injected pure self-absorb that is in
+ * NEITHER list; caught while writing `cdHoardedSelfOnly.test.ts`, see
+ * CLAUDE.md's Curated-List Completeness Rule). For a TEAMMATE's crisis, a
+ * cooldown only counts if `canHelpAnotherUnit` says it can reach somebody
+ * other than the owner — the exact guard `cdHoardedSelfOnly.test.ts` exists
+ * to pin (a self-only heal like Desperate Prayer can never answer a
+ * teammate's crisis).
+ *
+ * "Spent" is a press of any READY cooldown (not just the first one found)
+ * inside `[tSec - RESPONSE_PRE_MS/1000, tSec + CD_HOARD_RESPONSE_S]` — a
+ * press landing just before the sampled crossing still counts, the same
+ * convention `crisisDecisionPoints`' own response window uses.
+ *
+ * Severity/cap: sorted by the SAME danger order `crisisNoResponseEvents`
+ * uses (enemyBurst, then attackers2s, then dmg2s — NEVER by outcome; this
+ * function must not read `diedWithin10s`/`friendDiedWithin15s`, and
+ * `ICdHoardedCrisisSource.points` is typed narrowly enough that it cannot),
+ * capped at `CD_HOARD_CAP`, then re-sorted chronologically for display
+ * (every sibling producer in `candidates/` reports in time order regardless
+ * of how it selected the capped set — see `crisisNoResponseEvents`'s own
+ * 2026-08-29 ruling).
+ */
+export function cdHoardedEvents(
+  sources: ICdHoardedCrisisSource[],
+  ownerCds: CdHoardCandidateCd[],
+  owner: { id: string; name: string },
+  overrides?: { cap?: number },
+  /** Intent guard (BACKLOG #26 Task 2), unchanged in spirit from the
+   * retired predicate: a CAST_FAILED hit on any READY cooldown inside the
+   * same response window downgrades "hoarded" to "attempted but rejected"
+   * (see `facts.attempted` and auditFindings.ts's matching severity
+   * downgrade). */
+  rawStreams?: RawStreams,
+  /** #29 (2026-08-17): the owner's own successful-cast instants (seconds),
+   * consumed only by `filterIntentGuardEvidence`'s gcd-locked exclusion —
+   * same convention as every other guard-carrying builder in this file. */
+  ownCastSuccessSeconds?: number[],
+): CandidateEvent[] {
+  const cap = overrides?.cap ?? CD_HOARD_CAP;
+  const candidates: Array<{
+    crisisUnit: { id: string; name: string };
+    own: boolean;
+    point: ICdHoardedCrisisSource["points"][number];
+    ready: CdHoardCandidateCd[];
+  }> = [];
+  for (const src of sources) {
+    for (const p of src.points) {
+      // "only dangerous && !inCC points" (spec 2026-08-30): dangerous is
+      // gate 5 (a real damage floor), inCC is gate 1 — both describe the
+      // CRISIS UNIT's own state. Deliberately NOT `p.feasible` (which also
+      // requires !diedInWindow and hasTool): a crisis unit who died within
+      // the response window is exactly the case this type exists to catch,
+      // and `hasTool` answers a different question (could the crisis unit
+      // help THEMSELF) than the one this predicate asks (did the OWNER have
+      // a ready cooldown for THEM).
+      if (!p.dangerous || p.inCC) continue;
+      const ready = readyDefensiveCds(ownerCds, p.tSec, (cd) =>
+        src.own
+          ? !SELF_CAST_NOOP_EXTERNAL_IDS.has(cd.spellId)
+          : canHelpAnotherUnit(cd.spellId, cd.tag),
+      );
+      if (ready.length === 0) continue;
+      const spent = ready.some((cd) =>
+        cd.casts.some(
+          (c) =>
+            c.timeSeconds >= p.tSec - RESPONSE_PRE_MS / 1000 &&
+            c.timeSeconds <= p.tSec + CD_HOARD_RESPONSE_S,
+        ),
+      );
+      if (spent) continue;
+      candidates.push({
+        crisisUnit: src.crisisUnit,
+        own: src.own,
+        point: p,
+        ready,
+      });
+    }
+  }
+  return candidates
+    .sort(
+      (a, b) =>
+        Number(b.point.enemyBurst) - Number(a.point.enemyBurst) ||
+        b.point.attackers2s - a.point.attackers2s ||
+        b.point.dmg2s - a.point.dmg2s,
+    )
+    .slice(0, cap)
+    .map(({ crisisUnit, own, point, ready }) => {
+      const t = toRenderSecond(point.tSec);
+      const windowFromS = point.tSec - RESPONSE_PRE_MS / 1000;
+      const windowToS = point.tSec + CD_HOARD_RESPONSE_S;
+      // Intent guard: any of the READY cooldowns' own spellIds with a
+      // rejected cast inside the same response window — merged across every
+      // ready cooldown (not just one), since the accusation now names up to
+      // three (`facts.readyCds`), not a single spell.
+      const failedHits = rawStreams
+        ? ready.flatMap((cd) =>
+            filterIntentGuardEvidence(
+              castFailedInWindow(
+                rawStreams,
+                owner.id,
+                windowFromS,
+                windowToS,
+                Number(cd.spellId),
+              ),
+              cd.casts.map((c) => c.timeSeconds),
+              { ownCastSuccessSeconds },
+            ),
+          )
+        : [];
+      const attempted = formatAttemptedFact(failedHits);
+      return {
+        id: `cd-hoarded:${owner.id}:${crisisUnit.id}:${t}`,
+        type: "cd-hoarded",
+        t,
+        unitNames: [owner.name, crisisUnit.name],
+        // Presentation only (types.ts: "for a multi-spell event only the
+        // first is taken") — `facts.readyCds` carries the full list.
+        spell: ready[0]?.spellName,
+        spellId: ready[0]?.spellId,
+        facts: {
+          t: String(t),
+          crisisUnit: crisisUnit.name,
+          crisisHpPct: String(point.hpPct),
+          dmg2sPct: String(Math.round(point.dmg2s * 100)),
+          readyCds: ready
+            .slice(0, 3)
+            .map((cd) => cd.spellName)
+            .join("; "),
+          own: own ? "yes" : "no",
+          ...CD_HOARDED_OUTCOME_REF,
+          ...(attempted ? { attempted } : {}),
+        },
+      };
+    })
+    .sort((a, b) => a.t - b.t);
+}
 
 /** A single citable "crisis moment" inside a window: the worst HP% any
  * friendly reached, which friendly it was, and the rendered second it
@@ -497,11 +749,12 @@ export function friendlyCrisisMomentInWindow(
     timestampMs: number,
     maxDtMs: number,
   ) => number | null = getUnitHpAtTimestamp,
-  /** GH #28: restrict the scan to ONE unit. cd-hoarded passes the owner's own
-   *  name when the hoarded cooldown cannot help anybody else (Desperate Prayer
-   *  heals the caster only), so a teammate's dip can never become the crisis
-   *  that a self-heal is accused of ignoring. Absent = scan every friendly, the
-   *  behaviour every other caller keeps. */
+  /** GH #28: restrict the scan to ONE unit. md-cyclone-window (the sole
+   *  production caller since the 2026-08-30 cd-hoarded rewrite — see
+   *  `CD_HOARD_CRISIS_HP_PCT`'s doc comment) passes this when a hoarded
+   *  cooldown cannot help anybody else, so a teammate's dip can never become
+   *  the crisis that a self-only tool is accused of ignoring. Absent = scan
+   *  every friendly, the behaviour every other caller keeps. */
   onlyUnitName?: string,
 ): ICrisisMoment | null {
   const fromR = toRenderSecond(fromSeconds);
@@ -521,203 +774,6 @@ export function friendlyCrisisMomentInWindow(
     }
   }
   return worst;
-}
-
-/**
- * cd-hoarded (P2 起爆-1, 2026-08-15, deep-dive-derived definition): a major
- * cooldown sat available (`IMajorCooldownInfo.availableWindows` — the
- * existing talent-corrected ledger, not recomputed here) for at least
- * `CD_HOARD_MIN_LATE_S` before it was actually pressed, AND a friendly
- * crossed below `CD_HOARD_CRISIS_HP_PCT` sometime during that same hoarded
- * window (60ab-AW shape: Avenging Wrath ready 6:20, an ally at 34% at 6:30,
- * not cast until 6:54 — the button sat on a crisis instead of answering it).
- *
- * Covers EVERY `availableWindows` entry, not just ones closed by a
- * subsequent cast (fix round 1, 2026-08-15 review — the spec text, 「大 CD
- * 转好后 ≥H 秒未按,且期间出现危机窗...→ 候选」, names no requirement of a
- * later cast). The original implementation only fired on windows closed by
- * an actual cast (`cd.casts` containing an entry at exactly `w.toSeconds`)
- * and excluded the trailing window that runs to match end with no further
- * cast, on the rationale that shape is `cd-waste`'s territory — that
- * rationale does not hold: `cd-waste` only gates on `cd.neverUsed`
- * (`casts.length === 0`, cooldowns.ts), so a CD cast once early and then
- * hoarded through a crisis to match end (`casts.length >= 1`, so
- * `neverUsed === false`) fell through BOTH types uncaught. Both shapes now
- * emit, distinguished in facts by `closedByCast`:
- *  - closed window: `castT` is the render second of the actual closing
- *    cast (still an exact-value match against `cd.casts`, not a tolerance
- *    comparison — `w.toSeconds` IS that cast's `timeSeconds`, no
- *    arithmetic in between).
- *  - trailing/unresolved window (`w.toSeconds === matchDurationSeconds`,
- *    no matching cast): `unresolved` carries the fact-not-prescription
- *    string "未再施放直至战斗结束" instead of `castT` — the button sat
- *    through the crisis and was never pressed again this match at all,
- *    arguably the worst form of the pattern this type names.
- * `lateS` means "how long the button sat idle" in both shapes — elapsed
- * ready-time to the closing cast, or elapsed ready-time to match end.
- *
- * cd-hoarded can fire on ANY major CD (offensive or defensive) — unlike
- * `cd-waste`/`cd-spent-idle`, hoarding a throughput CD like Avenging Wrath
- * during a crisis is exactly the shape this type exists to catch.
- *
- * Render-grid anchoring (CLAUDE.md): `readyT`/`endT` are floored via
- * `toRenderSecond` FIRST; `lateS` is derived from those floored endpoints
- * (never from the raw fractional `w.fromSeconds`/`w.toSeconds`), and the
- * floored endpoints — not the raw window — are what gets passed to
- * `probes.crisisMomentAt`, so the crisis this candidate cites can never fall
- * outside the window the facts display. This also means a CD that comes
- * ready in the match's final stretch, with less than `CD_HOARD_MIN_LATE_S`
- * left before `matchDurationSeconds`, is excluded by the SAME `lateS` gate
- * that governs closed windows — no separate "too close to the end" check is
- * needed, the floored-endpoint math already produces a small `lateS` for
- * that shape.
- *
- * `probes.crisisMomentAt` is wired to `friendlyCrisisMomentInWindow` in
- * production (kept as an injectable probe, same "no raw combat traversal
- * inside the pure mapper" shape every other builder in this file uses, e.g.
- * `missedSyncWindowEvents`'s `enemyMinHpPctAt`) — unlike that B8 accelerator,
- * this probe genuinely GATES the candidate (no confirmed crisis → no
- * candidate), so it must run before emission, not just annotate facts after.
- *
- * Cost-norm guard (#25 precedent, same as `cdWasteEvents`/
- * `deathUnusedDefensiveEvents`): a cost_norm ability (Divine Shield/Ice
- * Block) sitting ready through a crisis is not "you should have used it
- * sooner" — it's a last-resort tool being correctly saved. The fact still
- * carries `costNorm`; the prompt explains it.
- *
- * Severity/cap: sorted by `lateS` descending (the longer the button sat idle
- * through the crisis, the bigger the miss — unresolved windows count toward
- * the same cap as closed ones), capped at `CD_HOARD_CAP` (see that
- * constant's own doc comment for the 2026-08-15 corpus calibration).
- */
-export function cdHoardedEvents(
-  cds: (Pick<
-    IMajorCooldownInfo,
-    "spellId" | "spellName" | "casts" | "availableWindows"
-  > &
-    /** GH #28 层 4:调用方知道 tag 就传下来 —— 静态 classMetadata 之外还有
-     *  运行时注入(终极苦修)和名字正则发现两条路会产生 Defensive CD,只按
-     *  id 集合判断会把它们漏出门外。可选,缺省退回 id 集合。 */
-    Partial<Pick<IMajorCooldownInfo, "tag">>)[],
-  owner: { id: string; name: string },
-  probes: {
-    /** Wired to friendlyCrisisMomentInWindow in production. A real gate, not
-     * an accelerator — see the doc comment above. */
-    crisisMomentAt: (
-      fromSeconds: number,
-      toSeconds: number,
-      /** GH #28: when set, only this unit's HP counts as a crisis (the
-       *  cooldown in question cannot help anybody else). Production wires it
-       *  straight to friendlyCrisisMomentInWindow's own parameter. */
-      onlyUnitName?: string,
-    ) => ICrisisMoment | null;
-    /** #29 (2026-08-17): the owner's own successful-cast instants (seconds,
-     * any spell — `owner.spellCastEvents` timestamps re-based to match
-     * start), consumed only by `filterIntentGuardEvidence`'s gcd-locked
-     * exclusion. Optional — absent skips that exclusion (graceful
-     * degradation, same convention as `rawStreams?` itself). */
-    ownCastSuccessSeconds?: number[];
-  },
-  // Calibration-only override (Task 5, packages/eval/src/explore/
-  // candidateCalibration.ts): every field defaults to its module constant, so
-  // every production call site (which passes no 4th arg) is byte-identical to
-  // before this was added. Exists so the corpus threshold-sensitivity sweep
-  // calls this REAL builder at swept values instead of a second,
-  // drift-prone reimplementation (CLAUDE.md shared-predicate rule).
-  overrides?: { minLateS?: number; crisisHpPct?: number; cap?: number },
-  /**
-   * Intent guard (BACKLOG #26 Task 2): optional, absent/`available:false` →
-   * byte-identical to before this param existed (Global Constraint: raw
-   * degradation is always silent). When present, each candidate's own
-   * [readyT, endT] window — the SAME already-`toRenderSecond`-floored
-   * instants used for `crisisMomentAt` and written into `facts.t`/`castT` —
-   * is queried for `CAST_FAILED` hits on this exact `cd.spellId`; a hit means
-   * the player did try to press it, so "hoarded" is downgraded from a clean
-   * negligence claim to an attempted-but-rejected one (see `facts.attempted`
-   * and auditFindings.ts's matching severity downgrade).
-   */
-  rawStreams?: RawStreams,
-): CandidateEvent[] {
-  const minLateS = overrides?.minLateS ?? CD_HOARD_MIN_LATE_S;
-  const crisisHpPct = overrides?.crisisHpPct ?? CD_HOARD_CRISIS_HP_PCT;
-  const cap = overrides?.cap ?? CD_HOARD_CAP;
-  const candidates: Array<{
-    cd: (typeof cds)[number];
-    readyT: number;
-    endT: number;
-    lateS: number;
-    crisis: ICrisisMoment;
-    closedByCast: boolean;
-  }> = [];
-  for (const cd of cds) {
-    for (const w of cd.availableWindows) {
-      const readyT = toRenderSecond(w.fromSeconds);
-      const endT = toRenderSecond(w.toSeconds);
-      const lateS = endT - readyT;
-      if (lateS < minLateS) continue;
-      // GH #28: a cooldown that cannot reach anybody else (Desperate Prayer,
-      // Ice Block, Barkskin …) may only be accused of ignoring the OWNER's own
-      // crisis. Before this gate the crisis probe scanned every friendly, so a
-      // self-heal sitting unused while a TEAMMATE dipped to 13% produced
-      // "你本该按绝望祷言" — mechanically impossible advice. Measured on 60
-      // matches / 80 healer rounds: 15 such events, 0 after.
-      const crisis = probes.crisisMomentAt(
-        readyT,
-        endT,
-        canHelpAnotherUnit(cd.spellId, cd.tag) ? undefined : owner.name,
-      );
-      if (!crisis || crisis.hpPct >= crisisHpPct) continue;
-      const closedByCast = cd.casts.some((c) => c.timeSeconds === w.toSeconds);
-      candidates.push({ cd, readyT, endT, lateS, crisis, closedByCast });
-    }
-  }
-  return candidates
-    .sort((a, b) => b.lateS - a.lateS)
-    .slice(0, cap)
-    .map(({ cd, readyT, endT, lateS, crisis, closedByCast }) => {
-      const costNorm = costNormPhrase(cd.spellId);
-      // #29 (2026-08-17): raw hits are filtered through the shared
-      // GCD-artifact exclusions before they count as "pressed but rejected"
-      // — see filterIntentGuardEvidence's doc comment (shared.ts) for the
-      // corpus numbers (96.9% of 尚未恢复 hits were GCD spam, and 37.4% of
-      // guard-hit candidates carried nothing else).
-      const failedHits = rawStreams
-        ? filterIntentGuardEvidence(
-            castFailedInWindow(
-              rawStreams,
-              owner.id,
-              readyT,
-              endT,
-              Number(cd.spellId),
-            ),
-            cd.casts.map((cc) => cc.timeSeconds),
-            { ownCastSuccessSeconds: probes.ownCastSuccessSeconds },
-          )
-        : [];
-      const attempted = formatAttemptedFact(failedHits);
-      return {
-        id: `cd-hoarded:${owner.id}:${cd.spellId}:${readyT}`,
-        type: "cd-hoarded",
-        t: readyT,
-        unitNames: [owner.name, crisis.unitName],
-        spell: cd.spellName,
-        spellId: cd.spellId,
-        facts: {
-          t: String(readyT),
-          lateS: String(lateS),
-          spell: cd.spellName,
-          unit: owner.name,
-          crisisT: String(crisis.t),
-          crisisUnit: crisis.unitName,
-          crisisHpPct: fmt(crisis.hpPct),
-          ...(closedByCast
-            ? { castT: String(endT) }
-            : { unresolved: "未再施放直至战斗结束" }),
-          ...(costNorm ? { costNorm } : {}),
-          ...(attempted ? { attempted } : {}),
-        },
-      };
-    });
 }
 
 /** Per-match cap for cd-spent-idle. <标定定稿 2026-08-15,报告

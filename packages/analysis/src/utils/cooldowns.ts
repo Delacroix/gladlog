@@ -603,6 +603,66 @@ export function getUnitHpAtTimestamp(
 }
 
 /**
+ * The `[STATE]` tick's HP predicate — **the** single sampler for "what HP does
+ * the prompt show for this unit at this rendered second" (CLAUDE.md
+ * Shared-Predicate Rule).
+ *
+ * Two consumers, one predicate:
+ *  - `context/matchTimeline.ts`'s `[STATE]` loop prints this integer next to
+ *    `fmtTime(s)`;
+ *  - `analysis/crisisDecisionPoints.ts` re-anchors every crisis crossing onto
+ *    the same grid through it, so a `cd-hoarded` / `crisis-no-response` fact
+ *    rendered at a displayed second is by construction the number the
+ *    same-second `[STATE]` line prints.
+ *
+ * The clamp is not cosmetic: `getUnitHpAtTimestamp` can exceed 100 (absorb
+ * shields / max-HP changes mid-sample) and `[STATE]` renders the clamped
+ * value, so anything comparing against the rendered text must clamp too.
+ *
+ * Measured cost of the two sides sampling separately (2026-08-30, 309-prompt
+ * A/B corpus): cd-hoarded 155/167 covered menu lines contradicted their own
+ * `[STATE]` tick, crisis-no-response 7/8. The eval gate
+ * `checkCrisisHpStateConsistency` (promptQualityCheck.ts) re-parses the
+ * rendered text and fails on any residual disagreement.
+ *
+ * @param tMs must already be on the render grid (`matchStartMs + s * 1000`).
+ */
+export function gridHpPct(unit: ICombatUnit, tMs: number): number | null {
+  const pct = getUnitHpAtTimestamp(unit, tMs, HP_SAMPLE_RADIUS_MS);
+  return pct === null ? null : Math.min(pct, 100);
+}
+
+/**
+ * The `[STATE]` tick's death predicate — the companion to `gridHpPct`, and
+ * the second half of "what does the prompt show for this unit at this
+ * rendered second". `[STATE]` prints `unit:dead` (never a number) from the
+ * rendered second `Math.floor(deathSeconds)` onward, so a claim citing a
+ * numeric HP at such a second contradicts the timeline just as loudly as a
+ * wrong number does.
+ *
+ * Measured 2026-08-30: after the crisis crossings were re-anchored onto the
+ * render grid, 6 of the 158 covered `cd-hoarded` menu lines still disagreed
+ * with their `[STATE]` tick — every one of them "fact 18% vs [STATE] dead",
+ * because `gridHpPct` happily returns the last pre-death sample within
+ * `HP_SAMPLE_RADIUS_MS` of a second the unit did not live to see.
+ *
+ * Multiple `deathRecords` resolve to the LAST one, matching
+ * matchTimeline.ts's per-name map (built from ascending-sorted deaths, so the
+ * last write wins).
+ */
+export function isDeadAtRenderSecond(
+  unit: ICombatUnit,
+  matchStartMs: number,
+  renderSecond: number,
+): boolean {
+  const records = unit.deathRecords ?? [];
+  if (records.length === 0) return false;
+  let lastMs = -Infinity;
+  for (const d of records) lastMs = Math.max(lastMs, d.timestamp);
+  return renderSecond >= Math.floor((lastMs - matchStartMs) / 1000);
+}
+
+/**
  * Returns the power state (current/max) of `unit` for a specific power type
  * (defaults to Mana) at the given timestamp by finding the nearest advancedAction.
  * Returns null when no data exists.

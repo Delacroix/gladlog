@@ -350,7 +350,10 @@ export function candidateDetail(c: CandidateEvent): string {
     case "unsynced-burst":
       return `${f.spell ?? ""} 起爆时 ${f.healer ?? ""} 没有硬控在身,自由治疗`;
     case "cd-hoarded":
-      return `${f.spell ?? ""} ready 后 ${f.lateS ?? "?"}s 才按,期间 ${f.crisisUnit ?? ""} 掉到 ${f.crisisHpPct ?? "?"}%${f.unresolved ? `(${f.unresolved})` : ""}`;
+      // 2026-08-30 决策点重写(GH #34):facts 从 lateS/crisisT/castT/unresolved
+      // 换成了 t/crisisUnit/crisisHpPct/readyCds/own —— 危机时刻本身就是 t,
+      // 不再有一个独立更早的"转好时刻"。
+      return `${f.crisisUnit ?? ""} 在 ${f.t ?? "?"}s 掉到 ${f.crisisHpPct ?? "?"}%${f.own === "yes" ? "(自己)" : ""}时,${f.readyCds ?? ""} 均可用却 5 秒内未按`;
     case "cd-spent-idle":
       return `${f.spell ?? ""} 在无威胁时段打出`;
     default:

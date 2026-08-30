@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   aggregateGradient,
-  formatStratifiedReport,
   bucketOf,
   DENOMINATOR_OF,
+  formatStratifiedReport,
   MIN_BUCKET_N,
   type RoundRecord,
   wilson95,
@@ -132,14 +132,23 @@ describe("aggregateGradient — opportunity normalisation", () => {
     });
   });
 
-  it("normalises cd-hoarded by crisis windows, not by rounds (first-run defect)", () => {
+  it("normalises cd-hoarded by crisis decision points, not by rounds (first-run defect)", () => {
     // The 2026-08-22 first pass reported cd-hoarded +11.3pp measured against
     // rounds — i.e. against nothing. A round with no crisis is no evidence.
-    expect(DENOMINATOR_OF["cd-hoarded"]).toBe("crisisWindows");
+    // 2026-08-30 (GH #34 decision-point rewrite): the retired `crisisWindows`
+    // denominator (an HP-floor-window count the old predicate no longer
+    // uses) was replaced by `crisisDecisionPoints` — the same field
+    // crisis-no-response already normalises by, since cd-hoarded's producer
+    // now scans that exact predicate too (see DENOMINATOR_OF's own comment
+    // for why this is a proxy, not an exact opportunity count, for the new
+    // multi-source scope).
+    expect(DENOMINATOR_OF["cd-hoarded"]).toBe("crisisDecisionPoints");
     const records = [
-      rec(1500, ["cd-hoarded"], { crisisWindows: 2 }),
-      rec(1500, [], { crisisWindows: 1 }),
-      ...Array.from({ length: 20 }, () => rec(1500, [], { crisisWindows: 0 })),
+      rec(1500, ["cd-hoarded"], { crisisDecisionPoints: 2 }),
+      rec(1500, [], { crisisDecisionPoints: 1 }),
+      ...Array.from({ length: 20 }, () =>
+        rec(1500, [], { crisisDecisionPoints: 0 }),
+      ),
     ];
     const row = aggregateGradient(records).find(
       (r) => r.type === "cd-hoarded",

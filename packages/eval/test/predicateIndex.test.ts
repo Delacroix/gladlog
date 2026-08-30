@@ -200,6 +200,16 @@ const INDEX: PredicateRow[] = [
     symbol: "getUnitHpAtTimestamp",
     mod: cooldowns,
   },
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "gridHpPct",
+    mod: cooldowns,
+  },
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "isDeadAtRenderSecond",
+    mod: cooldowns,
+  },
   // Cooldown availability
   {
     file: `${A}/utils/cooldowns.ts`,
@@ -662,6 +672,11 @@ const INDEX: PredicateRow[] = [
   {
     file: `${E}/quality/promptQualityCheck.ts`,
     symbol: "checkSameSecondHpConsistency",
+    mod: promptQualityCheck,
+  },
+  {
+    file: `${E}/quality/promptQualityCheck.ts`,
+    symbol: "checkCrisisHpStateConsistency",
     mod: promptQualityCheck,
   },
   {

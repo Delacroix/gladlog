@@ -308,21 +308,23 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线;Task 9 �
       readyCds: "Avenging Wrath",
     },
   };
+  // facts shape follows the 2026-08-30 decision-point rewrite (GH #34).
   const cdHoardedEvent: CandidateEvent = {
-    id: "cd-hoarded:h:62618:180",
+    id: "cd-hoarded:h:h:180",
     type: "cd-hoarded",
     t: 180,
     unitNames: ["Healer-R", "Healer-R"],
     spell: "Power Word: Barrier",
     facts: {
       t: "180",
-      lateS: "70",
-      spell: "Power Word: Barrier",
-      unit: "Healer-R",
-      crisisT: "200",
       crisisUnit: "Healer-R",
       crisisHpPct: "30",
-      castT: "250",
+      dmg2sPct: "25",
+      readyCds: "Power Word: Barrier",
+      own: "yes",
+      refDeathSpent: "4.5",
+      refDeathHeld: "11.4",
+      refN: "16960",
     },
   };
 

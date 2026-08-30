@@ -185,13 +185,43 @@
 // ruling: root value = reachability, not DR) + three legend lines. Only roots
 // whose target could not reach anyone for >= ROOT_UNREACHABLE_MIN_S (3 s)
 // render; no candidate/accusation → prompt 变 → 旧缓存作废。
-// v43 (2026-08-30): healing-gap (HEAL-001) regated on the lowest friendly HP%
-// reached during the gap instead of gap seconds — A/B change 1/5 (3,000-match
-// outcome probe: friendly-death-within-10s flat across gap length but keyed
-// on lowest HP <=40% 13.0% vs 40-70% 2.8% vs >70% 0.8%). HEAL_GAP_FREE_MIN_S
-// (>=4s) replaced by HEAL_GAP_CRISIS_HP_PCT (<=40%, same line as
-// crisisDecisionPoints' CRISIS_HP_PCT); events gained facts.lowestAllyHp and
-// sort by lowest HP ascending instead of damage descending; legend text
-// changed to match → menu composition unchanged (still one type) but facts
-// shape + selection differ → prompt 变 → 旧缓存作废。
+// v43 (2026-08-30): five A/B-approved menu changes land together (GH #34).
+// 1. healing-gap (HEAL-001) regated on the lowest friendly HP% reached during
+//    the gap instead of gap seconds — 3,000-match outcome probe:
+//    friendly-death-within-10s is flat across gap length but keyed on lowest
+//    HP <=40% 13.0% vs 40-70% 2.8% vs >70% 0.8%. HEAL_GAP_FREE_MIN_S (>=4s)
+//    replaced by HEAL_GAP_CRISIS_HP_PCT (<=40%, the same line as
+//    crisisDecisionPoints' CRISIS_HP_PCT); events gained facts.lowestAllyHp
+//    and sort by lowest HP ascending instead of damage descending; the legend
+//    now also states facts.t is the gap START.
+// 2. cd-hoarded rewritten decision-point shaped (3,000-match outcome probe) —
+//    "a teammate (or you) hit a crisis while a usable major defensive CD was
+//    ready and it wasn't spent within 5 s", replacing the retired
+//    availableWindows/CD_HOARD_MIN_LATE_S shape whose own intent guard
+//    measured 35.6% of accusations wrong. facts change completely (lateS/
+//    crisisT/castT/unresolved gone; t/crisisUnit/crisisHpPct/dmg2sPct/
+//    readyCds/own/refDeathSpent/refDeathHeld/refN new) and only
+//    Defensive-tagged, non-throughput cooldowns count now.
+//    Crisis decision points are additionally re-anchored onto the prompt's
+//    render grid (crisisDecisionPoints' anchorToRenderGrid + the shared
+//    `gridHpPct` sampler in utils/cooldowns.ts, the same one matchTimeline's
+//    [STATE] tick uses): cd-hoarded's `crisisHpPct` / crisis-no-response's
+//    `hpPct` are now the [STATE] tick's own reading at the displayed second
+//    instead of the raw advancedAction sample, `t` is a whole second on both
+//    types (crisis-no-response used to render one decimal, e.g. `t=116.9`),
+//    and a crossing no whole second can see is dropped. Measured
+//    contradiction against the same-second [STATE] line over the 309-prompt
+//    A/B corpus: cd-hoarded 155/167 covered lines → 0, crisis-no-response
+//    7/8 → 0 (packages/eval/scripts/crisisHpStateScan.ts).
+// 3. cd-spent-idle retired from the candidate menu (signal outcome probe
+//    2026-08-30, user ruling — no measurable cost): CANDIDATE_TYPE_FLAGS
+//    .cdSpentIdle = false, so the menu loses one type.
+// 4. attempt-into-trinket cites the corpus outcome contrast (6.8% vs 3.8%) —
+//    data/outcomeRefs.ts renders the reference numbers into the fact line and
+//    the legend, gated by checkOutcomeRefConsistency.
+// 5. candidate-menu time facts floor to the render grid instead of rounding
+//    past it (kick-eaten `t`, death `t`, missed-cleanse `t`, death-setup
+//    `deathT`), so a menu line's second can never sit one second ahead of the
+//    `fmtTime`-floored timeline marker it points at.
+// 菜单构成变(少一类)+ 多类 facts/legend 全变 → prompt 变 → 旧缓存作废。
 export const PROMPT_VERSION = 43;

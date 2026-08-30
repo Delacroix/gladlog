@@ -655,6 +655,133 @@ export function checkBehaviorPriorConsistency(lines: string[]): string[] {
   return failures;
 }
 
+/** The roster line that assigns every player the numeric id each [STATE]
+ * token is keyed on: `<unit id="3" name="Supatease-Tichondrius-US" …>`. */
+const UNIT_ROSTER_LINE = /<unit\s+id="(\d+)"\s+name="([^"]+)"/;
+/** One [STATE] HP token: `3(BDruid):97`, `2(SHunter):dead`,
+ * `1(HPriest):ghost`. */
+const STATE_TOKEN = /(\d+)\([^)]*\):(\d+|dead|ghost)\b/g;
+/** The two candidate-menu types that cite a crisis unit's HP at a rendered
+ * second, and which facts carry the unit name / the HP claim. */
+const CRISIS_HP_FACT_KEYS = {
+  "cd-hoarded": { unit: "crisisUnit", hp: "crisisHpPct" },
+  "crisis-no-response": { unit: "unit", hp: "hpPct" },
+} as const;
+
+export interface CrisisHpStateProbe {
+  type: keyof typeof CRISIS_HP_FACT_KEYS;
+  /** 0-based index into `lines` */
+  lineIndex: number;
+  /** the rendered second the fact's `t` floors onto (`fmtTime`'s grid) */
+  tSecond: number;
+  unitName: string;
+  /** the roster id the unit's [STATE] tokens are keyed on, null when the
+   * roster block does not name this unit (nothing to cross-check against) */
+  unitId: number | null;
+  factHp: number;
+  /** the same-second [STATE] tick's reading for this unit — a number, the
+   * literal "dead", or null when no such tick carries the unit at all
+   * (STATE is emitted only inside critical windows, so partial coverage is
+   * normal and is NOT a failure). "ghost" (Spirit of Redemption) is also
+   * reported as null: it is a third state that no HP fact can equal. */
+  stateHp: number | "dead" | null;
+}
+
+/**
+ * The probe behind `checkCrisisHpStateConsistency`, exported so the standing
+ * measurement (`packages/eval/scripts/crisisHpStateScan.ts`) counts coverage
+ * and mismatches through the SAME parser the gate fails on — one fact, one
+ * predicate (CLAUDE.md).
+ */
+export function crisisHpStateProbes(lines: string[]): CrisisHpStateProbe[] {
+  const idByName = new Map<string, number>();
+  const stateAt = new Map<number, Map<number, number | "dead" | "ghost">>();
+  for (const line of lines) {
+    const roster = line.match(UNIT_ROSTER_LINE);
+    if (roster) {
+      idByName.set(roster[2]!, Number(roster[1]));
+      continue;
+    }
+    const st = line.match(STATE_LINE);
+    if (!st) continue;
+    const units = new Map<number, number | "dead" | "ghost">();
+    for (const tok of st[3]!.matchAll(STATE_TOKEN)) {
+      const v = tok[2]!;
+      units.set(Number(tok[1]), v === "dead" || v === "ghost" ? v : Number(v));
+    }
+    stateAt.set(Number(st[1]) * 60 + Number(st[2]), units);
+  }
+
+  const probes: CrisisHpStateProbe[] = [];
+  lines.forEach((line, i) => {
+    for (const [type, keys] of Object.entries(CRISIS_HP_FACT_KEYS)) {
+      if (!line.includes(`type=${type}`)) continue;
+      const m = line.match(/facts=\{(.*)\}\s*$/);
+      if (!m) continue;
+      const f = parseFactsBlock(m[1]!);
+      const t = Number(f.t);
+      const hp = Number(f[keys.hp]);
+      const unitName = f[keys.unit];
+      if (!Number.isFinite(t) || !Number.isFinite(hp) || !unitName) continue;
+      // The fact's `t` is rendered on the fmtFactNum scale (crisis-no-response
+      // keeps one decimal); [STATE] is rendered by fmtTime, i.e. floored.
+      const tSecond = Math.floor(t);
+      const unitId = idByName.get(unitName) ?? null;
+      const tick =
+        unitId === null ? undefined : stateAt.get(tSecond)?.get(unitId);
+      probes.push({
+        type: type as keyof typeof CRISIS_HP_FACT_KEYS,
+        lineIndex: i,
+        tSecond,
+        unitName,
+        unitId,
+        factHp: hp,
+        stateHp: tick === undefined || tick === "ghost" ? null : tick,
+      });
+    }
+  });
+  return probes;
+}
+
+/**
+ * Hard invariant (2026-08-30): a `cd-hoarded` / `crisis-no-response` menu line
+ * claims a unit's HP at a rendered second; when the timeline also emits a
+ * `[STATE]` tick for that unit at that same rendered second, the two numbers
+ * must be identical.
+ *
+ * Same class as `checkSameSecondHpConsistency` (the 2026-07-20 [DMG SPIKE] vs
+ * [STATE] bug), same root cause: the crisis crossing was sampled at the raw
+ * advancedAction timestamp while [STATE] samples
+ * `getUnitHpAtTimestamp(unit, startMs + s*1000, HP_SAMPLE_RADIUS_MS)` on whole
+ * seconds, and both rendered into one displayed second. Measured before the
+ * fix over the 309-prompt A/B corpus: cd-hoarded 155/167 covered lines
+ * mismatched, crisis-no-response 7/8. The fix re-anchors the analysis side
+ * (`crisisDecisionPoints.gridHpPct`) onto the render grid; this gate is what
+ * keeps it there.
+ *
+ * A `dead` [STATE] tick against a numeric HP fact is also a failure — the two
+ * lines then disagree about whether the unit was even alive.
+ */
+export function checkCrisisHpStateConsistency(lines: string[]): string[] {
+  const failures: string[] = [];
+  for (const p of crisisHpStateProbes(lines)) {
+    if (p.stateHp === null) continue;
+    if (p.stateHp === p.factHp) continue;
+    failures.push(
+      `line ${p.lineIndex + 1}: ${p.type} 声称 ${p.unitName} 在 ${fmtMmSs(p.tSecond)} 为 ${p.factHp}%,` +
+        `而同秒 [STATE] 报 ${p.stateHp === "dead" ? "dead" : `${p.stateHp}%`}`,
+    );
+  }
+  return failures;
+}
+
+/** `95` → `1:35` — the gate's own rendering of a rendered second, only for
+ * failure messages (the analysis side's `fmtTime` is the authority on the
+ * text itself). */
+function fmtMmSs(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 export function checkSelfOnlyDefensiveClaims(lines: string[]): string[] {
   const violations: string[] = [];
   lines.forEach((line, i) => {
@@ -898,6 +1025,7 @@ export function checkMatch(
   hardFailures.push(...checkDmgSpikeCcCoverConsistency(lines));
   hardFailures.push(...checkHealedThroughConsistency(lines));
   hardFailures.push(...checkBehaviorPriorConsistency(lines));
+  hardFailures.push(...checkCrisisHpStateConsistency(lines));
 
   return {
     ordinal: entry.ordinal,

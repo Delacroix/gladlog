@@ -91,8 +91,22 @@ export const DENOMINATOR_OF: Record<string, keyof RoundExposure> = {
   "death-unused-defensive": "friendlyDeaths",
   "kick-eaten": "ownerHardCasts",
   "slow-defensive-response": "friendlyDamageSpikes",
-  // added 2026-08-22 — see the header note
-  "cd-hoarded": "crisisWindows", // you can only hoard through a crisis
+  // 2026-08-30 (GH #34, cd-hoarded decision-point rewrite): the producer
+  // itself now scans `crisisDecisionPoints` (owner's own crises + every
+  // teammate's), the same predicate `crisis-no-response` already uses — so
+  // this row switches from `crisisWindows` (the retired HP-floor-window
+  // count) to the same `crisisDecisionPoints` denominator that row already
+  // computes (see its own doc comment above: "feasible AND dangerous"
+  // points from `crisisDecisionPoints(owner, legacy)`). Not an exact
+  // opportunity count for the new predicate — that field is owner-only and
+  // `feasible`-gated (cd-hoarded deliberately does NOT require `feasible`,
+  // see cooldownTiming.ts's `cdHoardedEvents` doc comment — and it also
+  // scans every teammate's crises, not just the owner's) — but it is a
+  // strictly closer proxy than `crisisWindows` (which counted HP-only
+  // windows the retired predicate no longer uses at all). A denominator
+  // that actually matches cd-hoarded's multi-source `dangerous && !inCC`
+  // scope is the follow-up (docs/BACKLOG.md #34).
+  "cd-hoarded": "crisisDecisionPoints",
   "cd-spent-idle": "ownerMajorCdCasts", // you can only spend idly if you spent
   "cd-waste": "ownerMajorCdsInKit", // waste is per cooldown you own — PER-UNIT, see PER_UNIT_TYPES
   "questionable-external": "ownerExternalCasts", // per external actually cast

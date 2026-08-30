@@ -23,9 +23,17 @@ import {
   cdRoleTag,
   findCheaperDefensiveAlternatives,
   getUnitHpAtTimestamp,
+  // The [STATE] tick's HP predicate. Shared with
+  // analysis/crisisDecisionPoints.ts so a crisis fact rendered at a
+  // displayed second is the same number this loop prints there (CLAUDE.md
+  // Shared-Predicate Rule) — see gridHpPct's doc comment in cooldowns.ts.
+  gridHpPct,
   HP_SAMPLE_RADIUS_MS,
   IDamageBucket,
   IMajorCooldownInfo,
+  // The [STATE] tick's `unit:dead` predicate — shared with
+  // crisisDecisionPoints.ts for the same reason gridHpPct is.
+  isDeadAtRenderSecond,
   isHealerSpec,
   isSelfOnlyDefensive,
   isTeamHealCD,
@@ -2375,7 +2383,12 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     label: (name: string) => enemyPid(name),
   }));
 
-  // B42: Build death-time lookup so [STATE] ticks show :dead instead of silently omitting dead players.
+  // B42: [STATE] ticks show :dead instead of silently omitting dead players.
+  // The [STATE] loop's own predicate is `isDeadAtRenderSecond`
+  // (utils/cooldowns.ts), shared with analysis/crisisDecisionPoints.ts's
+  // render-grid anchor so the two sides cannot drift apart on "was this unit
+  // alive at second s". These name-keyed maps remain for the mana-marker
+  // block below (emitManaMarkerEntries), which takes names, not units.
   const friendlyDeathAtByName = new Map<string, number>(
     friendlyDeaths.map((d) => [d.name, d.atSeconds]),
   );
@@ -2390,12 +2403,10 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
 
   for (let t = 0; t <= Math.floor(matchDurationS); t++) {
     const tsMs = matchStartMs + t * 1000;
-    const sampleWindowMs = HP_SAMPLE_RADIUS_MS;
 
     const friendlyParts: string[] = [];
     const currentFriendlies = friendlyHpUnits.map(({ unit, label }) => {
-      const deathAt = friendlyDeathAtByName.get(unit.name);
-      let isDead = deathAt !== undefined && t >= Math.floor(deathAt);
+      let isDead = isDeadAtRenderSecond(unit, matchStartMs, t);
 
       const isGhost = spiritOfRedemptionIntervals.some(
         (i) =>
@@ -2405,8 +2416,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
           ),
       );
 
-      const pct = getUnitHpAtTimestamp(unit, tsMs, sampleWindowMs);
-      const clamped = pct !== null ? Math.min(pct, 100) : null;
+      const clamped = gridHpPct(unit, tsMs);
 
       if (isGhost) {
         friendlyParts.push(`${label(unit.name)}:ghost`);
@@ -2425,8 +2435,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     const currentEnemies =
       criticalWindowSet.has(t) && enemyHpUnits.length > 0
         ? enemyHpUnits.map(({ unit, label }) => {
-            const deathAt = enemyDeathAtByName.get(unit.name);
-            let isDead = deathAt !== undefined && t >= Math.floor(deathAt);
+            let isDead = isDeadAtRenderSecond(unit, matchStartMs, t);
 
             const isGhost = spiritOfRedemptionIntervals.some(
               (i) =>
@@ -2436,8 +2445,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
                 ),
             );
 
-            const pct = getUnitHpAtTimestamp(unit, tsMs, sampleWindowMs);
-            const clamped = pct !== null ? Math.min(pct, 100) : null;
+            const clamped = gridHpPct(unit, tsMs);
 
             if (isGhost) {
               enemyParts.push(`${label(unit.name)}:ghost`);

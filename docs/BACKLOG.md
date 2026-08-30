@@ -1900,6 +1900,15 @@ SP-B1.5 的 `buildGroups`(本条要替换的就是它的分组维度)。
 
 ### (a) `cd-hoarded` 的单一 35% 门 → 每个 CD 自己的触发血线【最可动手】
 
+**2026-08-30 补记(GH #34 决策点重写)**:`cd-hoarded` 已换成决策点形状 ——
+危机判定不再走本条讨论的 `CD_HOARD_CRISIS_HP_PCT`,改用 `crisisDecisionPoints`
+自己的 `CRISIS_HP_PCT`(40%,与 `crisis-no-response` 共享同一谓词,见
+`crisisDecisionPoints.ts`)。`CD_HOARD_CRISIS_HP_PCT` 仍然存在,但现在**只服务
+`md-cyclone-window`**(见该常量在 `cooldownTiming.ts` 里的文档注释)。下面这条
+「每 CD 自己的触发血线」建议因此不再适用于 cd-hoarded 本身 —— 如果仍值得做,
+应该重新论证成"crisisDecisionPoints 的 40% 门该不该按 CD/专精细分",而不是按
+原方案改 `CD_HOARD_CRISIS_HP_PCT`。以下历史分析保留作证据,不是待办。
+
 `CD_HOARD_CRISIS_HP_PCT = 35`(`candidates/cooldownTiming.ts:455`)对**所有 CD、
 所有专精**一视同仁。代码注释自己写着这个张力:「45% 会把不算危机的中等压力算进来,
 低于 35% 又会漏掉真正的濒死窗」。语料的答案是:**这个数不该是一个数**。

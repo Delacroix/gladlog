@@ -26,7 +26,15 @@ import { SpellTag } from "../data/spellTypes";
 import {
   cdAvailableAt,
   extractMajorCooldowns,
+  // The [STATE] tick's own HP sampler (getUnitHpAtTimestamp +
+  // HP_SAMPLE_RADIUS_MS + the 100 clamp), imported rather than re-derived so
+  // a crisis fact and the same-second [STATE] line cannot disagree —
+  // CLAUDE.md Shared-Predicate Rule; see gridHpPct's doc comment for the
+  // measured cost of the two sides sampling separately.
+  gridHpPct,
   type IMajorCooldownInfo,
+  // ...and its companion, the [STATE] tick's `unit:dead` predicate.
+  isDeadAtRenderSecond,
   isProcOnlyActivation,
 } from "../utils/cooldowns";
 import { buildFilteredAuraIntervals } from "../utils/utils";
@@ -86,8 +94,16 @@ export interface DecisionPointResponses {
   kite: boolean;
 }
 export interface DecisionPoint {
+  /** the crossing re-anchored onto the prompt's render grid — always
+   * `combat.startTime + tSec * 1000` (see `anchorToRenderGrid`) */
   tMs: number;
+  /** WHOLE seconds since round start; this is the second `fmtTime` will
+   * display, so it is safe to render directly and to re-derive from the
+   * rendered text */
   tSec: number;
+  /** the [STATE] tick's own reading at `tSec` (`gridHpPct`), never the raw
+   * advancedAction sample — the two disagreed on 155/167 cd-hoarded lines
+   * before 2026-08-30 */
   hpPct: number;
   dmg2s: number;
   attackers2s: number;
@@ -203,6 +219,48 @@ function samplesOf(u: any): Sample[] {
       y: a.advancedActorPositionY ?? null,
     }))
     .sort((a, b) => a.t - b.t);
+}
+
+/** `CRISIS_HP_PCT` on the scale [STATE] rounds to — an integer percent. The
+ * crossing test must compare like with like: 0.4 → 40. */
+const CRISIS_HP_PCT_RENDERED = Math.round(CRISIS_HP_PCT * 100);
+/** How many whole seconds forward the grid re-anchor may search from the
+ * crossing's own second. Derived from `CRISIS_WINDOW_GAP_MS` — anything
+ * further away would already be a separate crisis by the merge rule. */
+const GRID_ANCHOR_MAX_S = Math.ceil(CRISIS_WINDOW_GAP_MS / 1000);
+
+/**
+ * Re-anchor a raw crossing instant onto the prompt's render grid: the first
+ * whole second at or after the crossing's own second (bounded by
+ * `GRID_ANCHOR_MAX_S`) at which `gridHpPct` — the [STATE] tick's sampler —
+ * still reads at or below `CRISIS_HP_PCT`.
+ *
+ * Returns null when no such second exists: the rendered prompt cannot show a
+ * crisis there, so neither may a candidate that cites it (the alternative —
+ * printing a number no [STATE] line agrees with — is exactly the defect this
+ * function exists to remove).
+ */
+function anchorToRenderGrid(
+  unit: any,
+  startMs: number,
+  rawMs: number,
+): { tMs: number; tSec: number; hpPct: number } | null {
+  const s0 = Math.floor((rawMs - startMs) / 1000);
+  for (let s = s0; s <= s0 + GRID_ANCHOR_MAX_S; s++) {
+    if (s < 0) continue;
+    // [STATE] prints `unit:dead` from this second on, so no numeric HP claim
+    // can be anchored here (measured: the whole residual 6/158 after the
+    // HP-side anchor landed — see isDeadAtRenderSecond). A crisis is over
+    // once the unit is dead; stop rather than search past it.
+    if (isDeadAtRenderSecond(unit, startMs, s)) break;
+    const tMs = startMs + s * 1000;
+    const hp = gridHpPct(unit, tMs);
+    // `hp > 0` mirrors the raw crossing's own `c.hp > 0` guard: 0% is a
+    // corpse, not a crisis.
+    if (hp !== null && hp > 0 && hp <= CRISIS_HP_PCT_RENDERED)
+      return { tMs, tSec: s, hpPct: hp };
+  }
+  return null;
 }
 
 function nearestSample(
@@ -331,8 +389,24 @@ export function crisisDecisionPoints(
   }
 
   const out: DecisionPoint[] = [];
+  const emittedSeconds = new Set<number>();
   for (const x of crossings) {
-    const t = x.t;
+    // Render-grid discipline (CLAUDE.md): everything below — the response
+    // window, the 2s damage window, the CC/lockout tests, the position
+    // samples, `tSec` for cooldown readiness — is anchored at the SECOND the
+    // prompt will display, not at the raw advancedAction timestamp, so the
+    // rendered `hpPct` is by construction the number the same-second [STATE]
+    // tick prints.
+    const anchor = anchorToRenderGrid(owner, start, x.t);
+    // No grid second in reach still reads <= CRISIS_HP_PCT → the rendered
+    // prompt cannot support this crisis; drop it rather than cite an HP no
+    // [STATE] line agrees with.
+    if (!anchor) continue;
+    // Two raw crossings >CRISIS_WINDOW_GAP_MS apart can still land on one
+    // grid second; keep the first, the merge rule's intent.
+    if (emittedSeconds.has(anchor.tSec)) continue;
+    emittedSeconds.add(anchor.tSec);
+    const t = anchor.tMs;
     const w0 = t - RESPONSE_PRE_MS,
       w1 = t + RESPONSE_WINDOW_MS;
     const inWin = (tt: number) => tt >= w0 && tt <= w1;
@@ -412,7 +486,7 @@ export function crisisDecisionPoints(
       responses.external ||
       responses.control ||
       responses.kite;
-    const tSec = (t - start) / 1000;
+    const tSec = anchor.tSec;
     // Gate 3 (spec §1d): trivially true for a healer (self-heal is always a
     // tool). For a DPS owner, `!rooted` alone already satisfies it — being
     // free to move/act is a tool — so `rooted` only matters when a wall or a
@@ -427,7 +501,7 @@ export function crisisDecisionPoints(
     out.push({
       tMs: t,
       tSec,
-      hpPct: Math.round(x.hp * 100),
+      hpPct: anchor.hpPct,
       dmg2s: dmg2sRounded,
       attackers2s: attackers.size,
       enemyBurst: enemyBurstCasts.some(
