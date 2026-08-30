@@ -181,6 +181,7 @@ describe("buildFindingsPrompt", () => {
               freeS: "4",
               pressured: "Ally",
               pressuredSpec: "Warrior_Arms",
+              lowestAllyHp: "35",
             },
           },
         ],
@@ -191,6 +192,7 @@ describe("buildFindingsPrompt", () => {
       expect(p).toMatch(/facts\.durationS/);
       expect(p).toMatch(/facts\.freeS/);
       expect(p).toMatch(/facts\.pressured\b/);
+      expect(p).toMatch(/facts\.lowestAllyHp/);
     });
 
     it("md-cyclone-window 图例(GH #25,2026-08-21):条件渲染 + 图例引用的每个 facts 键都真在 builder 产出里,措辞守住红线", () => {

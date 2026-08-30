@@ -101,7 +101,7 @@ import {
   MD_SPELL_ID,
   mdCycloneWindowEvents,
 } from "./candidates/massDispel";
-import { crisisDecisionPoints } from "./crisisDecisionPoints";
+import { CRISIS_HP_PCT, crisisDecisionPoints } from "./crisisDecisionPoints";
 import { fmtFactNum as fmt } from "./factFormat";
 import type { CandidateEvent } from "./types";
 
@@ -436,9 +436,6 @@ const CC_LOCKED_MIN_S = 4;
  * Corpus-empirical rates (200 matches / 899 sources, one predicate call per
  * signal, zero new tables — see
  * `.superpowers/sdd/2026-08-05-window-multi-finding/signal-rates-report.md`):
- *  - HEAL-001 (healing-gap): 5.3% of healer-owner rounds qualify, 54 raw
- *    events; freeCastSeconds p50=3.8s sits right at the 4s door, so the
- *    threshold roughly halves detectHealingGaps' own 117 raw gaps.
  *  - POSITION-001 (position-mistake): 10.9% of rounds with position data have
  *    >=1 mistake, 118 raw STAYED_IN-with-real-cost events (MISSED_PUSH /
  *    CD_OUT_OF_RANGE were 0/0 on this healer-heavy corpus — kept anyway, see
@@ -449,10 +446,21 @@ const CC_LOCKED_MIN_S = 4;
  *    bar, meaning a good chunk are just normal cast-rhythm gaps, not
  *    "sitting on it".
  */
-const HEAL_GAP_FREE_MIN_S = 4;
+// HEAL-001 (healing-gap) originally gated on `freeCastSeconds >=
+// HEAL_GAP_FREE_MIN_S(4)` — "placed at the median" per the original comment.
+// A 3,000-match outcome probe (2026-08-30,
+// eval-private/reports/signal-outcomes-2026-08-30/report.md, healer-owner
+// gaps from detectHealingGaps) showed friendly-death-within-10s FLAT across
+// gap length (2-4s 5.3%, 4-6s 5.4%, 6+s 5.7%) but steeply keyed on the lowest
+// friendly HP% reached during the gap (<=40% 13.0%, 40-70% 2.8%, >70% 0.8%) —
+// gap seconds was the wrong axis. Replaced with an HP-crisis gate: same 40%
+// line as crisisDecisionPoints' CRISIS_HP_PCT — imported rather than
+// redeclared.
+const HEAL_GAP_CRISIS_HP_PCT = CRISIS_HP_PCT * 100;
 // at-cap 体检(2026-08-26,782 owner-回合,详见上方 *_CAP 块注释):healing-gap
 // 打到上限 3/29 有产出回合(10%)、position-mistake 17/98(17%)、cc-held 7/121
-// (6%)—— 三条 cap 基本惰性,截断可忽略。
+// (6%)—— 三条 cap 基本惰性,截断可忽略。(pre-2026-08-30 gate; re-measure after
+// the HP-crisis gate lands.)
 const HEALING_GAP_CAP = 2;
 const POSITION_MISTAKE_CAP = 2;
 // GH #34 batch 4 (2026-08-28), same corpus, 2,328 available windows of the
@@ -1003,15 +1011,15 @@ export function trinketTeamMinHpPctAt(
 
 /**
  * healing-gap mapping (HEAL-001, pure function): the healer owner produced no
- * heal/cast for a stretch while a teammate was under real pressure AND had
- * enough un-CC'd free time to have realistically cast (detectHealingGaps'
- * own three gates — see healingGaps.ts). This mapper adds one more door on
- * top: `freeCastSeconds >= HEAL_GAP_FREE_MIN_S` and `mostDamagedAmount > 0`
- * (a pressured teammate actually took damage, not just "someone was
- * theoretically in range"). Corpus-measured: detectHealingGaps' own gates
- * already produce a thin signal (117 raw gaps / 898 healer rounds); this
- * door roughly halves it again to 54/48 rounds (5.3%) — see the const block
- * above for the full empirical citation.
+ * heal/cast for a stretch while a teammate was under real pressure
+ * (detectHealingGaps' own three gates — see healingGaps.ts). This mapper
+ * adds one more door on top: `lowestFriendlyHpPct <= HEAL_GAP_CRISIS_HP_PCT`
+ * (a teammate actually dropped into crisis HP during the gap, not just "the
+ * gap ran long") and `mostDamagedAmount > 0` (a pressured teammate actually
+ * took damage, not just "someone was theoretically in range"). Gate keyed on
+ * the lowest HP reached, not gap length — see the const block above for the
+ * 2026-08-30 outcome-probe citation that drove this change. Sorted by lowest
+ * HP ascending (most severe first), capped at HEALING_GAP_CAP.
  */
 export function healingGapEvents(
   gaps: Pick<
@@ -1023,15 +1031,19 @@ export function healingGapEvents(
     | "mostDamagedName"
     | "mostDamagedSpec"
     | "mostDamagedAmount"
+    | "lowestFriendlyHpPct"
   >[],
   owner: { id: string; name: string },
 ): CandidateEvent[] {
+  type Gap = (typeof gaps)[number];
   return gaps
     .filter(
-      (g) =>
-        g.freeCastSeconds >= HEAL_GAP_FREE_MIN_S && g.mostDamagedAmount > 0,
+      (g): g is Gap & { lowestFriendlyHpPct: number } =>
+        g.lowestFriendlyHpPct !== null &&
+        g.lowestFriendlyHpPct <= HEAL_GAP_CRISIS_HP_PCT &&
+        g.mostDamagedAmount > 0,
     )
-    .sort((a, b) => b.mostDamagedAmount - a.mostDamagedAmount)
+    .sort((a, b) => a.lowestFriendlyHpPct - b.lowestFriendlyHpPct)
     .slice(0, HEALING_GAP_CAP)
     .map((g) => {
       const t = toRenderSecond(g.fromSeconds);
@@ -1046,6 +1058,7 @@ export function healingGapEvents(
           freeS: String(Math.round(g.freeCastSeconds)),
           pressured: g.mostDamagedName,
           pressuredSpec: g.mostDamagedSpec,
+          lowestAllyHp: String(Math.round(g.lowestFriendlyHpPct)),
         },
       };
     });

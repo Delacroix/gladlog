@@ -5,7 +5,12 @@ import {
   detectHealingGaps,
   formatHealingGapsForContext,
 } from "../../src/utils/healingGaps";
-import { makeAuraEvent, makeSpellCastEvent, makeUnit } from "./testHelpers";
+import {
+  makeAdvancedAction,
+  makeAuraEvent,
+  makeSpellCastEvent,
+  makeUnit,
+} from "./testHelpers";
 
 const MATCH_START = 1_000_000;
 
@@ -310,6 +315,87 @@ describe("healingGaps — main detection", () => {
       makeCombat(),
     );
     expect(res).toHaveLength(0); // no inactivity charged — the only pressure is after the healer died
+  });
+
+  // 2026-08-30, A/B change 1/5: gate is being moved off gap seconds onto the
+  // lowest friendly HP% reached during the gap. detectHealingGaps must expose
+  // that value on every gap it emits.
+  it("computes lowestFriendlyHpPct as the min HP% across friendly advancedAction samples inside the gap window", () => {
+    const healer = makeUnit("h", {
+      spec: CombatUnitSpec.Priest_Holy,
+      spellCastEvents: [
+        makeSpellCastEvent(
+          "2061",
+          MATCH_START + 10_000,
+          "f1",
+          "Friend",
+          "h",
+          "Priest",
+        ),
+        makeSpellCastEvent(
+          "2061",
+          MATCH_START + 20_000,
+          "f1",
+          "Friend",
+          "h",
+          "Priest",
+        ),
+      ],
+    });
+    const friend = makeUnit("f1", {
+      spec: CombatUnitSpec.Warrior_Arms,
+      damageIn: [
+        {
+          logLine: { timestamp: MATCH_START + 15_000 },
+          effectiveAmount: -100_000,
+        },
+      ] as any,
+      advancedActions: [
+        // before the gap opens (10s) — must be ignored
+        makeAdvancedAction(MATCH_START + 5_000, 0, 0, 100, 10),
+        // inside the gap window [10s, 20s]
+        makeAdvancedAction(MATCH_START + 12_000, 0, 0, 100, 70),
+        makeAdvancedAction(MATCH_START + 16_000, 0, 0, 100, 35),
+      ],
+    });
+    const enemy = makeUnit("e1");
+
+    const res = detectHealingGaps(
+      healer as any,
+      [healer, friend] as any,
+      [enemy] as any,
+      makeCombat(),
+    );
+    expect(res).toHaveLength(1);
+    expect(res[0].lowestFriendlyHpPct).toBe(35); // min of 70/35 in-window; the pre-gap 10% sample is excluded
+  });
+
+  it("lowestFriendlyHpPct is null when no friendly advancedAction sample lands inside the gap window", () => {
+    const healer = makeUnit("h", {
+      spellCastEvents: [
+        makeSpellCastEvent("2061", MATCH_START + 10_000, "f1"),
+        makeSpellCastEvent("2061", MATCH_START + 20_000, "f1"),
+      ],
+    });
+    const friend = makeUnit("f1", {
+      damageIn: [
+        {
+          logLine: { timestamp: MATCH_START + 15_000 },
+          effectiveAmount: -100_000,
+        },
+      ] as any,
+      // no advancedActions at all
+    });
+    const enemy = makeUnit("e1");
+
+    const res = detectHealingGaps(
+      healer as any,
+      [healer, friend] as any,
+      [enemy] as any,
+      makeCombat(),
+    );
+    expect(res).toHaveLength(1);
+    expect(res[0].lowestFriendlyHpPct).toBeNull();
   });
 });
 
