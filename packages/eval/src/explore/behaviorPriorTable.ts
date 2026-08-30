@@ -89,11 +89,10 @@ function deathRate(
     outcome === "teamDeath15s"
       ? points.filter(
           (p) =>
-            // TRANSITIONAL (§1c): remove after the v8 re-scan. v7 scan rows
             // (packages/eval/scripts/behaviorPriorScan.ts output predating
             // §1c) don't carry friendDiedWithin15s at all; treat a missing
             // value as false rather than let it poison the temp table.
-            p.friendDiedWithin15s ?? false,
+            p.friendDiedWithin15s,
         ).length
       : points.filter((p) => p.diedWithin10s).length;
   return r2(died / points.length);

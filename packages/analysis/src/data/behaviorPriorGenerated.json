@@ -1,7 +1,7 @@
 {
   "meta": {
     "generatedAt": "2026-08-30",
-    "corpus": "TEMP — v7 rows lack friendDiedWithin15s; regenerate after §1c scan",
+    "corpus": "wowarenalogs archive 2026/08 new season, 18,134 matches (v8: friendDiedWithin15s; Solo = teamDeath15s)",
     "weeks": [
       "2026-W33",
       "2026-W34"
@@ -138,9 +138,9 @@
     },
     "Rated Solo Shuffle|healer|*": {
       "nNoResp": 696,
-      "deathNoResp": 0,
+      "deathNoResp": 0.31,
       "nResp": 2622,
-      "deathResp": 0,
+      "deathResp": 0.13,
       "top": [
         [
           "selfHeal",
@@ -159,9 +159,9 @@
     },
     "Rated Solo Shuffle|healer|10-20%": {
       "nNoResp": 347,
-      "deathNoResp": 0,
+      "deathNoResp": 0.32,
       "nResp": 945,
-      "deathResp": 0,
+      "deathResp": 0.16,
       "top": [
         [
           "selfHeal",
@@ -180,9 +180,9 @@
     },
     "Rated Solo Shuffle|healer|>=20%": {
       "nNoResp": 349,
-      "deathNoResp": 0,
+      "deathNoResp": 0.29,
       "nResp": 1677,
-      "deathResp": 0,
+      "deathResp": 0.12,
       "top": [
         [
           "selfHeal",
