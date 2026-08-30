@@ -165,20 +165,25 @@ describe("auditFindings", () => {
 });
 
 describe("意图守护 severity 降一档(BACKLOG #26 Task 2,candidateFindings.ts 的 facts.attempted → 这里的确定性降级)", () => {
+  // facts shape follows the 2026-08-30 decision-point rewrite (GH #34) —
+  // this describe block only exercises auditFindings' ATTEMPTED_GUARD_TYPES
+  // severity downgrade, which keys on `type` + presence of `facts.attempted`
+  // alone, not on any other individual fact.
   const hoardedAttempted: CandidateEvent = {
-    id: "cd-hoarded:h:31884:380",
+    id: "cd-hoarded:h:m:380",
     type: "cd-hoarded",
     t: 380,
     unitNames: ["Healer-R", "Ally-R"],
     facts: {
       t: "380",
-      lateS: "50",
-      spell: "Avenging Wrath",
-      unit: "Healer-R",
-      crisisT: "390",
       crisisUnit: "Ally-R",
       crisisHpPct: "34",
-      castT: "430",
+      dmg2sPct: "30",
+      readyCds: "Divine Shield",
+      own: "no",
+      refDeathSpent: "4.5",
+      refDeathHeld: "11.4",
+      refN: "16960",
       attempted: "曾尝试施放被拒(尚未恢复×3)",
     },
   };
@@ -186,16 +191,16 @@ describe("意图守护 severity 降一档(BACKLOG #26 Task 2,candidateFindings.t
     hoardedAttempted.facts;
   const hoardedClean: CandidateEvent = {
     ...hoardedAttempted,
-    id: "cd-hoarded:h:31884:900",
+    id: "cd-hoarded:h:m:900",
     facts: factsWithoutAttempted,
   };
   const rawHoarded: RawFinding = {
     eventIds: [hoardedAttempted.id],
     severity: "high",
     category: "cooldown-usage",
-    title: "Hoarded Avenging Wrath",
+    title: "Hoarded a ready defensive",
     explanation:
-      "You held {{spell}} for {{lateS}}s while {{crisisUnit}} was in danger.",
+      "You had {{readyCds}} ready when {{crisisUnit}} fell to {{crisisHpPct}}% and spent none of it.",
   };
 
   it("① 候选带 attempted → severity 降一档(high→med)", () => {

@@ -125,7 +125,13 @@ function legendLines(
 const NEW_CANDIDATE_LEGENDS: Record<string, string> = {
   "missed-sync-window": `- "missed-sync-window": the enemy healer facts.healer sat in hard CC (facts.cc) for facts.durationS seconds (facts.t–facts.windowEndT) while your team had facts.readyCds ready and pressed none of them. Syncing with the lock is the trigger — facts.enemyMinHpPct, when present, is only an accelerator fact; do NOT require low enemy HP before recommending the burst. Coach pressing offensive cooldowns the moment a hard-CC lock on the healer opens.`,
   "unsynced-burst": `- "unsynced-burst": you opened facts.spell at facts.t with zero hard CC on the enemy healer anywhere in its effect window (facts.t–facts.windowEndT) — the healer was free to answer. Same rule as missed-sync-window: syncing with a healer lock is the trigger, never a low-HP threshold. Coach lining the cooldown up with CC on the healer next time.`,
-  "cd-hoarded": `- "cd-hoarded": facts.spell sat ready for facts.lateS seconds after facts.t while facts.crisisUnit dropped to facts.crisisHpPct% at facts.crisisT — a real crisis happened during the hoard. facts.castT names when it was finally pressed; facts.unresolved means it was never pressed again the rest of the match. Coach pressing sooner when a teammate is in danger.${COST_NORM_LEGEND_NOTE}${ATTEMPTED_LEGEND_NOTE}`,
+  // cd-hoarded (2026-08-30 rewrite, GH #34, decision-point shaped): facts
+  // changed from the retired window-shaped predicate (facts.lateS/facts.
+  // crisisT/facts.castT/facts.unresolved are gone) to a crisis-decision-point
+  // shape with a corpus outcome reference, same discipline crisis-no-response
+  // already established (descriptive contrast, never a causal claim, never
+  // "you should have pressed <ability>").
+  "cd-hoarded": `- "cd-hoarded": at facts.t facts.crisisUnit fell to facts.crisisHpPct% while taking facts.dmg2sPct% of max HP in the prior 2 s (facts.own="yes" means it was the player's own HP crossing; "no" means a teammate's) — the player had a usable major defensive cooldown ready (facts.readyCds) and spent none of them within 5 seconds. Corpus reference (n=facts.refN friendly crises with a ready defensive): the crisis unit died within 10 s facts.refDeathHeld% of the time when the ready cooldown was held vs facts.refDeathSpent% when it was spent within 5 s. This is a descriptive contrast, not causal proof, and it does not identify WHICH cooldown mattered — cite the numbers, do not prescribe a specific button.${ATTEMPTED_LEGEND_NOTE}`,
   "cd-spent-idle": `- "cd-spent-idle": facts.spell was cast at facts.t with no active enemy threat at that instant — spent into dead air instead of held for the next real window. This type only ever appears in matches with at least medium overall threat, so idle time in an otherwise-calm match is never flagged here. Coach holding survival cooldowns for genuine pressure.${COST_NORM_LEGEND_NOTE}`,
 };
 

@@ -15,8 +15,6 @@ import {
   ccAvoidanceOptionsAt,
   ccHeldEvents,
   ccLockedEvents,
-  CD_HOARD_CRISIS_HP_PCT,
-  CD_HOARD_MIN_LATE_S,
   cdHoardedEvents,
   cdSpentIdleEvents,
   cdWasteEvents,
@@ -2903,249 +2901,138 @@ describe("friendlyCrisisMomentInWindow(cd-hoarded 的危机时刻探针,渲染�
   });
 });
 
-describe("cdHoardedEvents(P2 起爆-1,2026-08-15,60ab-AW 形态)", () => {
-  // ready 6:20(380.4s,小数秒模拟真实数据)、己方 34% 危机在 6:30(390)、直到
-  // 7:10(430.6s)才施放——availableWindows 的 toSeconds 与真正促成它关闭的那次
-  // 施放共享同一个原始浮点值(exact-value match,不是容差比较),模拟
-  // extractMajorCooldowns 自己产出的形状。窗口时长(430.6-380.4≈50s)选在标定
-  // 定稿后的 H=45s 门槛之上,不是 Task 5 标定前 33.8s 的占位形状——那个时长在
-  // 新阈值下不再够晚,故随标定同步放宽(输入形状变了,不是只改期望值)。
-  it("标定定稿后的常量(报告 p1p2-calibration.md:H=45s/危机=35%)", () => {
-    expect(CD_HOARD_MIN_LATE_S).toBe(45);
-    expect(CD_HOARD_CRISIS_HP_PCT).toBe(35);
+describe("cdHoardedEvents(2026-08-30 rewrite, GH #34, decision-point shape, 60ab-AW 精神传承)", () => {
+  // 2026-08-30 决策点重写:判据换成 crisisDecisionPoints 的 dangerous && !inCC
+  // 点,不再是 availableWindows 的「转好后晚 N 秒」——minLateS/crisisHpPct 两个
+  // 门槛随窗口形状一起退役了(见 cooldownTiming.ts 的 cdHoardedEvents 文档注释)。
+  // GH #28 的自愈/够不着队友细节、readyCds 截断、cap+排序、语料参照三件套已
+  // 由 packages/analysis/test/cdHoardedSelfOnly.test.ts 覆盖;这里只保留
+  // render-grid floor 这条与本文件其它测试同风格的锚点用例。
+  const OWNER = { id: "h", name: "Healer-R" };
+  const point = (
+    tSec: number,
+    hpPct: number,
+    over: Record<string, unknown> = {},
+  ) => ({
+    tSec,
+    hpPct,
+    dmg2s: 0.3,
+    attackers2s: 1,
+    enemyBurst: false,
+    inCC: false,
+    dangerous: true,
+    ...over,
+  });
+  const cd = (
+    spellId: string,
+    spellName: string,
+    over: Record<string, unknown> = {},
+  ) => ({
+    spellId,
+    spellName,
+    tag: "Defensive",
+    cooldownSeconds: 300,
+    casts: [] as { timeSeconds: number }[],
+    neverUsed: true,
+    ...over,
   });
 
-  const hoardedWindow = {
-    fromSeconds: 380.4,
-    toSeconds: 430.6,
-    durationSeconds: 50.2,
-  };
-  const HOARDED_CD = {
-    spellId: "31884",
-    spellName: "Avenging Wrath",
-    casts: [{ timeSeconds: 0 }, { timeSeconds: 430.6 }],
-    availableWindows: [hoardedWindow],
-  };
-
-  it("① ready 6:20、己方危机 6:30(34%)、施放延到 7:10 → 1 条,facts 含渲染网格晚 N 秒/危机时刻(不是原始小数秒)", () => {
+  it("① 小数秒的危机点(6:20.6)→ facts.t/e.t 都落在渲染网格(floor),不是原始小数秒", () => {
     const evts = cdHoardedEvents(
-      [HOARDED_CD],
-      { id: "h", name: "Healer-R" },
-      {
-        crisisMomentAt: (from, to) => {
-          // 探针必须已经拿到渲染网格整数(380/430),不是原始小数秒——
-          // 渲染网格纪律:facts 显示的窗口绝不能比探针实际扫描的窗口宽。
-          expect(from).toBe(380);
-          expect(to).toBe(430);
-          return { t: 390, unitName: "Ally-R", hpPct: 34 };
-        },
-      },
+      [{ crisisUnit: OWNER, own: true, points: [point(380.6, 34)] }],
+      [cd("642", "Divine Shield")],
+      OWNER,
     );
     expect(evts).toHaveLength(1);
-    const e = evts[0];
+    const e = evts[0]!;
     expect(e.type).toBe("cd-hoarded");
-    expect(e.t).toBe(380);
-    expect(e.unitNames).toEqual(["Healer-R", "Ally-R"]);
+    expect(e.t).toBe(380); // toRenderSecond(380.6)
     expect(e.facts["t"]).toBe("380");
-    expect(e.facts["castT"]).toBe("430");
-    expect(e.facts["lateS"]).toBe("50"); // 430-380,派生自已 floor 的两端,不是 430.6-380.4
-    expect(e.facts["crisisT"]).toBe("390");
-    expect(e.facts["crisisUnit"]).toBe("Ally-R");
+    expect(e.facts["crisisUnit"]).toBe("Healer-R");
     expect(e.facts["crisisHpPct"]).toBe("34");
-    expect(e.facts["spell"]).toBe("Avenging Wrath");
-    // 31884 不是 cost_norm 条目 → 不带 costNorm 字段
-    expect(e.facts["costNorm"]).toBeUndefined();
+    expect(e.facts["dmg2sPct"]).toBe("30"); // Math.round(0.3*100)
+    expect(e.facts["own"]).toBe("yes");
+    expect(e.unitNames).toEqual(["Healer-R", "Healer-R"]);
+    // 呈现用的 spell/spellId 取第一个 ready CD(types.ts:多技能事件只取第一个)。
+    expect(e.spell).toBe("Divine Shield");
+    expect(e.spellId).toBe("642");
   });
 
-  it("② 转好后立刻按下(晚 < CD_HOARD_MIN_LATE_S)→ 0 条,即便同一窗口确有危机", () => {
-    const promptWindow = {
-      fromSeconds: 380.4,
-      toSeconds: 390,
-      durationSeconds: 9.6,
-    };
-    const cd = {
-      ...HOARDED_CD,
-      casts: [{ timeSeconds: 0 }, { timeSeconds: 390 }],
-      availableWindows: [promptWindow],
-    };
+  it("② 同一 CD 在响应窗内(渲染网格意义上的 +3s)被按下 → 0 条(按了不算屯)", () => {
     const evts = cdHoardedEvents(
-      [cd],
-      { id: "h", name: "Healer-R" },
-      {
-        crisisMomentAt: () => ({ t: 385, unitName: "Ally-R", hpPct: 20 }),
-      },
-    );
-    expect(evts).toHaveLength(0);
-  });
-
-  it("红线:cost_norm 命中(642)时 facts 必须带 costNorm——大技能宁愿囤着也不推荐当常规挡控", () => {
-    const cd = { ...HOARDED_CD, spellId: "642", spellName: "Divine Shield" };
-    const evts = cdHoardedEvents(
-      [cd],
-      { id: "h", name: "Healer-R" },
-      {
-        crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
-      },
-    );
-    expect(evts).toHaveLength(1);
-    expect(evts[0].facts["costNorm"]).toBeDefined();
-    expect(evts[0].facts["costNorm"]).toContain("大技能");
-  });
-
-  it("尾窗(跑到比赛结束、没有对应的 cast)也要出——fix round 1(评审 Important):cd-waste 只在 casts.length===0(neverUsed)才管,这条 CD 早前真按过一次(casts.length>=1),中途屯过危机却再没按,此前两个类型都不认,现在 cd-hoarded 认领,facts 用 unresolved 而非 castT", () => {
-    const tailWindow = {
-      fromSeconds: 430.4,
-      toSeconds: 600,
-      durationSeconds: 169.6,
-    };
-    const cd = {
-      ...HOARDED_CD,
-      casts: [{ timeSeconds: 0 }, { timeSeconds: 250.4 }], // 600 处没有对应施放,但 casts.length===2,neverUsed 恒 false
-      availableWindows: [tailWindow],
-    };
-    const evts = cdHoardedEvents(
-      [cd],
-      { id: "h", name: "Healer-R" },
-      {
-        crisisMomentAt: (from, to) => {
-          expect(from).toBe(430);
-          expect(to).toBe(600);
-          return { t: 500, unitName: "Ally-R", hpPct: 10 };
+      [
+        {
+          crisisUnit: OWNER,
+          own: true,
+          points: [point(380.6, 34)],
         },
-      },
-    );
-    expect(evts).toHaveLength(1);
-    const e = evts[0];
-    expect(e.facts["t"]).toBe("430");
-    expect(e.facts["lateS"]).toBe("170"); // 600-430,派生自已 floor 的两端
-    expect(e.facts["castT"]).toBeUndefined(); // 没有真实施放可引用
-    expect(e.facts["unresolved"]).toBe("未再施放直至战斗结束");
-  });
-
-  it("CD 在比赛倒数不足 H 秒才转好(尾窗过短)→ 0 条——不是每个尾窗都算屯", () => {
-    const lateReadyTailWindow = {
-      fromSeconds: 590,
-      toSeconds: 600, // 只剩 10s < CD_HOARD_MIN_LATE_S(45)
-      durationSeconds: 10,
-    };
-    const cd = {
-      ...HOARDED_CD,
-      casts: [{ timeSeconds: 0 }],
-      availableWindows: [lateReadyTailWindow],
-    };
-    const evts = cdHoardedEvents(
-      [cd],
-      { id: "h", name: "Healer-R" },
-      {
-        crisisMomentAt: () => ({ t: 595, unitName: "Ally-R", hpPct: 5 }), // 危机再明显也不该出——窗口本身太短
-      },
+      ],
+      [cd("642", "Divine Shield", { casts: [{ timeSeconds: 383 }] })],
+      OWNER,
     );
     expect(evts).toHaveLength(0);
-  });
-
-  it("危机探针返回 null 或不够低(>= CD_HOARD_CRISIS_HP_PCT)→ 0 条", () => {
-    const nullCase = cdHoardedEvents(
-      [HOARDED_CD],
-      { id: "h", name: "Healer-R" },
-      {
-        crisisMomentAt: () => null,
-      },
-    );
-    expect(nullCase).toHaveLength(0);
-    const notLowEnough = cdHoardedEvents(
-      [HOARDED_CD],
-      { id: "h", name: "Healer-R" },
-      {
-        crisisMomentAt: () => ({
-          t: 390,
-          unitName: "Ally-R",
-          hpPct: CD_HOARD_CRISIS_HP_PCT,
-        }),
-      },
-    );
-    expect(notLowEnough).toHaveLength(0);
-  });
-
-  it("按晚 N 秒降序排序并按上限截断", () => {
-    const mk = (spellId: string, from: number, to: number) => ({
-      spellId,
-      spellName: spellId,
-      casts: [{ timeSeconds: 0 }, { timeSeconds: to }],
-      availableWindows: [
-        { fromSeconds: from, toSeconds: to, durationSeconds: to - from },
-      ],
-    });
-    const cds = [
-      mk("1", 0, 25), // late 25
-      mk("2", 0, 60), // late 60
-      mk("3", 0, 45), // late 45
-    ];
-    const evts = cdHoardedEvents(
-      cds,
-      { id: "h", name: "Healer-R" },
-      {
-        crisisMomentAt: () => ({ t: 10, unitName: "Ally-R", hpPct: 10 }),
-      },
-    );
-    expect(evts.map((e) => e.facts["lateS"])).toEqual(["60", "45"]);
   });
 });
 
-describe("cdHoardedEvents 意图守护(BACKLOG #26 Task 2,按了被拒不算屯——三条红线)", () => {
-  // Own copy of the fixture (the "cdHoardedEvents(P2 起爆-1...)" describe
-  // above scopes its HOARDED_CD to its own callback) — same shape/window as
-  // that block's HOARDED_CD (readyT floors to 380, endT to 430).
+describe("cdHoardedEvents 意图守护(BACKLOG #26 Task 2,按了被拒不算屯——2026-08-30 沿用/扩展到多技能合并)", () => {
+  const OWNER = { id: "h", name: "Healer-R" };
+  const point = (tSec: number, hpPct: number) => ({
+    tSec,
+    hpPct,
+    dmg2s: 0.3,
+    attackers2s: 1,
+    enemyBurst: false,
+    inCC: false,
+    dangerous: true,
+  });
+  const ownSource = (tSec: number, hpPct: number) => ({
+    crisisUnit: OWNER,
+    own: true,
+    points: [point(tSec, hpPct)],
+  });
+  // 与旧版同一形状的 fixture(readyT floors 到 380,响应窗 [378.5, 385]) —— 只
+  // 是不再挂在 availableWindows 上,直接用一个决策点在 380.6s。
   const HOARDED_CD = {
-    spellId: "31884",
-    spellName: "Avenging Wrath",
-    casts: [{ timeSeconds: 0 }, { timeSeconds: 430.6 }],
-    availableWindows: [
-      { fromSeconds: 380.4, toSeconds: 430.6, durationSeconds: 50.2 },
-    ],
+    spellId: "642",
+    spellName: "Divine Shield",
+    tag: "Defensive",
+    cooldownSeconds: 300,
+    casts: [] as { timeSeconds: number }[],
+    neverUsed: true,
   };
-  // Fractional-second CAST_FAILED timestamps (brief's explicit red-line
-  // requirement), all inside HOARDED_CD's floored [380,430] window and on its
-  // exact spellId (31884). Note this test can NOT assert the "severity
-  // downgraded one tier" half of the brief's ①: CandidateEvent has no
-  // severity field (severity is entirely LLM-assigned, only materializing in
-  // auditFindings.ts's RawFinding→Finding step) — the downgrade is
-  // deterministic there instead and is red-lined in auditFindings.test.ts
-  // ("意图守护 severity 降一档"). This describe only owns the candidate-layer
-  // half: does facts.attempted appear, correctly aggregated.
+
   it("① 屯窗内该技能 CAST_FAILED×3(两种理由)→ facts.attempted 按频次聚合(尚未恢复×2、法力值不足×1)", () => {
     const rawStreams: RawStreams = {
       available: true,
       manaSamples: [],
       castFailed: [
         {
-          tSeconds: 385.2,
+          tSeconds: 381.2,
           unitGuid: "h",
-          spellId: 31884,
-          spellName: "Avenging Wrath",
+          spellId: 642,
+          spellName: "Divine Shield",
           reason: "尚未恢复",
         },
         {
-          tSeconds: 400.7,
+          tSeconds: 382.7,
           unitGuid: "h",
-          spellId: 31884,
-          spellName: "Avenging Wrath",
+          spellId: 642,
+          spellName: "Divine Shield",
           reason: "尚未恢复",
         },
         {
-          tSeconds: 410.9,
+          tSeconds: 384.9,
           unitGuid: "h",
-          spellId: 31884,
-          spellName: "Avenging Wrath",
+          spellId: 642,
+          spellName: "Divine Shield",
           reason: "法力值不足",
         },
       ],
     };
     const evts = cdHoardedEvents(
+      [ownSource(380.6, 34)],
       [HOARDED_CD],
-      { id: "h", name: "Healer-R" },
-      {
-        crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
-      },
+      OWNER,
       undefined,
       rawStreams,
     );
@@ -3160,81 +3047,69 @@ describe("cdHoardedEvents 意图守护(BACKLOG #26 Task 2,按了被拒不算屯�
       available: true,
       manaSamples: [],
       castFailed: [
-        // Wrong spellId: same unit/window, doesn't count as an attempt on
-        // THIS spell.
         {
-          tSeconds: 385.2,
+          tSeconds: 381.2,
           unitGuid: "h",
           spellId: 99999,
           spellName: "Some Other Spell",
           reason: "尚未恢复",
         },
-        // Wrong unit: right spell/window, not this owner.
         {
-          tSeconds: 400.7,
+          tSeconds: 382.7,
           unitGuid: "someone-else",
-          spellId: 31884,
-          spellName: "Avenging Wrath",
+          spellId: 642,
+          spellName: "Divine Shield",
           reason: "法力值不足",
         },
       ],
     };
-    const probes = {
-      crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
-    };
     const withGuard = cdHoardedEvents(
+      [ownSource(380.6, 34)],
       [HOARDED_CD],
-      { id: "h", name: "Healer-R" },
-      probes,
+      OWNER,
       undefined,
       rawStreams,
     );
     const without = cdHoardedEvents(
+      [ownSource(380.6, 34)],
       [HOARDED_CD],
-      { id: "h", name: "Healer-R" },
-      probes,
+      OWNER,
     );
     expect(withGuard).toEqual(without);
     expect(withGuard[0]!.facts["attempted"]).toBeUndefined();
   });
 
   it("③ rawStreams 缺省 / available:false → 逐字段与无 rawStreams 时完全相同(优雅降级,绝不 throw)", () => {
-    const probes = {
-      crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
-    };
     const without = cdHoardedEvents(
+      [ownSource(380.6, 34)],
       [HOARDED_CD],
-      { id: "h", name: "Healer-R" },
-      probes,
+      OWNER,
     );
-    // Absent (undefined) — same as every pre-existing call site.
     const absent = cdHoardedEvents(
+      [ownSource(380.6, 34)],
       [HOARDED_CD],
-      { id: "h", name: "Healer-R" },
-      probes,
+      OWNER,
       undefined,
       undefined,
     );
     expect(absent).toEqual(without);
-    // available:false, even carrying (malformed/stale) castFailed data — must
-    // still degrade silently, never consult the data.
     const unavailable: RawStreams = {
       available: false,
       manaSamples: [],
       castFailed: [
         {
-          tSeconds: 385.2,
+          tSeconds: 381.2,
           unitGuid: "h",
-          spellId: 31884,
-          spellName: "Avenging Wrath",
+          spellId: 642,
+          spellName: "Divine Shield",
           reason: "尚未恢复",
         },
       ],
     };
     const withUnavailable = cdHoardedEvents(
+      [ownSource(380.6, 34)],
       [HOARDED_CD],
-      { id: "h", name: "Healer-R" },
-      probes,
+      OWNER,
       undefined,
       unavailable,
     );
@@ -3244,48 +3119,38 @@ describe("cdHoardedEvents 意图守护(BACKLOG #26 Task 2,按了被拒不算屯�
   // #29 rewrite (2026-08-17): GCD-spam presses are not "pressed but
   // rejected" evidence — see filterIntentGuardEvidence's own doc comment
   // (shared.ts) for the corpus numbers (96.9% of 尚未恢复 hits were GCD
-  // artifacts).
-  it("④ #29:收盘施放前 ≤2s 的连点(任何理由)不算证据——只剩这种时 facts 与无 rawStreams 逐字段全同", () => {
+  // artifacts). Still consumed the same way post-rewrite (per-cd
+  // filterIntentGuardEvidence call, merged across every READY cd).
+  it("④ #29:紧邻一次成功施放前 ≤2s 的连点(任何理由)不算证据 —— 该次成功施放本身落在响应窗之外(所以 spent=false、候选照常触发),窗内那次失败尝试因贴着它被判定为「最终按下前的连点」而剔除", () => {
+    // 响应窗 [379.1, 385.6](380.6 - 1.5 / +5)。成功施放在 386.0(窗外,
+    // 不算 spent);384.5 的失败尝试在窗内、且在成功施放前 1.5s(<=2s)——
+    // 应被 pre-cast 排除,不计入 attempted。
+    const cdWithLateCast = {
+      ...HOARDED_CD,
+      casts: [{ timeSeconds: 386.0 }],
+    };
     const rawStreams: RawStreams = {
       available: true,
       manaSamples: [],
       castFailed: [
-        // 1.6s before the closing cast at 430.6 — spam while GCD-locked.
         {
-          tSeconds: 429.0,
+          tSeconds: 384.5,
           unitGuid: "h",
-          spellId: 31884,
-          spellName: "Avenging Wrath",
+          spellId: 642,
+          spellName: "Divine Shield",
           reason: "尚未恢复",
-        },
-        // 0.6s before — even a CC reason this close to the successful press
-        // is the final press sequence, not blocked intent.
-        {
-          tSeconds: 430.0,
-          unitGuid: "h",
-          spellId: 31884,
-          spellName: "Avenging Wrath",
-          reason: "无法在昏迷时那样做",
         },
       ],
     };
-    const probes = {
-      crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
-    };
-    const withGuard = cdHoardedEvents(
-      [HOARDED_CD],
-      { id: "h", name: "Healer-R" },
-      probes,
+    const evts = cdHoardedEvents(
+      [ownSource(380.6, 34)],
+      [cdWithLateCast],
+      OWNER,
       undefined,
       rawStreams,
     );
-    const without = cdHoardedEvents(
-      [HOARDED_CD],
-      { id: "h", name: "Healer-R" },
-      probes,
-    );
-    expect(withGuard).toEqual(without);
-    expect(withGuard[0]!.facts["attempted"]).toBeUndefined();
+    expect(evts).toHaveLength(1); // 386.0 在窗外 → spent=false → 仍触发
+    expect(evts[0]!.facts["attempted"]).toBeUndefined();
   });
 
   it("⑤ #29:自己刚成功施放 ≤1.5s 内的「尚未恢复」是 GCD 不算证据;同时刻的昏迷理由保留(理由收窄)", () => {
@@ -3293,38 +3158,69 @@ describe("cdHoardedEvents 意图守护(BACKLOG #26 Task 2,按了被拒不算屯�
       available: true,
       manaSamples: [],
       castFailed: [
-        // 1.2s after own successful cast at 399.5 → GCD artifact, excluded.
+        // 1.2s after an own successful cast at 382 → GCD artifact, excluded.
         {
-          tSeconds: 400.7,
+          tSeconds: 383.2,
           unitGuid: "h",
-          spellId: 31884,
-          spellName: "Avenging Wrath",
+          spellId: 642,
+          spellName: "Divine Shield",
           reason: "尚未恢复",
         },
-        // Same instant but a CC reason → kept (the narrowing exists exactly
-        // for this shape: cast → stunned immediately after → pressed).
+        // Same instant but a CC reason → kept.
         {
-          tSeconds: 400.7,
+          tSeconds: 383.2,
           unitGuid: "h",
-          spellId: 31884,
-          spellName: "Avenging Wrath",
+          spellId: 642,
+          spellName: "Divine Shield",
           reason: "无法在昏迷时那样做",
         },
       ],
     };
     const evts = cdHoardedEvents(
+      [ownSource(380.6, 34)],
       [HOARDED_CD],
-      { id: "h", name: "Healer-R" },
-      {
-        crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
-        ownCastSuccessSeconds: [399.5],
-      },
+      OWNER,
+      undefined,
+      rawStreams,
+      [382],
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["attempted"]).toBe(
+      "曾尝试施放被拒(无法在昏迷时那样做×1)",
+    );
+  });
+
+  it("⑥ 新增(2026-08-30 多技能合并):两个 ready CD 各自的 CAST_FAILED 一起并入 facts.attempted,不是只看第一个", () => {
+    const rawStreams: RawStreams = {
+      available: true,
+      manaSamples: [],
+      castFailed: [
+        {
+          tSeconds: 381.0,
+          unitGuid: "h",
+          spellId: 642,
+          spellName: "Divine Shield",
+          reason: "尚未恢复",
+        },
+        {
+          tSeconds: 382.0,
+          unitGuid: "h",
+          spellId: 871,
+          spellName: "Shield Wall",
+          reason: "法力值不足",
+        },
+      ],
+    };
+    const evts = cdHoardedEvents(
+      [ownSource(380.6, 34)],
+      [HOARDED_CD, { ...HOARDED_CD, spellId: "871", spellName: "Shield Wall" }],
+      OWNER,
       undefined,
       rawStreams,
     );
     expect(evts).toHaveLength(1);
     expect(evts[0]!.facts["attempted"]).toBe(
-      "曾尝试施放被拒(无法在昏迷时那样做×1)",
+      "曾尝试施放被拒(尚未恢复×1、法力值不足×1)",
     );
   });
 });
@@ -3633,13 +3529,16 @@ describe("cd-hoarded / cd-spent-idle 接线(extractCandidateFindings,2026-08-15,
   // 菜单,但 CANDIDATE_TYPE_FLAGS 默认全 false,A/B 阶段仍不出现。Task 9(用户
   // 裁决全量上线)把四开关翻 true —— 本块用真实数据条件证明"条件满足且默认
   // 开启 → 出现",再用同一 fixture 直调真实谓词链(extractMajorCooldowns + 真实
-  // friendlyCrisisMomentInWindow/threatActiveAt/matchThreatLevel,不是手搭
-  // stub)证明底层数据本身是通的。
+  // crisisDecisionPoints/threatActiveAt/matchThreatLevel,不是手搭 stub)证明
+  // 底层数据本身是通的。
   //
   // 团队编成:治疗 owner(Healer-R,Priest_Discipline)+ 敌方(Enemy-E)。
   // Healer-R 真实施放圣言术:屏障(62618,180s CD)两次(t=0、t≈250.4s)——
-  // 中间的可用窗口(180s→250.4s)内 Healer-R 自己血量在 200s 掉到 30%,构成
-  // cd-hoarded 的危机;又在远离威胁的 t≈400.7s 真实施放痛苦压制
+  // 中间的可用窗口(180s→250.4s)内 Healer-R 自己血量从 190s 的 100%
+  // 掉到 200s 的 30%(2026-08-30 决策点重写:crisisDecisionPoints 要看到一次
+  // 真实的下穿,单点 HP 读数不够——补了 190s 这一读作「穿越前」的样本),同一
+  // 窗口内还有一笔真实伤害(199.5s,25% maxHp)让 dmg2s 过 dangerous 门槛,
+  // 构成 cd-hoarded 的决策点;又在远离威胁的 t≈400.7s 真实施放痛苦压制
   // (33206,防御向、非 throughput)——此时敌方没有任何进攻光环、也没有
   // 伤害数据,是真正的空档。敌方在 195~210s 有一段 Avenging Wrath 自增益
   // (真实 OFFENSIVE_SPELL_IDS 表项,任意单位类型都能触发
@@ -3689,12 +3588,31 @@ describe("cd-hoarded / cd-spent-idle 接线(extractCandidateFindings,2026-08-15,
       logLine: { event: "SPELL_AURA_REMOVED", timestamp: 210_000 },
       timestamp: 210_000,
     };
+    const healerHpBeforeCrisis = {
+      timestamp: 190_000,
+      logLine: { timestamp: 190_000 },
+      advancedActorId: "h",
+      advancedActorCurrentHp: 100,
+      advancedActorMaxHp: 100,
+    };
     const healerCrisisHp = {
       timestamp: 200_000,
       logLine: { timestamp: 200_000 },
       advancedActorId: "h",
       advancedActorCurrentHp: 30,
       advancedActorMaxHp: 100,
+    };
+    // 2026-08-30 决策点重写:crisisDecisionPoints 的 dangerous 门槛
+    // (CRISIS_MIN_DMG2S=0.1)需要穿越前 2s 内的真实伤害,不是只看 HP 读数。
+    // logLine.timestamp 也要给——threatAssessment.ts 的 threatActiveAt 走
+    // 这个字段读伤害窗(与 crisisDecisionPoints 直接读 d.timestamp 是两条
+    // 不同的伤害事件读法,同一 fixture 要同时满足两边)。
+    const healerCrisisDamage = {
+      timestamp: 199_500,
+      logLine: { timestamp: 199_500 },
+      srcUnitId: "e",
+      amount: -25,
+      effectiveAmount: -25,
     };
     const commonUnitFields = {
       healOut: [],
@@ -3720,9 +3638,10 @@ describe("cd-hoarded / cd-spent-idle 接线(extractCandidateFindings,2026-08-15,
           class: CombatUnitClass.Priest,
           spellCastEvents: [barrierCast1, barrierCast2, painSuppressionCast],
           auraEvents: [],
-          advancedActions: [healerCrisisHp],
+          advancedActions: [healerHpBeforeCrisis, healerCrisisHp],
           info: { teamId: "0" },
           ...commonUnitFields,
+          damageIn: [healerCrisisDamage],
         },
         e: {
           id: "e",
@@ -3747,7 +3666,7 @@ describe("cd-hoarded / cd-spent-idle 接线(extractCandidateFindings,2026-08-15,
     expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(true);
   });
 
-  it("同一 fixture 直调真实谓词链(extractMajorCooldowns + 真实 friendlyCrisisMomentInWindow/threatActiveAt/matchThreatLevel)仍各产出 1 条——证明底层数据/谓词本身没坏,菜单接线已按「退役到零件」摘除", () => {
+  it("同一 fixture 直调真实谓词链(extractMajorCooldowns + 真实 crisisDecisionPoints/threatActiveAt/matchThreatLevel)仍各产出 1 条——证明底层数据/谓词本身没坏,菜单接线已按「退役到零件」摘除", () => {
     const c = p2Fixture();
     const units = Object.values(c.units) as any[];
     const friends = units.filter((u) => u.reaction === 1);
@@ -3767,11 +3686,17 @@ describe("cd-hoarded / cd-spent-idle 接线(extractCandidateFindings,2026-08-15,
     const threat = matchThreatLevel(enemies, friends, c);
     expect(threat).not.toBe("low");
 
+    // 2026-08-30 决策点重写:cd-hoarded 的输入换成了 crisisDecisionPoints 的
+    // 真实产出(不是探针 stub),owner 的「own crisis」source。
+    const points = crisisDecisionPoints(healer, c);
+    expect(points).toHaveLength(1); // 唯一一次下穿,200s
+    expect(points[0]!.dangerous).toBe(true);
     expect(
-      cdHoardedEvents([barrierCd], owner, {
-        crisisMomentAt: (from, to) =>
-          friendlyCrisisMomentInWindow(friends, c, from, to),
-      }),
+      cdHoardedEvents(
+        [{ crisisUnit: owner, own: true, points }],
+        [barrierCd],
+        owner,
+      ),
     ).toHaveLength(1);
 
     expect(

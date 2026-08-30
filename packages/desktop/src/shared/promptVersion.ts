@@ -185,4 +185,14 @@
 // ruling: root value = reachability, not DR) + three legend lines. Only roots
 // whose target could not reach anyone for >= ROOT_UNREACHABLE_MIN_S (3 s)
 // render; no candidate/accusation → prompt 变 → 旧缓存作废。
-export const PROMPT_VERSION = 42;
+// v43 (2026-08-30): cd-hoarded rewritten decision-point shaped (GH #34,
+// 3,000-match outcome probe) — "a teammate (or you) hit a crisis while a
+// usable major defensive CD was ready and it wasn't spent within 5 s",
+// replacing the retired availableWindows/CD_HOARD_MIN_LATE_S shape whose own
+// intent guard measured 35.6% of accusations wrong. facts change completely
+// (lateS/crisisT/castT/unresolved gone; t/crisisUnit/crisisHpPct/dmg2sPct/
+// readyCds/own/refDeathSpent/refDeathHeld/refN new) and only
+// Defensive-tagged, non-throughput cooldowns count now (previously any major
+// CD) → 菜单未变(仍是 "cd-hoarded"),但该类型的 facts/legend 全变 → prompt 变
+// → 旧缓存作废。
+export const PROMPT_VERSION = 43;

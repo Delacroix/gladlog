@@ -34,8 +34,9 @@ import {
   cdAvailableAt,
   cdHoardedEvents,
   cdSpentIdleEvents,
-  friendlyCrisisMomentInWindow,
-  threatActiveAt,
+  enemyHealerCcWindows,
+  enemyMinHpPctInWindow,
+  extractMajorCooldowns,
   type IEnemyHealerCcWindow,
   type IMajorCooldownInfo,
   isHealerSpec,
@@ -43,12 +44,15 @@ import {
   type MatchThreatLevel,
   matchThreatLevel,
   missedSyncWindowEvents,
-  enemyHealerCcWindows,
-  enemyMinHpPctInWindow,
   type RawStreams,
+  threatActiveAt,
   unsyncedBurstEvents,
-  extractMajorCooldowns,
 } from "@gladlog/analysis";
+// Deep import, same precedent as signalSkillGradient.ts (barrel index.ts does
+// not re-export crisisDecisionPoints.ts): cd-hoarded's 2026-08-30 rewrite
+// (GH #34) scans crisisDecisionPoints directly, the same predicate
+// crisis-no-response uses.
+import { crisisDecisionPoints } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
 import type { ICombatUnit } from "@gladlog/parser-compat";
 
 import { type LegacyRound, splitTeams } from "./storeAccess.js";
@@ -57,11 +61,6 @@ import { type LegacyRound, splitTeams } from "./storeAccess.js";
  * candidate count can be measured through the same code path as its capped
  * (real, shippable) count — never a second counting rule. */
 const UNCAPPED = 1_000_000;
-
-export interface CdHoardThresholds {
-  minLateS: number;
-  crisisHpPct: number;
-}
 
 /** One round's precomputed wiring context — everything `teamPlayEvents`
  * derives once and reuses across builders, held here so a sensitivity sweep
@@ -245,9 +244,9 @@ export interface RoundCandidateCounts {
  * Pure, cheap: counts every builder's raw (uncapped) and capped (shipped)
  * candidate count for one already-built round context, at the given
  * threshold overrides. No I/O, no re-derivation — every count comes from
- * calling the real exported builder. `cdHoardThresholds`/`threatOverrides`
- * omitted reproduces production's default thresholds exactly (each builder's
- * own default-param fallback to its module constant).
+ * calling the real exported builder. `threatOverrides` omitted reproduces
+ * production's default thresholds exactly (each builder's own default-param
+ * fallback to its module constant).
  *
  * missed-sync-window / unsynced-burst mirror `teamPlayEvents`' own gate: with
  * zero `ccWindows` (no hard CC ever landed on the enemy healer), both are
@@ -257,7 +256,6 @@ export interface RoundCandidateCounts {
 export function countsAtThresholds(
   ctx: RoundContext,
   opts: {
-    cdHoardThresholds?: CdHoardThresholds;
     threatOverrides?: IThreatLevelOverrides;
   } = {},
 ): RoundCandidateCounts {
@@ -278,29 +276,29 @@ export function countsAtThresholds(
   let cdHoardedRaw = 0;
   let cdHoardedCapped = 0;
   try {
-    // GH #28: onlyUnitName 必须透传 —— cdHoardedEvents 对「够不着队友」的 CD
-    // 传 owner 名字,吞掉这个参数就等于在标定里跑修复前的行为。
-    const crisisMomentAt = (from: number, to: number, onlyUnitName?: string) =>
-      friendlyCrisisMomentInWindow(
-        friends,
-        legacy,
-        from,
-        to,
-        undefined,
-        onlyUnitName,
-      );
-    cdHoardedCapped = cdHoardedEvents(
-      ownerCds,
-      owner,
-      { crisisMomentAt },
-      opts.cdHoardThresholds,
-    ).length;
-    cdHoardedRaw = cdHoardedEvents(
-      ownerCds,
-      owner,
-      { crisisMomentAt },
-      { ...opts.cdHoardThresholds, cap: UNCAPPED },
-    ).length;
+    // 2026-08-30 (GH #34 cd-hoarded decision-point rewrite): mirrors
+    // production's candidateFindings.ts wiring — crisisDecisionPoints on the
+    // owner for their own crises, plus every OTHER friendly's as a teammate
+    // crisis (the `own` flag decides which help-gate cdHoardedEvents applies
+    // per source).
+    const sources = [
+      {
+        crisisUnit: { id: owner.id, name: owner.name },
+        own: true,
+        points: crisisDecisionPoints(owner, legacy),
+      },
+      ...friends
+        .filter((f) => f.id !== owner.id)
+        .map((f) => ({
+          crisisUnit: { id: f.id, name: f.name },
+          own: false,
+          points: crisisDecisionPoints(f, legacy),
+        })),
+    ];
+    cdHoardedCapped = cdHoardedEvents(sources, ownerCds, owner).length;
+    cdHoardedRaw = cdHoardedEvents(sources, ownerCds, owner, {
+      cap: UNCAPPED,
+    }).length;
   } catch {
     /* not computable -> 0/0 */
   }

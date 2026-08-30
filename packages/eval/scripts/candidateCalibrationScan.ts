@@ -22,12 +22,13 @@
  *             the module constants ARE the thresholds under test) plus
  *             matchThreatLevel, one row per round, JSONL-appended.
  *   sweep   tsx candidateCalibrationScan.ts sweep --tag <name> [--store DIR] [--offset N] [--limit N]
- *             Builds each round's context ONCE, then re-counts cd-hoarded at
- *             every {H, crisisHP} grid cell (CD_HOARD_GRID below) and
- *             re-derives matchThreatLevel at every damage-window tier
+ *             Builds each round's context ONCE, then re-derives
+ *             matchThreatLevel at every damage-window tier
  *             (THREAT_WINDOW_TIERS below) — cheap, in-memory, no re-parsing.
  *             One row per round, JSONL-appended (same resumability shape as
- *             `scan`).
+ *             `scan`). cd-hoarded's own {H, crisisHP} grid sweep retired
+ *             2026-08-30 (GH #34 decision-point rewrite) — see
+ *             candidateCalibration.ts's `countsAtThresholds` doc comment.
  *   report  tsx candidateCalibrationScan.ts report --tag <name> --kind scan|sweep [--out FILE]
  *             Aggregates a tag's partial file into a markdown report
  *             (`scan` → per-type occurrence/mean via `summarize`; `sweep` →
@@ -51,7 +52,6 @@ import { ensureAnalysisData } from "@gladlog/analysis";
 import { resolveEvalHome } from "../src/evalHome.js";
 import {
   buildRoundContext,
-  type CdHoardThresholds,
   countsAtThresholds,
   type RoundCandidateCounts,
   scanRound,
@@ -68,17 +68,12 @@ const USAGE = `usage:
   candidateCalibrationScan.ts sweep --tag <name> [--store <dir>] [--offset N] [--limit N] [--partial-dir <dir>]
   candidateCalibrationScan.ts report --tag <name> --kind scan|sweep [--partial-dir <dir>] [--out <file>]`;
 
-/** cd-hoarded sensitivity grid (plan Task 5: H∈{10,20,30,45}s × crisis
- * HP∈{35,45}%). Cell key encodes both axes for a stable JSONL field name. */
-const CD_HOARD_GRID: CdHoardThresholds[] = [];
-for (const minLateS of [10, 20, 30, 45]) {
-  for (const crisisHpPct of [35, 45]) {
-    CD_HOARD_GRID.push({ minLateS, crisisHpPct });
-  }
-}
-function cdHoardCellKey(t: CdHoardThresholds): string {
-  return `H${t.minLateS}C${t.crisisHpPct}`;
-}
+/** cd-hoarded's own H/crisis-HP sensitivity grid retired 2026-08-30 (GH #34
+ * decision-point rewrite) — `cdHoardedEvents` no longer takes a
+ * minLateS/crisisHpPct threshold pair at all (see cooldownTiming.ts's
+ * `cdHoardedEvents` doc comment), so there is nothing left for this sweep
+ * to vary. The `sweep` subcommand below now only sweeps the threat
+ * damage-window tiers. */
 
 /** Threat damage-rate window sensitivity tiers (plan Task 5: "威胁承伤阈三档").
  * `threatActiveAt`'s damage-rate disjunct is "how wide a window around the
@@ -141,7 +136,6 @@ function countRounds(matchesDir: string, matchId: string): number | undefined {
 interface SweepRow {
   matchId: string;
   roundSeq?: number;
-  cdHoard: Record<string, number>;
   threat: Record<string, string>;
 }
 
@@ -240,12 +234,6 @@ async function runSweep(args: {
           skippedNoTeams++;
           continue;
         }
-        const cdHoard: Record<string, number> = {};
-        for (const t of CD_HOARD_GRID) {
-          cdHoard[cdHoardCellKey(t)] = countsAtThresholds(ctx, {
-            cdHoardThresholds: t,
-          }).cdHoardedCapped;
-        }
         const threat: Record<string, string> = {};
         for (const ms of THREAT_WINDOW_TIERS) {
           threat[threatCellKey(ms)] = countsAtThresholds(ctx, {
@@ -258,7 +246,6 @@ async function runSweep(args: {
         const sweepRow: SweepRow = {
           matchId: row.id,
           roundSeq,
-          cdHoard,
           threat,
         };
         appendFileSync(
@@ -348,21 +335,9 @@ function formatSweepReport(tag: string, partialDir: string): string {
     `matches processed: ${matches}`,
     `rounds swept: ${n}`,
     "",
-    "## cd-hoarded sensitivity (场均条数 per cell, capped at CD_HOARD_CAP)",
-    "",
-    "| H\\crisisHP | 35% | 45% |",
-    "|---|---|---|",
+    // cd-hoarded's own {H, crisisHP} sensitivity table retired 2026-08-30
+    // (GH #34 decision-point rewrite) — see runSweep's doc comment above.
   ];
-  for (const minLateS of [10, 20, 30, 45]) {
-    const cells = [35, 45].map((crisisHpPct) => {
-      const key = cdHoardCellKey({ minLateS, crisisHpPct });
-      const mean =
-        n === 0 ? 0 : rows.reduce((a, r) => a + (r.cdHoard[key] ?? 0), 0) / n;
-      return mean.toFixed(3);
-    });
-    lines.push(`| ${minLateS}s | ${cells[0]} | ${cells[1]} |`);
-  }
-  lines.push("");
   lines.push(
     "## threat damage-window sensitivity (threat-level distribution per tier)",
   );

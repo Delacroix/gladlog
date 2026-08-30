@@ -109,13 +109,15 @@ import type { CandidateEvent } from "./types";
 // 2026-08-16 theme split; re-exported so importers keep their paths.
 export {
   CD_HOARD_CRISIS_HP_PCT,
-  CD_HOARD_MIN_LATE_S,
+  CD_HOARD_RESPONSE_S,
+  CD_HOARDED_OUTCOME_REF,
   cdHoardedEvents,
   cdSpentIdleEvents,
   enemyHealerCcWindows,
   enemyMinHpPctInWindow,
   friendlyCrisisMomentInWindow,
   HARD_CC_CATEGORIES,
+  type ICdHoardedCrisisSource,
   type ICrisisMoment,
   type IEnemyHealerCcWindow,
   missedSyncWindowEvents,
@@ -1797,43 +1799,41 @@ function teamPlayEvents(
     }
   }
 
-  // cd-hoarded / cd-spent-idle (P2 起爆-1/-2, 2026-08-15, Task 4 flag-gated
-  // wiring): owner-scoped, reuse the caller's already-computed `ownerCds`
-  // (no re-fetch) — each builder applies its own internal filter
-  // (cdHoardedEvents covers every major CD; cdSpentIdleEvents narrows to
-  // `DEFENSIVE_TAGS.has(cd.tag) && !cd.isThroughput`, the identical filter
-  // the slow-defensive-response wiring below uses) so the full unfiltered
-  // list is passed through, same as ccHeldEvents above. Each flag gates its
-  // own type independently — flipping one on does not affect the other.
+  // cd-hoarded (2026-08-30 rewrite, GH #34, decision-point shaped): crisis
+  // decision points from `crisisDecisionPoints` — the owner's own crises,
+  // plus each OTHER friendly's as a teammate crisis (the `own` flag on each
+  // source decides which help-gate `cdHoardedEvents` applies). Reuses the
+  // caller's already-computed `ownerCds` (no re-fetch), same convention as
+  // cd-spent-idle below.
   if (CANDIDATE_TYPE_FLAGS.cdHoarded) {
     try {
+      const cdHoardSources = [
+        {
+          crisisUnit: { id: owner.id, name: owner.name },
+          own: true,
+          points: crisisDecisionPoints(owner, combat),
+        },
+        ...friends
+          .filter((f: any) => f.id !== owner.id)
+          .map((f: any) => ({
+            crisisUnit: { id: f.id, name: f.name },
+            own: false,
+            points: crisisDecisionPoints(f, combat),
+          })),
+      ];
       out.push(
         ...cdHoardedEvents(
+          cdHoardSources,
           ownerCds,
           owner,
-          {
-            // GH #28: the 3rd arg (onlyUnitName) must be threaded through —
-            // cdHoardedEvents passes the owner's own name for cooldowns that
-            // cannot help anybody else. A probe that swallows it silently
-            // reinstates the false "你本该按绝望祷言救队友" accusations.
-            crisisMomentAt: (from, to, onlyUnitName) =>
-              friendlyCrisisMomentInWindow(
-                friends,
-                combat,
-                from,
-                to,
-                undefined,
-                onlyUnitName,
-              ),
-            // #29 (2026-08-17): feeds filterIntentGuardEvidence's gcd-locked
-            // exclusion — the owner's own successful casts, re-based to
-            // seconds the same way every other tSeconds fact is.
-            ownCastSuccessSeconds: (owner.spellCastEvents ?? []).map(
-              (e: any) => (e.logLine.timestamp - combat.startTime) / 1000,
-            ),
-          },
           undefined,
           rawStreams,
+          // #29 (2026-08-17): feeds filterIntentGuardEvidence's gcd-locked
+          // exclusion — the owner's own successful casts, re-based to
+          // seconds the same way every other tSeconds fact is.
+          (owner.spellCastEvents ?? []).map(
+            (e: any) => (e.logLine.timestamp - combat.startTime) / 1000,
+          ),
         ),
       );
     } catch {
