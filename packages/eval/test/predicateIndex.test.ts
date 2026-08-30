@@ -155,6 +155,11 @@ const INDEX: PredicateRow[] = [
     mod: renderGrid,
   },
   {
+    file: `${A}/analysis/factFormat.ts`,
+    symbol: "fmtFactTime",
+    mod: factFormat,
+  },
+  {
     file: `${A}/utils/drAnalysis.ts`,
     symbol: "PATCH_121_GOLIVE_EPOCH_MS",
     mod: drAnalysis,
@@ -1424,6 +1429,40 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
     expect(
       promptQualityCheck.checkBehaviorPriorConsistency([mutatedLine]),
     ).toHaveLength(1);
+  });
+
+  it("kick-eaten t 经 fmtFactTime 渲染,与 fmtTime 渲染的 [KICK] 标记同一渲染秒,门规零违规(反向对照:fmtFactNum 会把 x.95–x.99 舍入进下一秒)", () => {
+    // Real analysis-side atSeconds values with fractional parts that
+    // fmtFactNum's toFixed(1) rounds UP past a whole-second boundary — the
+    // exact 2026-08-30 kick-eaten defect shape (20/209 on the A/B corpus).
+    const atSecondsSamples = [9.96, 8.9, 30.5, 70.2, 119.5, 208.96];
+    const lines: string[] = [];
+    for (const atSeconds of atSecondsSamples) {
+      const floored = renderGrid.toRenderSecond(atSeconds);
+      lines.push(
+        `  - id=kick-eaten:P1:${floored} type=kick-eaten t=${factFormat.fmtFactTime(atSeconds)}s units=Me/Rogue facts={t=${factFormat.fmtFactTime(atSeconds)}, interrupted=Heal, kick=Kick, source=Rogue, lockout=3.0}`,
+      );
+      lines.push(
+        `${renderGrid.fmtTime(atSeconds)}  [KICK]   1(Rogue) interrupted 2(Priest)'s Heal (Kick)`,
+      );
+    }
+    expect(promptQualityCheck.checkMenuTRenderGrid(lines)).toEqual([]);
+
+    // Negative control: render the SAME facts.t with the old fmtFactNum
+    // (round, not floor) instead — must be caught, one failure per sample
+    // whose fractional part actually crosses the boundary (9.96 and 208.96
+    // here; the others are already exact tenths and round to themselves).
+    const naiveLines: string[] = [];
+    for (const atSeconds of atSecondsSamples) {
+      naiveLines.push(
+        `  - id=kick-eaten:P1:x type=kick-eaten t=${factFormat.fmtFactNum(atSeconds)}s units=Me/Rogue facts={t=${factFormat.fmtFactNum(atSeconds)}, interrupted=Heal, kick=Kick, source=Rogue, lockout=3.0}`,
+      );
+      naiveLines.push(
+        `${renderGrid.fmtTime(atSeconds)}  [KICK]   1(Rogue) interrupted 2(Priest)'s Heal (Kick)`,
+      );
+    }
+    const naiveFails = promptQualityCheck.checkMenuTRenderGrid(naiveLines);
+    expect(naiveFails).toHaveLength(2); // 9.96 -> 10.0 and 208.96 -> 209.0
   });
 });
 

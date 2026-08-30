@@ -102,7 +102,7 @@ import {
   mdCycloneWindowEvents,
 } from "./candidates/massDispel";
 import { crisisDecisionPoints } from "./crisisDecisionPoints";
-import { fmtFactNum as fmt } from "./factFormat";
+import { fmtFactNum as fmt, fmtFactTime } from "./factFormat";
 import type { CandidateEvent } from "./types";
 
 // Cooldown-timing producers moved to `candidates/cooldownTiming.ts` in the
@@ -299,7 +299,11 @@ export function extractCandidateFindings(
         type: "death",
         t,
         unitNames: [u.name],
-        facts: { t: fmt(t), unit: u.name, side },
+        // Render-grid fix (2026-08-30, same bug/fix as kick-eaten): matches
+        // the [DEATH] timeline marker, which floors via fmtTime -- 23/375
+        // (6.1%) death lines on the 2026-08-30 A/B corpus rounded up past
+        // the marker's whole second before this.
+        facts: { t: fmtFactTime(t), unit: u.name, side },
       });
     }
   }
@@ -694,7 +698,13 @@ export function missedCleanseEvents(
         spell: w.spellName,
         spellId: w.spellId,
         facts: {
-          t: fmt(w.timeSeconds),
+          // Render-grid fix (2026-08-30, same bug/fix as kick-eaten): matches
+          // the [UNCLEANSED DEBUFF] timeline marker (fmtTime-floored) -- 3/58
+          // (5.2%) never-cleansed missed-cleanse lines on the 2026-08-30 A/B
+          // corpus rounded up past it before this. (Late-cleanse windows,
+          // which render no [UNCLEANSED DEBUFF] marker at all by design, are
+          // unaffected either way.)
+          t: fmtFactTime(w.timeSeconds),
           target: w.targetName,
           cc: w.spellName,
           duration: w.durationSeconds.toFixed(1),
@@ -891,7 +901,14 @@ export function kickEatenEvents(
       unitNames: [owner.name, k.sourceName],
       spell: k.interruptedSpellName,
       facts: {
-        t: fmt(k.atSeconds),
+        // Render-grid fix (2026-08-30, CLAUDE.md Shared-Predicate Rule): the
+        // matching [KICK] timeline line renders via fmtTime (floors to the
+        // whole second); fmtFactNum's toFixed(1) rounds instead, so an
+        // x.95-x.99 atSeconds rendered "t=(x+1).0s" while [KICK] still showed
+        // the second still in progress -- 20/209 kick-eaten lines (9.6%) on
+        // the 2026-08-30 A/B corpus. fmtFactTime truncates instead, keeping
+        // this fact on the same whole-second grid as the timeline marker.
+        t: fmtFactTime(k.atSeconds),
         interrupted: k.interruptedSpellName,
         kick: k.kickSpellName,
         source: k.sourceName,
