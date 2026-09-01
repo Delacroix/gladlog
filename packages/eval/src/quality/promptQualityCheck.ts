@@ -33,7 +33,12 @@ import {
   lookupBehaviorPrior,
   outcomePhrase,
 } from "@gladlog/analysis/src/data/behaviorPrior";
-import { lookupBurstWindowPrior } from "@gladlog/analysis/src/data/burstWindowPrior";
+import {
+  BURST_REF_MIN_CONTRAST_PP,
+  burstRefClearsMinContrast,
+  burstRefContrastPp,
+  lookupBurstWindowPrior,
+} from "@gladlog/analysis/src/data/burstWindowPrior";
 import { classMetadata } from "@gladlog/analysis/src/data/classSpells";
 import { ATTEMPT_INTO_TRINKET_OUTCOME_REF } from "@gladlog/analysis/src/data/outcomeRefs";
 import { canHelpAnotherUnit } from "@gladlog/analysis/src/utils/cooldowns";
@@ -675,6 +680,16 @@ export function checkBehaviorPriorConsistency(lines: string[]): string[] {
  * Fails closed — a missing fact is a failure, otherwise a producer that simply
  * stopped emitting the reference would leave the legend citing facts that do
  * not exist.
+ *
+ * 2026-09-01 also verifies the **minimum-contrast door**: a rendered line
+ * whose own `refDeathNoResp - refDeathResp` is below
+ * `BURST_REF_MIN_CONTRAST_PP` is a hardFailure. The producer refuses to emit
+ * such a line (`burstRefClearsMinContrast` in
+ * `candidates/burstWindowResponse.ts`) and this side re-checks it on the
+ * numbers parsed back out of the prompt text, through the SAME imported
+ * predicate — analysis consumes the gate's predicate, and the door cannot
+ * drift on one side only. Checked on the rendered integers, which is why the
+ * door lives on `BurstWindowPriorRef`'s already-rounded percentages.
  */
 export function checkBurstWindowRefConsistency(lines: string[]): string[] {
   const failures: string[] = [];
@@ -717,6 +732,23 @@ export function checkBurstWindowRefConsistency(lines: string[]): string[] {
         failures.push(
           `line ${i + 1}: slow-defensive-response ${k}=${f[k]} 与参照表 ${v} 不一致(${ref.cellKey})`,
         );
+    // Minimum-contrast door, checked on THIS LINE's own rendered numbers.
+    const rendered = {
+      deathRespPct: Number(f.refDeathResp),
+      deathNoRespPct: Number(f.refDeathNoResp),
+    };
+    if (
+      !Number.isFinite(rendered.deathRespPct) ||
+      !Number.isFinite(rendered.deathNoRespPct)
+    ) {
+      failures.push(
+        `line ${i + 1}: slow-defensive-response 的 refDeathResp/refDeathNoResp 不是数字,无法核对最小对比度门槛`,
+      );
+    } else if (!burstRefClearsMinContrast(rendered)) {
+      failures.push(
+        `line ${i + 1}: slow-defensive-response 引用的对比度只有 ${burstRefContrastPp(rendered)} pp(${f.refDeathNoResp}% vs ${f.refDeathResp}%),低于门槛 ${BURST_REF_MIN_CONTRAST_PP} pp —— 被引用的数字在反驳这条指控(${ref.cellKey})`,
+      );
+    }
   }
   return failures;
 }

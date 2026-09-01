@@ -25,6 +25,7 @@ import {
   BURST_LEAD_CD_EXCLUDED_IDS,
   BURST_OUTCOME_FIELDS,
   BURST_RESPONSE_WINDOW_MS,
+  BURST_TRIAGE_MIN_HP_DROP_PP,
   burstWindowDecisionPoints,
 } from "./burstWindowDecisionPoints";
 
@@ -458,30 +459,82 @@ describe("burstWindowDecisionPoints — the pressured friendly (correction 1)", 
   });
 });
 
-describe("burstWindowDecisionPoints — severity triage (correction 2)", () => {
-  const at = (hpValue: number, deaths: any[] = []) =>
+describe("burstWindowDecisionPoints — severity triage (correction 2 + the 2026-09-01 HP-drop door)", () => {
+  /** HP that sits at `startVal` through the window's opening second and has
+   * fallen to `endVal` by second 12 — so `startHpPct` reads `startVal` and
+   * `minHpPct` reads `endVal`, and the drop the door measures is the
+   * difference between the two. */
+  const at = (startVal: number, endVal: number, deaths: any[] = []) =>
     burstWindowDecisionPoints(
       combat([
         friendly({
           damageIn: steadyDamage(10, 20),
-          advancedActions: hpTrack("F1", 0, 40, hpValue),
+          advancedActions: [
+            ...hpTrack("F1", 0, 11, startVal),
+            ...hpTrack("F1", 12, 40, endVal),
+          ],
           deathRecords: deaths,
         }),
         hostile({ spellCastEvents: [cast(AR, 10)] }),
       ]),
     )[0]!;
 
+  it("samples HP at the window START as well as its minimum", () => {
+    const p = at(100, 25);
+    expect(p.pressured!.startHpPct).toBe(100);
+    expect(p.pressured!.startHpSec).toBe(p.tSec);
+    expect(p.pressured!.minHpPct).toBe(25);
+  });
+
   it("a window where nobody dropped to the crisis line is NOT triaged", () => {
     expect(CRISIS_HP_PCT_RENDERED).toBe(40);
-    expect(at(75).triaged).toBe(false);
+    expect(at(100, 75).triaged).toBe(false);
   });
 
   it("the pressured friendly reaching the crisis line triages the window", () => {
-    expect(at(CRISIS_HP_PCT_RENDERED).triaged).toBe(true);
+    expect(at(100, CRISIS_HP_PCT_RENDERED).triaged).toBe(true);
   });
 
-  it("a death inside the window triages it even at full HP", () => {
-    expect(at(99, [{ timestamp: T0 + 15_000 }]).triaged).toBe(true);
+  it("a death inside the window triages it even above the crisis line", () => {
+    expect(at(100, 80, [{ timestamp: T0 + 15_000 }]).triaged).toBe(true);
+  });
+
+  // ── the HP-drop door: "the window itself put them there" ────────────────
+
+  it("a friendly who was ALREADY low when the window opened is NOT triaged", () => {
+    // 30% → 25%: deep under the crisis line, but this burst moved it 5 points.
+    // That sentence belongs to the PREVIOUS exchange, not to this window.
+    expect(at(30, 25).triaged).toBe(false);
+  });
+
+  it("the same depth IS triaged once the window itself took the health", () => {
+    expect(at(55, 25).triaged).toBe(true);
+  });
+
+  it("the door is exactly BURST_TRIAGE_MIN_HP_DROP_PP points, inclusive", () => {
+    expect(BURST_TRIAGE_MIN_HP_DROP_PP).toBe(15);
+    const boundary = CRISIS_HP_PCT_RENDERED - 5; // 35, under the crisis line
+    expect(at(boundary + BURST_TRIAGE_MIN_HP_DROP_PP, boundary).triaged).toBe(
+      true,
+    );
+    expect(
+      at(boundary + BURST_TRIAGE_MIN_HP_DROP_PP - 1, boundary).triaged,
+    ).toBe(false);
+  });
+
+  it("a death the window did not cause does not triage it either — both clauses are AND", () => {
+    expect(at(35, 30, [{ timestamp: T0 + 15_000 }]).triaged).toBe(false);
+  });
+
+  it("the reference table's population is untouched by the door — it reads `feasible`, never `triaged`", () => {
+    // The regression this pins: if triage ever leaked into the table, the
+    // quoted contrast would be conditioned on the outcome that defines it.
+    const p = at(30, 25);
+    expect(p.triaged).toBe(false);
+    // the window is still HERE, with its outcome facts intact — the door
+    // removed it from the accusation menu, not from the corpus population
+    expect(p.minFriendlyHpPct).toBe(25);
+    expect(p.anyFriendlyDeath).toBe(false);
   });
 });
 

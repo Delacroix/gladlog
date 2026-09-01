@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { BurstWindowPriorRef } from "../../data/burstWindowPrior";
+import { BURST_REF_MIN_CONTRAST_PP } from "../../data/burstWindowPrior";
 import type { BurstWindowDecisionPoint } from "../burstWindowDecisionPoints";
 import { burstWindowResponseEvents } from "./burstWindowResponse";
 
@@ -50,6 +51,8 @@ const point = (
       name: "Mate-R",
       minHpPct: 31,
       minHpSec: 45,
+      startHpPct: 92,
+      startHpSec: 40,
       died: false,
     },
     responses: {
@@ -112,6 +115,59 @@ describe("burstWindowResponseEvents — which windows reach the menu", () => {
       [],
     );
   });
+
+  // ── minimum-contrast door (approved tightener, 2026-09-01) ──────────────
+
+  it("a cell whose contrast is under the door never fires — the quoted numbers would argue against the sentence", () => {
+    const flat: BurstWindowPriorRef = {
+      ...REF,
+      deathRespPct: 5,
+      deathNoRespPct: 5 + BURST_REF_MIN_CONTRAST_PP - 1,
+    };
+    expect(burstWindowResponseEvents([point()], owner, probes(flat))).toEqual(
+      [],
+    );
+  });
+
+  it("a REVERSED cell never fires either", () => {
+    const reversed: BurstWindowPriorRef = {
+      ...REF,
+      deathRespPct: 3,
+      deathNoRespPct: 2,
+    };
+    expect(
+      burstWindowResponseEvents([point()], owner, probes(reversed)),
+    ).toEqual([]);
+  });
+
+  it("exactly at the door it fires — the floor is inclusive", () => {
+    const edge: BurstWindowPriorRef = {
+      ...REF,
+      deathRespPct: 5,
+      deathNoRespPct: 5 + BURST_REF_MIN_CONTRAST_PP,
+    };
+    expect(
+      burstWindowResponseEvents([point()], owner, probes(edge)),
+    ).toHaveLength(1);
+  });
+
+  it("a door-failing window does not eat one of the two cap slots", () => {
+    const flat: BurstWindowPriorRef = {
+      ...REF,
+      deathRespPct: 5,
+      deathNoRespPct: 5,
+    };
+    const p = (tSec: number, leadCdId: string) =>
+      point({ tSec, leadCd: { ...point().leadCd, spellId: leadCdId } });
+    const evts = burstWindowResponseEvents(
+      // the two most dangerous windows are the ones with the flat cell; a
+      // post-cap door would return nothing at all here
+      [p(10, "flat"), p(20, "flat"), p(30, "good")],
+      owner,
+      { lookup: (id) => (id === "flat" ? flat : REF) },
+    );
+    expect(evts.map((e) => e.t)).toEqual([30]);
+  });
 });
 
 describe("burstWindowResponseEvents — cap and order", () => {
@@ -123,6 +179,8 @@ describe("burstWindowResponseEvents — cap and order", () => {
         name: "Mate-R",
         minHpPct: hp,
         minHpSec: tSec + 2,
+        startHpPct: 100,
+        startHpSec: tSec,
         died,
       },
       anyFriendlyDeath: died,

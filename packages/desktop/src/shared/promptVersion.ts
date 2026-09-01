@@ -243,4 +243,27 @@
 //  data/burstWindowPriorGenerated.json. Power Infusion (10060) can no longer
 //  open a window at all. Old caches carry the retired facts under the same
 //  type name, which the new legend does not describe — they must be void.
-export const PROMPT_VERSION = 44;
+//
+//  v45 (2026-09-01, GH #60 phase 2c): two approved doors narrow which burst
+//  windows reach the menu. The facts are unchanged — the POPULATION is not,
+//  so a v44 cache carries slow-defensive-response lines this build refuses to
+//  produce (and one of the two, the contrast door, is now a hardFailure in
+//  checkBurstWindowRefConsistency, i.e. a v44 line replayed against a v45 gate
+//  goes red).
+//  1. Minimum-contrast door (data/burstWindowPrior.ts's
+//     BURST_REF_MIN_CONTRAST_PP = 3 + burstRefClearsMinContrast, imported by
+//     both the producer and the gate): a window only becomes a candidate when
+//     the reference cell it would quote — after fallback resolution — shows
+//     the no-response population dying at least 3 pp more often. On the v44
+//     corpus build 8 of 56 rendered lines (14%) quoted a flat or REVERSED
+//     contrast, i.e. cited numbers arguing against their own accusation.
+//     The lookup also moved BEFORE the per-round cap, so a door-failing
+//     window no longer consumes one of the two slots.
+//  2. HP-drop door (BURST_TRIAGE_MIN_HP_DROP_PP = 15, in the engine): triage
+//     additionally requires the pressured friendly to have LOST >= 15 points
+//     of maximum health inside the window (new BurstFriendlyOutcome.startHpPct
+//     / startHpSec, same gridHpPct sampler as minHpPct). Without it the type
+//     fired on somebody who was already low when the burst opened — a
+//     sentence about the previous exchange. The reference table is untouched:
+//     it is built over FEASIBLE windows and never reads `triaged`.
+export const PROMPT_VERSION = 45;

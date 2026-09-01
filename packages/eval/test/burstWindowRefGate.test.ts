@@ -10,7 +10,13 @@
  * table so the test moves with the data instead of pinning numbers that a
  * season refresh will invalidate.
  */
-import { lookupBurstWindowPrior } from "@gladlog/analysis/src/data/burstWindowPrior";
+import {
+  BURST_REF_MIN_CONTRAST_PP,
+  BURST_WINDOW_PRIOR_N_FLOOR,
+  burstRefContrastPp,
+  lookupBurstWindowPrior,
+} from "@gladlog/analysis/src/data/burstWindowPrior";
+import PRIOR_RAW from "@gladlog/analysis/src/data/burstWindowPriorGenerated.json";
 import { describe, expect, it } from "vitest";
 
 import { checkBurstWindowRefConsistency } from "../src/quality/promptQualityCheck";
@@ -89,6 +95,79 @@ describe("checkBurstWindowRefConsistency", () => {
     const fails = checkBurstWindowRefConsistency([noId]);
     expect(fails).toHaveLength(1);
     expect(fails[0]).toContain("leadCdId");
+  });
+
+  // ── minimum-contrast door (2026-09-01) ──────────────────────────────────
+  //
+  // The producer refuses to emit a line whose reference cell contrast is
+  // under `BURST_REF_MIN_CONTRAST_PP`; this side must catch one that appears
+  // anyway (a stale cached round, a model-edited prompt, a producer that
+  // regressed). Both halves call `burstRefClearsMinContrast`.
+
+  /** A real (bracket, leadCdId) whose OWN cell clears the n floor but has a
+   * flat/reversed contrast — found in the generated table rather than pinned,
+   * so a season refresh moves the fixture instead of breaking it. */
+  const subDoor = (() => {
+    const cells = (
+      PRIOR_RAW as unknown as {
+        cells: Record<
+          string,
+          { nNoResp: number; deathResp: number; deathNoResp: number }
+        >;
+      }
+    ).cells;
+    for (const [k, c] of Object.entries(cells)) {
+      const [bracket, spellId] = k.split("|");
+      if (!bracket || !spellId || spellId === "*" || bracket === "*") continue;
+      if (c.nNoResp < BURST_WINDOW_PRIOR_N_FLOOR) continue;
+      const ref = lookupBurstWindowPrior(bracket, spellId);
+      if (!ref || ref.fellBack) continue;
+      if (burstRefContrastPp(ref) < BURST_REF_MIN_CONTRAST_PP)
+        return { bracket, spellId, ref };
+    }
+    return null;
+  })();
+
+  it("the table still contains a flat/reversed cell to test the door with", () => {
+    // If this ever goes null the corpus itself changed shape; the door tests
+    // below would silently stop testing anything, so it fails loudly instead.
+    expect(subDoor).not.toBeNull();
+  });
+
+  it("a line quoting a sub-door contrast is a hardFailure even though every number matches the table", () => {
+    const { spellId, ref } = subDoor!;
+    const fails = checkBurstWindowRefConsistency([
+      line({
+        leadCdId: spellId,
+        refN: String(ref.nResp + ref.nNoResp),
+        refDeathResp: String(ref.deathRespPct),
+        refDeathNoResp: String(ref.deathNoRespPct),
+        refTop: ref.topResponses.map(([k, v]) => `${k} ${v}%`).join("; "),
+        cellKey: ref.cellKey,
+        fellBack: ref.fellBack ? "yes" : "no",
+      }),
+    ]);
+    // every table fact agrees — the ONLY complaint is the door
+    expect(fails).toHaveLength(1);
+    expect(fails[0]).toContain(`${BURST_REF_MIN_CONTRAST_PP} pp`);
+    expect(fails[0]).toContain(String(burstRefContrastPp(ref)));
+  });
+
+  it("a planted equal-rate pair fires the door on top of the table mismatch", () => {
+    const fails = checkBurstWindowRefConsistency([
+      line({ refDeathNoResp: String(REF!.deathRespPct) }),
+    ]);
+    expect(fails.length).toBeGreaterThanOrEqual(2);
+    expect(fails.some((f) => f.includes(`${BURST_REF_MIN_CONTRAST_PP} pp`))).toBe(
+      true,
+    );
+  });
+
+  it("a non-numeric contrast pair fails closed rather than passing the door", () => {
+    const fails = checkBurstWindowRefConsistency([
+      line({ refDeathNoResp: "n/a" }),
+    ]);
+    expect(fails.some((f) => f.includes("最小对比度门槛"))).toBe(true);
   });
 
   it("ignores every other candidate type", () => {

@@ -34,6 +34,10 @@ import { burstWindowDecisionPoints } from "@gladlog/analysis/src/analysis/burstW
 import { BURST_WINDOW_MIN_JUDGED_S } from "@gladlog/analysis/src/analysis/candidates/burstWindowResponse";
 import { crisisDecisionPoints } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
 import {
+  burstRefClearsMinContrast,
+  lookupBurstWindowPrior,
+} from "@gladlog/analysis/src/data/burstWindowPrior";
+import {
   cdAvailableAt,
   extractMajorCooldowns,
 } from "@gladlog/analysis/src/utils/cooldowns";
@@ -257,14 +261,23 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
   // engine rather than re-derived (GH #60 phase 2): a window that was not
   // feasible or not triaged was never a chance the team had.
   try {
+    const bracket: string = legacy?.startInfo?.bracket ?? "";
     e.burstWindowOpportunities = burstWindowDecisionPoints(legacy, {
       friendlyReaction: owner.reaction,
-    }).filter(
-      (p) =>
-        p.feasible &&
-        p.triaged &&
-        p.durationSec >= BURST_WINDOW_MIN_JUDGED_S,
-    ).length;
+    }).filter((p) => {
+      if (
+        !p.feasible ||
+        !p.triaged ||
+        p.durationSec < BURST_WINDOW_MIN_JUDGED_S
+      )
+        return false;
+      // 2026-09-01: a window whose reference cell is missing or under the
+      // minimum-contrast door can NEVER convert into a finding, so counting
+      // it as an opportunity deflates the conversion rate for no reason.
+      // Same predicate as the producer's own door.
+      const ref = lookupBurstWindowPrior(bracket, p.leadCd.spellId);
+      return ref !== null && burstRefClearsMinContrast(ref);
+    }).length;
   } catch {
     /* engine not computable for this round → 0 opportunities */
   }

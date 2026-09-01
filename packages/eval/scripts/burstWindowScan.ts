@@ -14,6 +14,7 @@
  *   sweep       tsx burstWindowScan.ts sweep --manifest <file> --ledger <dir>
  *                 [--limit N]           # lapse floor × lapse seconds grid
  *   report      tsx burstWindowScan.ts report --in <file.jsonl>
+ *   overreact   tsx burstWindowScan.ts overreact --in <file.jsonl>   # probe only
  *   emit-table  tsx burstWindowScan.ts emit-table --in <file.jsonl>
  *                 --out <file.json> [--corpus <label>]
  *
@@ -27,10 +28,17 @@ import {
   BURST_LAPSE_DMG_PCT_PER_S,
   BURST_RESPONSE_WINDOW_SEC,
   BURST_LAPSE_SECONDS,
+  BURST_TRIAGE_MIN_HP_DROP_PP,
   type BurstWindowDecisionPoint,
   burstWindowDecisionPoints,
 } from "@gladlog/analysis/src/analysis/burstWindowDecisionPoints";
-import { lookupBurstWindowPrior } from "@gladlog/analysis/src/data/burstWindowPrior";
+import { BURST_WINDOW_MIN_JUDGED_S } from "@gladlog/analysis/src/analysis/candidates/burstWindowResponse";
+import { CRISIS_HP_PCT_RENDERED } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
+import {
+  BURST_REF_MIN_CONTRAST_PP,
+  burstRefContrastPp,
+  lookupBurstWindowPrior,
+} from "@gladlog/analysis/src/data/burstWindowPrior";
 import { PATCH_121_GOLIVE_EPOCH_MS } from "@gladlog/analysis/src/utils/drAnalysis";
 import { reconstructEnemyCDTimeline } from "@gladlog/analysis/src/utils/enemyCDs";
 import { fmtTime } from "@gladlog/analysis/src/utils/renderGrid";
@@ -200,7 +208,10 @@ async function scan(): Promise<void> {
       let points: BurstWindowDecisionPoint[] = [];
       let parentDurs: number[] = [];
       try {
-        points = burstWindowDecisionPoints(legacy);
+        // `collectSpend` is the PROBE-ONLY option (over-react probe): the
+        // product never sets it, the scan does, so `point.spend` exists on
+        // archive rows and nowhere else.
+        points = burstWindowDecisionPoints(legacy, { collectSpend: true });
         parentDurs = unboundedDurations(legacy);
       } catch {
         continue;
@@ -447,6 +458,54 @@ function report(): void {
     `  · pressured min HP among ALL unanswered feasible windows (the triage denominator): p10=${q(unansweredHp, 0.1)}% p25=${q(unansweredHp, 0.25)}% p50=${q(unansweredHp, 0.5)}% p75=${q(unansweredHp, 0.75)}%\n`,
   );
 
+  // ── the two 2026-09-01 doors, swept ────────────────────────────────────
+  // Both are CANDIDATE doors: neither touches the reference table, which is
+  // built over `feasible` and never reads `triaged` (pinned by a unit test).
+  lines.push(`## the two 2026-09-01 doors\n`);
+  lines.push(
+    `Fire = feasible ∧ unanswered ∧ (pressured min HP ≤ ${CRISIS_HP_PCT_RENDERED}% or a death) ∧ durationSec ≥ ${BURST_WINDOW_MIN_JUDGED_S} — i.e. exactly what the producer emits before its per-round cap. "quoted contrast" is the reference cell the line would cite, after fallback resolution (lookupBurstWindowPrior).\n`,
+  );
+  const dropOf = (r: Row): number | null => {
+    const p = r.point.pressured;
+    if (!p || p.startHpPct == null || p.minHpPct == null) return null;
+    return p.startHpPct - p.minHpPct;
+  };
+  const refOfRow = (r: Row) =>
+    lookupBurstWindowPrior(r.bracket, r.point.leadCd.spellId);
+  const baseFire = feas.filter(
+    (r) =>
+      !r.point.responded &&
+      r.point.durationSec >= BURST_WINDOW_MIN_JUDGED_S &&
+      ((r.point.pressured?.minHpPct != null &&
+        r.point.pressured.minHpPct <= CRISIS_HP_PCT_RENDERED) ||
+        r.point.deathsInWindow > 0),
+  );
+  const noDrop = baseFire.filter((r) => dropOf(r) === null).length;
+  lines.push(
+    `windows with no measurable HP drop (no start sample — the door fails these closed): ${pctStr(noDrop, baseFire.length)}\n`,
+  );
+  lines.push(
+    `| HP-drop floor pp | fires | fires/round | of feasible | death share | median quoted contrast pp | flat/reversed (< ${BURST_REF_MIN_CONTRAST_PP} pp or no cell) | + contrast door: fires | fires/round |`,
+  );
+  lines.push(`|---|---|---|---|---|---|---|---|---|`);
+  for (const floor of [0, 10, 15, 20]) {
+    const fires = baseFire.filter((r) => (dropOf(r) ?? -1) >= floor);
+    const contrasts = fires.map((r) => {
+      const ref = refOfRow(r);
+      return ref ? burstRefContrastPp(ref) : null;
+    });
+    const good = fires.filter(
+      (_, i) => contrasts[i] !== null && contrasts[i]! >= BURST_REF_MIN_CONTRAST_PP,
+    );
+    const cv = contrasts.filter((v): v is number => v !== null);
+    lines.push(
+      `| ${floor} | ${fires.length} | ${(fires.length / Math.max(1, rounds.length)).toFixed(3)} | ${pctStr(fires.length, feas.length)} | ${pctStr(fires.filter((r) => r.point.anyFriendlyDeath).length, fires.length)} | ${cv.length ? q(cv, 0.5) : "—"} | ${pctStr(fires.length - good.length, fires.length)} | ${good.length} | ${(good.length / Math.max(1, rounds.length)).toFixed(3)} |`,
+    );
+  }
+  lines.push(
+    `\nshipped: HP-drop floor ${BURST_TRIAGE_MIN_HP_DROP_PP} pp + contrast floor ${BURST_REF_MIN_CONTRAST_PP} pp.\n`,
+  );
+
   // opportunity normalisation (Value-Gate rule 4): windows per match, split by
   // the round's own outcome — so a "responders win more" reading can be
   // checked against how many windows each side even faced.
@@ -690,14 +749,424 @@ async function examples(): Promise<void> {
   console.error(`${out.length} example windows`);
 }
 
+
+// ─────────────────────────────────────────────────────────── overreact ─────
+/**
+ * PROBE ONLY — nothing here is wired into the product, no candidate reads it
+ * and no gate checks it (user idea, 2026-09-01).
+ *
+ * The question: does spending MORE defensive cooldowns than a burst window
+ * needed cost you later in the same round? The bar this has to clear is
+ * explicit — `cd-spent-idle` was retired 2026-08-30 because "wasteful spend"
+ * showed no outcome cost (punished 3.6% vs 3.1%). If all three definitions
+ * below come out flat, the idea dies the same way.
+ *
+ * **The denominator trap this probe is built around.** "Later punishment"
+ * requires at least one SPENT cooldown to still be on cooldown at a later
+ * window — so a window where nobody spent anything can never be punished, by
+ * construction. Comparing over-spenders against everybody would therefore
+ * manufacture a positive result out of nothing. Every control here is
+ * restricted to windows that spent AT LEAST ONE major, so the punishment
+ * mechanism is available to both arms (CLAUDE.md Value-Gate rule 4: ask what
+ * the denominator is before reading the sign).
+ *
+ * Severity is stratified, never pooled (Value-Gate rule 5), by the pressured
+ * friendly's min grid HP: >60 / 40–60 / ≤40. Brackets are reported
+ * separately for the same reason.
+ */
+type Band = ">60" | "40-60" | "<=40";
+const BANDS: Band[] = [">60", "40-60", "<=40"];
+const bandOf = (hp: number | null | undefined): Band | null =>
+  hp == null ? null : hp > 60 ? ">60" : hp > 40 ? "40-60" : "<=40";
+/** "a big cooldown" for O2 — 3 minutes or longer. */
+const LONG_CD_SECONDS = 180;
+
+interface ProbeWindow {
+  matchId: string;
+  seq: number | null;
+  bracket: string;
+  win: boolean | null;
+  tSec: number;
+  band: Band | null;
+  /** every response event inside the 8 s the window is judged over, all
+   * friendlies (casts + a kite, which has no cast instant) */
+  responsesCount: number;
+  /** personal walls + externals + major healing CDs actually cast inside the
+   * bounded window, all friendlies */
+  majorsSpent: number;
+  spentIds: string[];
+  /** sum of the spent CDs' base cooldown seconds (0-cd ledger misses excluded
+   * from the sum but still counted in `majorsSpent`) */
+  spendWeightS: number;
+  minHp: number | null;
+  died: boolean;
+  /** a spent CD whose base cooldown is >= LONG_CD_SECONDS */
+  hasLongCd: boolean;
+  /** "weak window": one lead CD, no extras, nobody died, nobody went under
+   * 60% — the moment did not ask for a big button */
+  weak: boolean;
+  /** LATER PUNISHMENT: a later feasible window in the same round, during
+   * which >=1 of the CDs spent here was still on cooldown, that either went
+   * unanswered or contained a friendly death */
+  punished: boolean;
+  /** could this window be punished at all (>=1 spend with a known cooldown
+   * AND a later feasible window exists)? the honest denominator */
+  punishable: boolean;
+  /**
+   * The CONFOUND-CONTROLLED outcome. `punished` above is mechanically
+   * satisfied by long cooldowns — a 180 s CD is still down at essentially
+   * every later window in the round, so "was one of them still down" measures
+   * cooldown length, not decision quality. These four count the round's own
+   * later feasible windows split by whether they fall inside the exhausted
+   * CD's shadow, so "more spend covers more windows" cancels: what is
+   * compared is a RATE over later windows, inside vs outside, within the same
+   * round.
+   */
+  shadowN: number;
+  shadowBad: number;
+  clearN: number;
+  clearBad: number;
+  /** spend casts the cooldown ledger had no entry for (they count toward
+   * `majorsSpent`, contribute nothing to `spendWeightS`) */
+  zeroCdSpends: number;
+}
+
+function buildProbeWindows(rows: Row[]): ProbeWindow[] {
+  const byRound = new Map<string, Row[]>();
+  for (const r of rows) {
+    const k = `${r.matchId}|${r.seq}`;
+    (byRound.get(k) ?? byRound.set(k, []).get(k)!).push(r);
+  }
+  const out: ProbeWindow[] = [];
+  for (const group of byRound.values()) {
+    const sorted = [...group].sort((a, b) => a.point.tSec - b.point.tSec);
+    for (const r of sorted) {
+      const p = r.point;
+      const spend = (p.spend ?? []).filter((c) => c.tSec >= p.tSec);
+      const laterFeasible = sorted.filter(
+        (o) => o.point.tSec > p.tSec && o.point.feasible,
+      );
+      const withCd = spend.filter((c) => c.cooldownSeconds > 0);
+      const punishable = withCd.length > 0 && laterFeasible.length > 0;
+      const punished =
+        punishable &&
+        laterFeasible.some(
+          (o) =>
+            (!o.point.responded || o.point.anyFriendlyDeath) &&
+            withCd.some((c) => c.tSec + c.cooldownSeconds > o.point.tSec),
+        );
+      const isBad = (o: Row) =>
+        !o.point.responded || o.point.anyFriendlyDeath;
+      const inShadow = (o: Row) =>
+        withCd.some((c) => c.tSec + c.cooldownSeconds > o.point.tSec);
+      const shadow = laterFeasible.filter(inShadow);
+      const clear = laterFeasible.filter((o) => !inShadow(o));
+      const minHp = p.pressured?.minHpPct ?? null;
+      out.push({
+        matchId: r.matchId,
+        seq: r.seq,
+        bracket: r.bracket,
+        win: r.win,
+        tSec: p.tSec,
+        band: bandOf(minHp),
+        responsesCount:
+          p.responseCasts.length + (p.responses.kite ? 1 : 0),
+        majorsSpent: spend.length,
+        spentIds: spend.map((c) => c.spellId),
+        spendWeightS: withCd.reduce((n, c) => n + c.cooldownSeconds, 0),
+        minHp,
+        died: p.anyFriendlyDeath,
+        hasLongCd: withCd.some((c) => c.cooldownSeconds >= LONG_CD_SECONDS),
+        weak:
+          p.extraCds.length === 0 &&
+          !p.anyFriendlyDeath &&
+          minHp != null &&
+          minHp > 60,
+        punished,
+        punishable,
+        zeroCdSpends: spend.length - withCd.length,
+        shadowN: shadow.length,
+        shadowBad: shadow.filter(isBad).length,
+        clearN: clear.length,
+        clearBad: clear.filter(isBad).length,
+      });
+    }
+  }
+  return out;
+}
+
+const rate = (ws: ProbeWindow[]) =>
+  ws.length ? (100 * ws.filter((w) => w.punished).length) / ws.length : NaN;
+const rateStr = (ws: ProbeWindow[]) =>
+  ws.length
+    ? `${rate(ws).toFixed(1)}% (${ws.filter((w) => w.punished).length}/${ws.length})`
+    : "—";
+
+/** Band-standardised rates: each band's rate weighted by the TRIGGER arm's own
+ * band distribution, so a definition that lives in a more dangerous band than
+ * its control cannot borrow that band's punishment rate. */
+function standardised(
+  trig: ProbeWindow[],
+  ctrl: ProbeWindow[],
+): { t: number; c: number } {
+  let tw = 0,
+    cw = 0,
+    wsum = 0;
+  for (const b of BANDS) {
+    const t = trig.filter((w) => w.band === b);
+    const c = ctrl.filter((w) => w.band === b);
+    if (!t.length || !c.length) continue;
+    tw += t.length * rate(t);
+    cw += t.length * rate(c);
+    wsum += t.length;
+  }
+  return wsum ? { t: tw / wsum, c: cw / wsum } : { t: NaN, c: NaN };
+}
+
+function overreact(): void {
+  const inPath = flag("--in");
+  if (!inPath) {
+    console.error("usage: overreact --in <file.jsonl> [--out <file.md>]");
+    process.exit(1);
+  }
+  const { rows, rounds } = readRows(inPath);
+  const all = buildProbeWindows(rows);
+  const brackets = [...new Set(all.map((w) => w.bracket))].sort();
+  const L: string[] = [];
+  L.push(`# burst windows — the over-react probe (GH #60, 2026-09-01)\n`);
+  L.push(
+    `**Probe only.** Nothing below is wired into the product. Bar to clear: \`cd-spent-idle\` was retired 2026-08-30 for showing no outcome cost (punished 3.6% vs 3.1%); "has teeth" here means a later-punishment contrast of ≥ 3 pp in at least two brackets, band-standardised.\n`,
+  );
+  L.push(
+    `Corpus: ${new Set(rows.map((r) => r.matchId)).size} archived 12.1 matches, ${rounds.length} rounds, ${all.length} bounded windows.\n`,
+  );
+
+  // ── the denominator, stated before any comparison ─────────────────────
+  const spent = all.filter((w) => w.majorsSpent >= 1);
+  const punishable = all.filter((w) => w.punishable);
+  L.push(`## the denominator\n`);
+  L.push(
+    `| population | windows | share | later-punishment rate |`,
+  );
+  L.push(`|---|---|---|---|`);
+  L.push(
+    `| all bounded windows | ${all.length} | 100% | ${rateStr(all)} |`,
+  );
+  L.push(
+    `| spent ≥ 1 major inside the window | ${spent.length} | ${((100 * spent.length) / Math.max(1, all.length)).toFixed(1)}% | ${rateStr(spent)} |`,
+  );
+  L.push(
+    `| **punishable** (≥1 spend with a known cooldown AND a later feasible window exists) | ${punishable.length} | ${((100 * punishable.length) / Math.max(1, all.length)).toFixed(1)}% | ${rateStr(punishable)} |`,
+  );
+  L.push(
+    `\nA window with no spend can NEVER be punished by construction, so every control below is restricted to windows that spent at least one major. Reading the trigger arms against "everybody" would manufacture the result.\n`,
+  );
+  const spendCasts = all.reduce((n, w) => n + w.majorsSpent, 0);
+  const zeroCd = all.reduce((n, w) => n + w.zeroCdSpends, 0);
+  L.push(
+    `spend ledger coverage: ${spendCasts} spend casts, ${zeroCd} (${((100 * zeroCd) / Math.max(1, spendCasts)).toFixed(1)}%) with no cooldown entry in the \`extractMajorCooldowns\` ledger — those count toward \`majorsSpent\` but contribute nothing to \`spendWeightS\` and cannot make a window punishable.\n`,
+  );
+  const qn = (v: number[], pp: number) => {
+    if (!v.length) return NaN;
+    const a = [...v].sort((x, y) => x - y);
+    return a[Math.min(a.length - 1, Math.floor(pp * a.length))]!;
+  };
+  const rc = all.map((w) => w.responsesCount);
+  const ms = all.map((w) => w.majorsSpent);
+  const sw = all.filter((w) => w.majorsSpent > 0).map((w) => w.spendWeightS);
+  L.push(
+    `per-window distributions — \`responsesCount\` (response events inside the 8 s the window is judged over, all friendlies, kite counted as one): p50=${qn(rc, 0.5)} p75=${qn(rc, 0.75)} p90=${qn(rc, 0.9)} max=${Math.max(0, ...rc)}; \`majorsSpent\` (walls+externals+major heal CDs cast anywhere inside the bounded window): p50=${qn(ms, 0.5)} p75=${qn(ms, 0.75)} p90=${qn(ms, 0.9)} max=${Math.max(0, ...ms)}; \`spendWeightS\` among windows with a spend: p25=${qn(sw, 0.25)}s p50=${qn(sw, 0.5)}s p75=${qn(sw, 0.75)}s p90=${qn(sw, 0.9)}s\n`,
+  );
+  L.push(
+    `**Read the sign, not the size.** Spending two cooldowns instead of one MECHANICALLY leaves more on cooldown later, so O1/O3 are biased toward a positive Δ before any coaching claim enters. That makes a flat or negative result strong evidence of no cost, and a small positive one weak evidence of a cost.\n`,
+  );
+
+  const section = (
+    title: string,
+    note: string,
+    trig: ProbeWindow[],
+    ctrl: ProbeWindow[],
+    denom: ProbeWindow[],
+  ) => {
+    L.push(`## ${title}\n`);
+    L.push(`${note}\n`);
+    L.push(
+      `share of windows: ${trig.length} / ${denom.length} = ${((100 * trig.length) / Math.max(1, denom.length)).toFixed(1)}% of its own denominator (${((100 * trig.length) / Math.max(1, all.length)).toFixed(1)}% of all windows); control arm ${ctrl.length}\n`,
+    );
+    L.push(
+      `| bracket | trigger n | trigger punished | control n | control punished | Δ pp (band-standardised) |`,
+    );
+    L.push(`|---|---|---|---|---|---|`);
+    const row = (label: string, t: ProbeWindow[], c: ProbeWindow[]) => {
+      const st = standardised(t, c);
+      const d = st.t - st.c;
+      L.push(
+        `| ${label} | ${t.length} | ${rateStr(t)} | ${c.length} | ${rateStr(c)} | ${isNaN(d) ? "—" : d.toFixed(1)} |`,
+      );
+      return d;
+    };
+    row("ALL", trig, ctrl);
+    const deltas: { b: string; d: number }[] = [];
+    for (const b of brackets) {
+      const d = row(
+        b,
+        trig.filter((w) => w.bracket === b),
+        ctrl.filter((w) => w.bracket === b),
+      );
+      if (!isNaN(d)) deltas.push({ b, d });
+    }
+    // severity cells, so a pooled bracket number can be checked (rule 5)
+    L.push(`\nby severity band (trigger vs control, unstandardised):\n`);
+    L.push(`| band | trigger | control | Δ pp |`);
+    L.push(`|---|---|---|---|`);
+    for (const b of BANDS) {
+      const t = trig.filter((w) => w.band === b);
+      const c = ctrl.filter((w) => w.band === b);
+      const d = rate(t) - rate(c);
+      L.push(
+        `| ${b} | ${rateStr(t)} | ${rateStr(c)} | ${isNaN(d) ? "—" : d.toFixed(1)} |`,
+      );
+    }
+    // ── the confound-controlled outcome ───────────────────────────────────
+    L.push(
+      `\nwithin-round paired outcome — of the round's LATER feasible windows, how many went badly (unanswered or a death) INSIDE the exhausted cooldown's shadow vs OUTSIDE it. "more spend covers more windows" cancels here, because this is a rate over later windows, not a count of them:\n`,
+    );
+    L.push(
+      `| bracket | arm | later windows in shadow | bad | later windows clear | bad | Δ pp |`,
+    );
+    L.push(`|---|---|---|---|---|---|---|`);
+    const pairRow = (label: string, arm: string, ws: ProbeWindow[]) => {
+      const sn = ws.reduce((n, w) => n + w.shadowN, 0);
+      const sb = ws.reduce((n, w) => n + w.shadowBad, 0);
+      const cn = ws.reduce((n, w) => n + w.clearN, 0);
+      const cb = ws.reduce((n, w) => n + w.clearBad, 0);
+      const d = sn && cn ? (100 * sb) / sn - (100 * cb) / cn : NaN;
+      L.push(
+        `| ${label} | ${arm} | ${sn} | ${sn ? ((100 * sb) / sn).toFixed(1) : "—"}% | ${cn} | ${cn ? ((100 * cb) / cn).toFixed(1) : "—"}% | ${isNaN(d) ? "—" : d.toFixed(1)} |`,
+      );
+      return d;
+    };
+    const pairedDeltas: { b: string; d: number }[] = [];
+    {
+      const t = pairRow("ALL", "trigger", trig);
+      const c = pairRow("ALL", "control", ctrl);
+      if (!isNaN(t) && !isNaN(c)) pairedDeltas.push({ b: "ALL", d: t - c });
+    }
+    for (const b of brackets) {
+      const t = pairRow(
+        b,
+        "trigger",
+        trig.filter((w) => w.bracket === b),
+      );
+      const c = pairRow(b, "control", ctrl.filter((w) => w.bracket === b));
+      if (!isNaN(t) && !isNaN(c)) pairedDeltas.push({ b, d: t - c });
+    }
+    // The deciding statistic is the DIFFERENCE IN DIFFERENCES: an exhausted
+    // cooldown's shadow makes later windows go worse in BOTH arms (a burst
+    // that just happened is followed by more pressure), so the trigger's own
+    // shadow effect proves nothing on its own — only the amount by which it
+    // EXCEEDS the control's does.
+    L.push(
+      `\ndifference in differences (trigger's shadow effect − control's) — the deciding statistic: ${pairedDeltas
+        .map((x) => `${x.b} ${x.d >= 0 ? "+" : ""}${x.d.toFixed(1)}`)
+        .join(" · ")}\n`,
+    );
+
+    // opportunity denominator (Value-Gate rule 4)
+    L.push(`\nwindows per round by outcome (opportunity denominator):\n`);
+    L.push(`| bracket | trigger / won round | / lost round |`);
+    L.push(`|---|---|---|`);
+    const perRoundOf = (ws: ProbeWindow[], b: string, win: boolean) => {
+      const rs = rounds.filter(
+        (r) => r.win === win && (b === "ALL" || r.bracket === b),
+      );
+      if (!rs.length) return "—";
+      const ids = new Set(rs.map((r) => `${r.matchId}|${r.seq}`));
+      const n = ws.filter((w) => ids.has(`${w.matchId}|${w.seq}`)).length;
+      return (n / rs.length).toFixed(3);
+    };
+    for (const b of ["ALL", ...brackets])
+      L.push(
+        `| ${b} | ${perRoundOf(trig, b, true)} | ${perRoundOf(trig, b, false)} |`,
+      );
+    const teeth = deltas.filter((x) => x.d >= 3).length;
+    // brackets only (ALL is a pooled row, and Value-Gate rule 5 forbids a
+    // pooled call)
+    const pairedTeeth = pairedDeltas.filter(
+      (x) => x.b !== "ALL" && x.d >= 3,
+    ).length;
+    L.push(
+      `\nraw outcome (task definition): ${teeth >= 2 ? `≥3 pp in ${teeth} brackets (${deltas.filter((x) => x.d >= 3).map((x) => `${x.b} ${x.d.toFixed(1)}`).join(", ")})` : `≥3 pp in ${teeth} bracket(s)`}`,
+    );
+    L.push(
+      `confound-controlled (within-round paired, difference in differences): ${pairedTeeth >= 2 ? `≥3 pp in ${pairedTeeth} brackets (${pairedDeltas.filter((x) => x.b !== "ALL" && x.d >= 3).map((x) => `${x.b} ${x.d.toFixed(1)}`).join(", ")})` : `≥3 pp in ${pairedTeeth} bracket(s)`}`,
+    );
+    L.push(
+      `\n**verdict: ${pairedTeeth >= 2 ? "HAS TEETH" : "FLAT"}** — the confound-controlled column is the one that decides, because the raw one is mechanically satisfied by cooldown LENGTH.\n`,
+    );
+  };
+
+  // O1
+  const o1denom = all.filter(
+    (w) => w.punishable && w.band === ">60" && w.majorsSpent >= 1,
+  );
+  section(
+    "O1 — two or more majors spent while the pressured friendly never went under 60%",
+    "trigger `majorsSpent ≥ 2` ∧ min HP > 60; control: the same band, exactly ONE major spent. Both arms restricted to PUNISHABLE windows (≥1 spend with a known cooldown, and a later feasible window in the round exists) so the outcome is reachable on both sides.",
+    o1denom.filter((w) => w.majorsSpent >= 2),
+    o1denom.filter((w) => w.majorsSpent === 1),
+    o1denom,
+  );
+
+  // O2
+  const o2denom = all.filter((w) => w.punishable && w.weak);
+  section(
+    `O2 — a ≥${LONG_CD_SECONDS} s cooldown spent on a weak window`,
+    `"weak" = one lead CD, no extras, nobody died, min HP > 60. trigger: at least one spent CD with base cooldown ≥ ${LONG_CD_SECONDS} s; control: weak windows where a major was spent but all of them were shorter. Both arms punishable-restricted.`,
+    o2denom.filter((w) => w.hasLongCd),
+    o2denom.filter((w) => !w.hasLongCd),
+    o2denom,
+  );
+
+  // O3 — top quartile spendWeightS within its own severity band
+  const o3denom = all.filter((w) => w.punishable && w.band !== null);
+  const p75ByBand = new Map<Band, number>();
+  for (const b of BANDS) {
+    const v = o3denom
+      .filter((w) => w.band === b)
+      .map((w) => w.spendWeightS)
+      .sort((x, y) => x - y);
+    p75ByBand.set(b, v.length ? v[Math.floor(0.75 * v.length)]! : Infinity);
+  }
+  L.push(
+    `<!-- O3 band p75 of spendWeightS: ${BANDS.map((b) => `${b}=${p75ByBand.get(b)}s`).join(", ")} -->\n`,
+  );
+  section(
+    "O3 — top-quartile cooldown weight spent, within its own severity band",
+    `trigger: \`spendWeightS\` at or above its band's p75 (${BANDS.map((b) => `${b}: ${p75ByBand.get(b)}s`).join(", ")}); control: the rest of the band. Both arms punishable-restricted.`,
+    o3denom.filter((w) => w.spendWeightS >= p75ByBand.get(w.band!)!),
+    o3denom.filter((w) => w.spendWeightS < p75ByBand.get(w.band!)!),
+    o3denom,
+  );
+
+  const outPath = flag("--out");
+  const text = L.join("\n") + "\n";
+  if (outPath) {
+    mkdirSync(dirname(outPath), { recursive: true });
+    writeFileSync(outPath, text);
+    console.error(`wrote ${outPath}`);
+  } else process.stdout.write(text);
+}
+
 if (cmd === "scan") await scan();
 else if (cmd === "examples") await examples();
 else if (cmd === "sweep") await sweep();
 else if (cmd === "report") report();
+else if (cmd === "overreact") overreact();
 else if (cmd === "emit-table") await emitTable();
 else {
   console.error(
-    "usage: burstWindowScan.ts scan|sweep|report|emit-table|examples ...",
+    "usage: burstWindowScan.ts scan|sweep|report|emit-table|examples|overreact ...",
   );
   process.exit(1);
 }

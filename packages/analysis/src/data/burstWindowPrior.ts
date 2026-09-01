@@ -28,6 +28,58 @@ import raw from "./burstWindowPriorGenerated.json";
  * enough to quote", imported rather than re-typed. */
 export const BURST_WINDOW_PRIOR_N_FLOOR = BEHAVIOR_PRIOR_N_FLOOR;
 
+/**
+ * **Minimum contrast door** (approved tightener, 2026-09-01). A window only
+ * becomes a `slow-defensive-response` candidate when the reference cell it
+ * would quote — AFTER fallback resolution, i.e. the cell whose numbers are
+ * actually rendered — shows the no-response population dying at least this
+ * many percentage points more often than the responding one.
+ *
+ * The evidence: on the 2026-09-01 corpus build **8 of the 56 rendered menu
+ * lines (14%) quoted a contrast that was flat or reversed**
+ * (`refDeathNoResp <= refDeathResp`; the worst was a Malevolence cell at
+ * 3% answered vs 2% unanswered). Nothing on those lines was false — the
+ * legend calls the pair a descriptive contrast — but the numbers the
+ * accusation cites argue AGAINST the accusation, which is worse than citing
+ * nothing. 3 pp is the floor because it is where the archive's own
+ * bracket-level contrasts sit (ALL +3.6, 2v2 +4.1, 3v3 +4.7, Solo +3.0): a
+ * cell that cannot beat the corpus-wide average is not evidence about THIS
+ * cooldown.
+ *
+ * Measured on the 2026-09-01 archive rescan and the 309-prompt corpus:
+ * 1,798 of the 6,292 archive-wide fires (28.6%) quote a cell that is under
+ * this floor or has no cell at all; on the corpus the type goes **56 → 39
+ * rendered lines** (−30.4%), lines quoting a sub-door contrast **17 → 0**,
+ * and lines quoting a flat-or-REVERSED one **8 → 0**. The surviving
+ * distribution is min 3 pp / median 5 pp / max 15 pp. The other 14 candidate
+ * types' 1,332 menu lines come out byte-identical.
+ *
+ * Anchored on the RENDERED integers (`deathRespPct` / `deathNoRespPct`, both
+ * already `Math.round`ed here), not on the raw fractions, so the gate that
+ * re-parses the prompt text and the producer that wrote it compare the same
+ * two numbers (CLAUDE.md shared-predicate rule).
+ */
+export const BURST_REF_MIN_CONTRAST_PP = 3;
+
+/** The rendered contrast of a reference cell, in percentage points. */
+export function burstRefContrastPp(
+  ref: Pick<BurstWindowPriorRef, "deathRespPct" | "deathNoRespPct">,
+): number {
+  return ref.deathNoRespPct - ref.deathRespPct;
+}
+
+/**
+ * The door itself — **the one predicate**. `burstWindowResponseEvents` calls
+ * it to decide whether to accuse; `checkBurstWindowRefConsistency` calls it on
+ * the numbers it re-parsed out of the rendered line, so a line that quotes a
+ * sub-door contrast is a hardFailure rather than a thing only a human notices.
+ */
+export function burstRefClearsMinContrast(
+  ref: Pick<BurstWindowPriorRef, "deathRespPct" | "deathNoRespPct">,
+): boolean {
+  return burstRefContrastPp(ref) >= BURST_REF_MIN_CONTRAST_PP;
+}
+
 interface Cell {
   nResp: number;
   deathResp: number;

@@ -162,6 +162,53 @@ export const BURST_LEAD_CD_EXCLUDED_IDS: ReadonlySet<string> = new Set([
   "10060",
 ]);
 
+/**
+ * **"The window itself put them there."** Severity triage additionally
+ * requires the pressured friendly to have LOST at least this many percentage
+ * points of maximum health inside the window (`startHpPct - minHpPct`, both
+ * `gridHpPct` samples on the render grid). Approved tightener 2026-09-01
+ * (chg7b concern §1: the previous triage fired on an HP number the player had
+ * walked in with — "they were at 25% when the enemy pressed Combustion" is a
+ * statement about the previous exchange, not about this one).
+ *
+ * Only the CANDIDATE population moves. The reference table
+ * (`burstWindowPriorGenerated.json`) is built over FEASIBLE windows and never
+ * reads `triaged`, so conditioning triage harder cannot move the numbers the
+ * product quotes — deliberately, since a death both triages a window and is
+ * the table's own outcome.
+ *
+ * **Swept, and the honest result is that this door is nearly a no-op.** The
+ * 2026-09-01 archive rescan (18,134 matches, 36,649 rounds, 68,756 bounded
+ * windows, `eval-private/reports/burst-window-2026-09-01-c/report.md`) over
+ * the 6,292 windows that fire without it:
+ *
+ * | drop floor | fires | fires/round | death share | flat/reversed cell |
+ * |---|---|---|---|---|
+ * | 0 pp | 6,292 | 0.172 | 9.2% | 28.6% |
+ * | 10 pp | 6,168 (−2.0%) | 0.168 | 9.0% | 28.4% |
+ * | **15 pp (taken)** | **6,100 (−3.1%)** | **0.166** | **9.0%** | **28.3%** |
+ * | 20 pp | 6,010 (−4.5%) | 0.164 | 9.0% | 28.3% |
+ *
+ * The three floors are indistinguishable on everything the sweep can measure
+ * — the fired windows' death share and the share of them quoting a
+ * flat/reversed reference move by 0.2 pp across the whole range — so 15 is
+ * taken as the middle of the swept range rather than because it won
+ * anything. The reason there is nothing to win: among fires the drop is
+ * already p05 21 · p10 30 · p25 47 · p50 61 · p75 71, because clause 1
+ * requires min HP ≤ 40% and almost nobody who ends a window under 40 started
+ * it near there. Only 192 of 6,292 fires (3.1%) drop under 15 points; 124
+ * (2.0%) under 10.
+ *
+ * This measurement **refutes** the phase-2 hand-off note that called this
+ * "the strongest remaining lever". It is worth keeping — those 192 windows
+ * really were accusing somebody about the previous exchange, all 6,292 have a
+ * usable start sample so failing closed costs nothing, and the door is one
+ * comparison — but nobody should expect it to move volume. On the 309-prompt
+ * corpus it removed **0** of the 56 rendered lines; every one of the 17 the
+ * two doors removed together failed the CONTRAST door.
+ */
+export const BURST_TRIAGE_MIN_HP_DROP_PP = 15;
+
 export interface BurstWindowResponses {
   /** a friendly pressed a personal wall (`bigDefensiveSpellIds`) */
   wall: boolean;
@@ -197,6 +244,35 @@ export interface BurstResponseCast {
   latencySec: number;
 }
 
+/**
+ * PROBE-ONLY (2026-09-01, GH #60 over-react probe). One defensive cooldown a
+ * friendly actually spent inside the bounded window — personal wall, external
+ * or major healing CD, the same three id sets `BurstWindowResponses` uses, so
+ * "a response" and "a spend" cannot disagree about what counts as a major
+ * defensive. Collected ONLY when `BurstWindowOptions.collectSpend` is set;
+ * the product never sets it, nothing renders it and no gate reads it. It
+ * exists so the corpus scan can ask whether spending MORE than the moment
+ * needed is punished later in the round (the bar to clear: `cd-spent-idle`
+ * was retired 2026-08-30 for showing no outcome cost).
+ */
+export interface BurstSpendCast {
+  category: "wall" | "external" | "healCd";
+  spellId: string;
+  spellName: string;
+  casterId: string;
+  casterName: string;
+  /** whole second the cast lands on (the second `fmtTime` displays) */
+  tSec: number;
+  /**
+   * Base cooldown in seconds, read from the SAME per-player ledger
+   * `cdAvailableAt` consults (`extractMajorCooldowns`), not a second table.
+   * 0 means the ledger has no entry for this spell on this player — the row
+   * still counts toward `majorsSpent`, it just contributes nothing to a
+   * cooldown-weight sum, and the scan reports how often that happens.
+   */
+  cooldownSeconds: number;
+}
+
 export interface BurstFriendlyOutcome {
   unitId: string;
   name: string;
@@ -205,6 +281,23 @@ export interface BurstFriendlyOutcome {
   minHpPct: number | null;
   /** the whole second `minHpPct` was read at */
   minHpSec: number | null;
+  /**
+   * `gridHpPct` at the window START — the first whole second in
+   * `[tSec, outcomeEndSec]` that has a grid sample at all (normally `tSec`
+   * itself; the fallback exists because `gridHpPct` returns null when no
+   * advanced-action sample is in reach of that second, and a window whose
+   * very first second happens to be a hole is not a window we know nothing
+   * about). Null when the unit was already dead at `tSec` or has no sample
+   * anywhere in the horizon.
+   *
+   * Added 2026-09-01 for the "the window itself put them there" triage door
+   * (`BURST_TRIAGE_MIN_HP_DROP_PP`): `startHpPct - minHpPct` is the drop the
+   * burst actually caused, as opposed to an HP number the player walked in
+   * with. Same sampler as `minHpPct`, same render grid — one predicate.
+   */
+  startHpPct: number | null;
+  /** the whole second `startHpPct` was read at */
+  startHpSec: number | null;
   died: boolean;
 }
 
@@ -264,12 +357,21 @@ export interface BurstWindowDecisionPoint {
   /** names of the friendlies that satisfied the gate (empty ⇒ !feasible) */
   feasibleUnits: string[];
   /**
-   * Severity triage (approved correction 2): the pressured friendly's grid
-   * min HP inside the window reached `CRISIS_HP_PCT_RENDERED` — the same
-   * crisis line `crisisDecisionPoints` uses, imported — or a friendly died in
-   * the window. Phase 1 would have fired on 28.6% of feasible windows (0.6
-   * per round); the product must not hand a coach a menu of every burst that
-   * went unanswered, only the ones that went somewhere.
+   * Severity triage (approved correction 2, tightened 2026-09-01):
+   *
+   *  1. the pressured friendly's grid min HP inside the window reached
+   *     `CRISIS_HP_PCT_RENDERED` — the same crisis line
+   *     `crisisDecisionPoints` uses, imported — or a friendly died in the
+   *     window; **AND**
+   *  2. that friendly LOST at least `BURST_TRIAGE_MIN_HP_DROP_PP` points of
+   *     maximum health inside the window (`startHpPct - minHpPct`).
+   *
+   * Phase 1 would have fired on 28.6% of feasible windows (0.6 per round);
+   * clause 1 alone brought that to 11.7%; clause 2 is the "the window itself
+   * put them there" door — without it the type fires on somebody who was
+   * ALREADY low when the burst opened, which is a sentence about the previous
+   * exchange. Both clauses are AND: a death at 12% HP that the window only
+   * moved 4 points is still not this window's story.
    */
   triaged: boolean;
   // ── OUTCOMES — reference table only, EXCEPT `anyFriendlyDeath`.
@@ -284,6 +386,13 @@ export interface BurstWindowDecisionPoint {
    * mean the same thing. The three fields below stay table-only.
    */
   anyFriendlyDeath: boolean;
+  /**
+   * PROBE-ONLY, present only when `BurstWindowOptions.collectSpend` is set
+   * (the product never sets it): every major defensive a friendly pressed
+   * inside `[tSec - BURST_RESPONSE_PRE_MS, outcomeEndSec]`. See
+   * `BurstSpendCast`.
+   */
+  spend?: BurstSpendCast[];
   deathsInWindow: number;
   /** the lowest `minHpPct` across friendlies */
   minFriendlyHpPct: number | null;
@@ -563,6 +672,12 @@ export interface BurstWindowOptions {
   friendlyReaction?: number;
   lapseSeconds?: number;
   dmgFloor?: number;
+  /**
+   * PROBE-ONLY: also populate `spend` on every window. Off by default and
+   * never set by the product — it costs an extra pass over every friendly
+   * cast per window and nothing in the prompt path reads the result.
+   */
+  collectSpend?: boolean;
 }
 
 /**
@@ -619,6 +734,10 @@ export function burstWindowDecisionPoints(
   const selfCdsByUnit = new Map<string, IMajorCooldownInfo[]>();
   const allyCdsByUnit = new Map<string, IMajorCooldownInfo[]>();
   const ccByUnit = new Map<string, { startMs: number; endMs: number }[]>();
+  /** PROBE-ONLY: spellId → base cooldown seconds, straight off the same
+   * `extractMajorCooldowns` ledger `cdAvailableAt` reads above, so a spend's
+   * weight and a spend's availability can never come from two tables. */
+  const cdSecByUnit = new Map<string, Map<string, number>>();
   for (const u of friendlies) {
     let cds: IMajorCooldownInfo[] = [];
     try {
@@ -643,6 +762,11 @@ export function burstWindowDecisionPoints(
       answers.filter((cd) => canHelpAnotherUnit(cd.spellId, cd.tag)),
     );
     ccByUnit.set(u.id, buildFilteredAuraIntervals(u, ccSpellIds, combat));
+    if (opts.collectSpend)
+      cdSecByUnit.set(
+        u.id,
+        new Map(cds.map((cd) => [cd.spellId, cd.cooldownSeconds])),
+      );
   }
 
   const out: BurstWindowDecisionPoint[] = [];
@@ -750,10 +874,16 @@ export function burstWindowDecisionPoints(
       const friendlyOutcomes: BurstFriendlyOutcome[] = friendlies.map((f) => {
         let minHpPct: number | null = null;
         let minHpSec: number | null = null;
+        let startHpPct: number | null = null;
+        let startHpSec: number | null = null;
         for (let s = tSec; s <= outcomeEndSec; s++) {
           if (isDeadAtRenderSecond(f, start, s)) break;
           const hp = gridHpPct(f, start + s * 1000);
           if (hp === null) continue;
+          if (startHpPct === null) {
+            startHpPct = hp;
+            startHpSec = s;
+          }
           if (minHpPct === null || hp < minHpPct) {
             minHpPct = hp;
             minHpSec = s;
@@ -762,7 +892,15 @@ export function burstWindowDecisionPoints(
         const died = ((f.deathRecords ?? []) as any[]).some(
           (d) => d.timestamp >= tMs && d.timestamp <= outcomeEndMs,
         );
-        return { unitId: f.id, name: f.name, minHpPct, minHpSec, died };
+        return {
+          unitId: f.id,
+          name: f.name,
+          minHpPct,
+          minHpSec,
+          startHpPct,
+          startHpSec,
+          died,
+        };
       });
       const damageTakenIn = (f: any): number =>
         ((f.damageIn ?? []) as any[])
@@ -849,6 +987,44 @@ export function burstWindowDecisionPoints(
       const mins = friendlyOutcomes
         .map((f) => f.minHpPct)
         .filter((v): v is number => v !== null);
+      // "The window itself put them there" (see `triaged` / the constant):
+      // null when the pressured friendly has no start sample, which fails the
+      // door closed — we cannot claim the burst caused a drop we never saw.
+      const pressuredDropPp =
+        pressured !== null &&
+        pressured.startHpPct !== null &&
+        pressured.minHpPct !== null
+          ? pressured.startHpPct - pressured.minHpPct
+          : null;
+
+      // ── PROBE-ONLY spend ledger (over-react probe, opt-in) ──────────────
+      let spend: BurstSpendCast[] | undefined;
+      if (opts.collectSpend) {
+        spend = [];
+        for (const c of friendlyCasts) {
+          if (c.tMs < w0) continue;
+          if (c.tMs > outcomeEndMs) break;
+          const category: BurstSpendCast["category"] | null =
+            PERSONAL_WALL_IDS.has(c.spellId)
+              ? "wall"
+              : EXTERNAL_IDS.has(c.spellId)
+                ? "external"
+                : BURST_HEAL_CD_IDS.has(c.spellId)
+                  ? "healCd"
+                  : null;
+          if (!category) continue;
+          spend.push({
+            category,
+            spellId: c.spellId,
+            spellName: getEnglishSpellName(c.spellId),
+            casterId: c.unitId,
+            casterName: c.unitName,
+            tSec: Math.floor((c.tMs - start) / 1000),
+            cooldownSeconds:
+              cdSecByUnit.get(c.unitId)?.get(c.spellId) ?? 0,
+          });
+        }
+      }
 
       out.push({
         tMs,
@@ -867,10 +1043,13 @@ export function burstWindowDecisionPoints(
         feasibleUnits,
         triaged:
           pressured !== null &&
+          pressuredDropPp !== null &&
+          pressuredDropPp >= BURST_TRIAGE_MIN_HP_DROP_PP &&
           ((pressured.minHpPct !== null &&
             pressured.minHpPct <= CRISIS_HP_PCT_RENDERED) ||
             deathsInWindow > 0),
         anyFriendlyDeath: deathsInWindow > 0,
+        ...(spend ? { spend } : {}),
         deathsInWindow,
         minFriendlyHpPct: mins.length ? Math.min(...mins) : null,
         friendlyOutcomes,

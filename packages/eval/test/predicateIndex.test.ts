@@ -691,6 +691,21 @@ const INDEX: PredicateRow[] = [
     symbol: "CRISIS_HP_PCT_RENDERED",
     mod: crisisDecisionPoints,
   },
+  {
+    file: `${A}/data/burstWindowPrior.ts`,
+    symbol: "burstRefClearsMinContrast",
+    mod: burstWindowPrior,
+  },
+  {
+    file: `${A}/data/burstWindowPrior.ts`,
+    symbol: "BURST_REF_MIN_CONTRAST_PP",
+    mod: burstWindowPrior,
+  },
+  {
+    file: `${A}/analysis/burstWindowDecisionPoints.ts`,
+    symbol: "BURST_TRIAGE_MIN_HP_DROP_PP",
+    mod: burstWindowDecisionPoints,
+  },
   // Formatting and notation
   {
     file: `${A}/compare/claimChecker.ts`,

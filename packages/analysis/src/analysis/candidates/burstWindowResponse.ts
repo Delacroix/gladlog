@@ -26,6 +26,7 @@
  * This module only selects, caps and renders.
  */
 import type { BurstWindowPriorRef } from "../../data/burstWindowPrior";
+import { burstRefClearsMinContrast } from "../../data/burstWindowPrior";
 import type { BurstWindowDecisionPoint } from "../burstWindowDecisionPoints";
 import { BURST_RESPONSE_WINDOW_SEC } from "../burstWindowDecisionPoints";
 import { fmtFactTime } from "../factFormat";
@@ -60,26 +61,41 @@ export function burstWindowResponseEvents(
   overrides?: { cap?: number },
 ): CandidateEvent[] {
   const cap = overrides?.cap ?? BURST_WINDOW_RESPONSE_CAP;
-  const eligible = points.filter(
-    (p) =>
-      p.feasible &&
-      p.triaged &&
-      !p.responded &&
-      p.pressured !== null &&
-      p.durationSec >= BURST_WINDOW_MIN_JUDGED_S,
-  );
+  // The reference lookup happens BEFORE the cap, not after: a window with no
+  // cell, or with a cell whose contrast does not clear
+  // `BURST_REF_MIN_CONTRAST_PP`, is not a candidate at all and must not eat
+  // one of the two slots a window that IS one would have had. (Measured on
+  // the 309-prompt corpus this freed no slot — 17 lines removed, 0 added —
+  // because no round there had a third eligible window. It is still the
+  // correct order: the alternative silently costs a real finding whenever a
+  // round does.)
+  const eligible = points
+    .filter(
+      (p) =>
+        p.feasible &&
+        p.triaged &&
+        !p.responded &&
+        p.pressured !== null &&
+        p.durationSec >= BURST_WINDOW_MIN_JUDGED_S,
+    )
+    .map((p) => ({ p, ref: probes.lookup(p.leadCd.spellId) }))
+    // no baseline → no accusation; a flat/reversed baseline → no accusation
+    // either (the quoted numbers would argue against the sentence quoting
+    // them — the door and the gate share `burstRefClearsMinContrast`)
+    .filter(
+      (e): e is { p: BurstWindowDecisionPoint; ref: BurstWindowPriorRef } =>
+        e.ref !== null && burstRefClearsMinContrast(e.ref),
+    );
   // Danger order: a window somebody died in first, then the deepest HP dip.
   // This is the SELECTION order only — the emitted order is time (see below),
   // the same split every sibling producer makes (spec §4, 2026-08-29 ruling).
   const ranked = [...eligible].sort(
     (a, b) =>
-      Number(b.anyFriendlyDeath) - Number(a.anyFriendlyDeath) ||
-      (a.pressured!.minHpPct ?? 101) - (b.pressured!.minHpPct ?? 101),
+      Number(b.p.anyFriendlyDeath) - Number(a.p.anyFriendlyDeath) ||
+      (a.p.pressured!.minHpPct ?? 101) - (b.p.pressured!.minHpPct ?? 101),
   );
   const out: CandidateEvent[] = [];
-  for (const p of ranked.slice(0, cap)) {
-    const ref = probes.lookup(p.leadCd.spellId);
-    if (!ref) continue; // no baseline → no accusation
+  for (const { p, ref } of ranked.slice(0, cap)) {
     // Only the CDs that landed inside the 8 s this sentence judges: a CD cast
     // 21 s later belongs to a different exchange and would read as if it had
     // opened alongside the lead (real case: match 2195ab6e round 1, window
