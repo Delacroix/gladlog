@@ -358,6 +358,15 @@ export const MITIGATION_VERDICTS: Record<string, IMitigationVerdict> = {
       "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;不构成真实阻碍,永不产出「浪费」判断",
     approved: "2026-08-17 user",
   },
+  "473909": {
+    zh: "知识古树",
+    officialPct: 30,
+    verdict: "unresolved",
+    note: "2026-09-01 补登记(BACKLOG #24-9 / GH #44)。2026-08-13 补丁说明审读时用户裁定「等 S2 语料 + DB2 复核后再进 mitigationData,不要只照补丁说明的文字填数」—— 这次照做,结果数值和补丁说明不一样:补丁说明写 20%,官方 DB2@12.1.0.69404 里 473909 自己第 2 行就是 `aura87 pts=-30 misc=127`(30% 全学派),wowhead tooltip 同为 30%(12s,1.5min CD);S2 归档已观测(对局 7d74b373)。数值走生成层(attributedMitigationSpellIds 白名单 → genMitigation),不是手工 override。\n\n**档位本人未裁,保持 unresolved。** 同形态先例:盾墙 40% 个人墙 → kill-live-gated;疾影术 25% 个人墙 → never;真言术:障 团队 20% → never。30% 落在 25% 与 40% 之间,且附带完全免控 + 换形(不能被打断已开的形态,但 1.5s 施法可被打断)—— 是比疾影术更硬的墙,但这是我的推导不是签字,留空缺等一个词:unconditional / kill-live-gated / never。",
+    source:
+      "官方 DB2 SpellEffect@12.1.0.69404(473909 自身 aura87 = -30/127)+ wowhead tooltip 30% + S2 归档观测;登记本身依 2026-08-13 用户裁定(DB2 复核后进表);档位未裁",
+    approved: "2026-08-13 user",
+  },
 };
 
 /** 键集一致性:每个官方减伤条目都必须有裁定(测试里断言,这里只导出便于复用)。 */

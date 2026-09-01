@@ -68,6 +68,13 @@ const spellIdLists = {
     "17", // Power Word: Shield (Priest)
     "421453", // Ultimate Penitence (Priest)
     "198589", // Blur(恶魔猎手)—— 25% 全学派个人墙,减伤挂在 buff 212800 上;2026-08-22 补登记(此前整个减伤体系不认识它:白名单、减伤表、无减伤表三处皆无)
+    // Ancient of Lore 知识古树(奶德 PvP 天赋,12.1 回归)—— 30% 全学派个人墙,减伤行就在
+    // cast id 自己身上(DB2@12.1.0.69404 `aura87 pts=-30 misc=127`,EffectIndex 2),生成层
+    // 一进白名单就能挖到,不用手工 override。补丁说明写的是 20%,官方表与 wowhead tooltip
+    // 都是 30%(BACKLOG #24-9 的裁决就是「别照补丁说明填数」);S2 归档已观测(对局
+    // 7d74b373,2026-08-13)。talentMitigationGenerated.json 同样挖到 30%(via "self s3
+    // (aura 87) = -30"),但那张表目前零消费者,产品用的减伤算术只读 MITIGATION_TABLE。
+    "473909",
     "108416", // Dark Pact (Warlock)
   ],
   // 团队/外放减伤。**名字里的 "cast on a teammate" 描述的不是它的实际内容** ——

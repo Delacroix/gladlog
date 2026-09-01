@@ -327,9 +327,9 @@ export const TALENT_BEHAVIORS: ITalentBehavior[] = [
     buffSpellId: "473909",
     abilitySpellId: "473909",
     toolLabel:
-      "Ancient of Lore (shapeshift: CC immunity + 20% DR + Blossom Burst/Mass Blooming)",
+      "Ancient of Lore (shapeshift: CC immunity + 30% DR + Blossom Burst/Mass Blooming)",
     toolCategory: "immunity",
-    note: "12.1 PvP-talent return; pvpTalents/cast/self-buff aura all 473909 (corpus match 7d74b373, 2026-08-13); interruptible 1.5s cast, observed buff window ~11.5s",
+    note: "12.1 PvP-talent return; pvpTalents/cast/self-buff aura all 473909 (corpus match 7d74b373, 2026-08-13); interruptible 1.5s cast, observed buff window ~11.5s. DR is 30% per DB2@69404 aura87 on the cast id (patch notes said 20%; registered in MITIGATION_TABLE via attributedMitigationSpellIds 2026-09-01, BACKLOG #24-9)",
   },
 ];
 

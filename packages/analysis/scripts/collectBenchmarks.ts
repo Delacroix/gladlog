@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+ 
 /**
  * CLI: Collect benchmarks from local WoW combat logs
  *
@@ -14,13 +14,15 @@
  *     [--out packages/analysis/benchmarks/benchmark_data.json]
  */
 
-import fs from "fs-extra";
-import path from "path";
 import { GladLogParser } from "@gladlog/parser";
 import { toLegacyMatch, toLegacyShuffle } from "@gladlog/parser-compat";
-import { stratifiedSample, type SampleMeta } from "../src/benchmark/stratify";
-import { isHealerSpec, specToString } from "../src/utils/cooldowns";
+import fs from "fs-extra";
+import path from "path";
+import { gunzipSync } from "zlib";
+
 import { createBenchmarkAccumulator } from "../src/benchmark/metrics";
+import { type SampleMeta,stratifiedSample } from "../src/benchmark/stratify";
+import { isHealerSpec, specToString } from "../src/utils/cooldowns";
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
 
@@ -56,6 +58,13 @@ function parseArgs(): {
   }
 
   return result;
+}
+
+/** Manifest entries may be `.txt` or `.txt.gz` (the PvP log archive stores raw
+ * gzip bytes); gunzip in memory, same convention as eval's observedSpellIds.ts. */
+async function readLog(logPath: string): Promise<string> {
+  const raw = await fs.readFile(logPath);
+  return (logPath.endsWith(".gz") ? gunzipSync(raw) : raw).toString("utf-8");
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -105,7 +114,7 @@ async function main() {
   for (let i = 0; i < logPaths.length; i++) {
     const logPath = logPaths[i];
     try {
-      const content = await fs.readFile(logPath, "utf-8");
+      const content = await readLog(logPath);
       const parser = new GladLogParser();
       const combats: { gladId: string; combat: any }[] = [];
       parser.on("match", (m: any) =>
@@ -183,7 +192,7 @@ async function main() {
   const seen = new Set<string>();
   for (const logPath of selectedLogs) {
     try {
-      const content = await fs.readFile(logPath as string, "utf-8");
+      const content = await readLog(logPath as string);
       const parser = new GladLogParser();
       parser.on("match", (m: any) => {
         if (selectedCombatIds.has(m.id) && !seen.has(m.id)) {

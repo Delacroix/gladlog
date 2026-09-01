@@ -1,6 +1,6 @@
 {
   "build": "12.1.0.69404",
-  "generatedAt": "2026-08-22T09:43:14.287Z",
+  "generatedAt": "2026-09-01T19:51:02.112Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
@@ -33,9 +33,9 @@
       "trackedSpells": 360
     },
     "mitigationGenerated.json": {
-      "entries": 18,
+      "entries": 19,
       "unresolved": 8,
-      "bytes": 1769
+      "bytes": 1833
     },
     "talentMitigationGenerated.json": {
       "entries": 59,
@@ -82,7 +82,7 @@
       "entries": 40
     },
     "dispelObservedGenerated.ts": {
-      "entries": 318,
+      "entries": 305,
       "producer": "packages/eval/scripts/confidenceAudit.ts --emit-table"
     },
     "observedSpellIdsGenerated.json": {

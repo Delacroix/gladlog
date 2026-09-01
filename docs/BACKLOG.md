@@ -790,9 +790,11 @@ Classified by suspected root cause; work begins after completing the currently r
      id 185313 (aura-id-rot family, measuring duration requires aura id).
    - ~~Malevolence/Soul Rot/Coordinated Assault~~ **Deleted as redundant** (DB2 and override
      byte-identical; Soul Rot actually unlocked dispelType:Magic that was being masked by the override).
-   - **Fel Barrage 258925 (sole remaining)**: override dur=3 vs DB2 8, but 808 matches of
-     12.0 corpus have **0 casts** (92 string matches are all loadout talent ids), bidirectionally
-     unfalsifiable. Will resolve by empirical measurement when first cast appears in 12.1 corpus; if no samples ever appear, adopt official 8s.
+   - ~~**Fel Barrage 258925 (sole remaining)**~~ **Closed 2026-08-22** (`2a6f7e06`, S2 health check
+     `eval-private/reports/s2-health-2026-08-21`): 0 occurrences in 10,682 12.1 matches / 3.3M raw lines and no
+     same-named live id in DB2 → the ability is gone in 12.x, so the override row was deleted outright (along with
+     its `spellCategories` row) rather than "adopt official 8s" — there is nothing left for the value to apply to.
+     The id is also out of `spellEffectGenerated.json` (no longer in any candidate universe). Bookkept here 2026-09-01 (GH #44).
 3. **rotScan whitelist rot check** (update-wow-data step 7 denominator): scan by spec
    none-tracked rate + `[DR: spell:<id>` fallback scan; ~20 reworked specs are worst hit,
    expected gaps (Retribution Radiant Glory / Enhancement Doom Winds) — don't false-alarm. #23's deferred
@@ -802,13 +804,36 @@ Classified by suspected root cause; work begins after completing the currently r
    > collapse. But 18 specs absent on day one (Subtlety/Outlaw Rogue, Balance/Guardian Druid, Arcane/Fire Mage,
    > Holy/Shadow Priest, Destruction/Demonology Warlock, Brewmaster/Mistweaver Monk, Protection Warrior/Paladin, Blood DK, Augmentation Evoker, etc.),
    > and present specs partially n≤3 — conclusive check still awaits one week of corpus.
+
+   ~~Conclusive check~~ **Done 2026-08-21/22** as the S2 predicate health check (`15ecc63a` + `1696f0a0` tooling,
+   `2a6f7e06` rulings landed): the reverse pass (`curatedRotScan`, 60 registered tables vs 10,682-match observed set)
+   found 155 never-observed entries → 14 wrong ids corrected and 22 deleted 12.x spells removed from 19 hand tables
+   (Netherwalk included — the #23 deferral closed here); rescan 155 → 69 remaining, all expected zero-event ids
+   (talent ids / passives). The forward pass (`drGapScan`) found 63 CC ids the DR table has but `SPELL_CATEGORIES`
+   lacks — tracked separately (S2 README §"CC 一个事实两套谓词"), not part of this item. Runbook §7b is the
+   standing procedure. Bookkept here 2026-09-01 (GH #44).
 4. **benchmarks.json rebuild**: current baseline from 2026-07-20 based on 12.0 corpus (2100+),
    healing/damage numbers significantly retuned and now stale; rerun after S2 corpus reaches volume, note
    [[metric-scale-vs-agreement]] — compare scale-independent counts before drawing conclusions.
+   > **2026-09-01 in progress (GH #44)**: `collectBenchmarks.ts` taught to read the `.txt.gz` archive; full rebuild
+   > running over `manifest-archive-2026-08-28-newseason.txt` (18,134 12.1 files, minRating 2100 as before).
+   > Old baseline for the comparison: generatedAt 2026-07-20, 34 specs / 2 insufficient / Σn=4215.
 5. **dispelObservedGenerated backfill**: `confidenceAudit --emit-table`,
    observational table "hasn't happened ≠ can't happen", feed new corpus entries back one by one.
+   > **2026-09-01 in progress (GH #44)**: `confidenceAudit.ts` taught to read `.txt.gz` and to skip the candidate
+   > extraction under `--emit-table` (the table only needs the observation side); regeneration running over the
+   > union manifest = `manifest-fullscale.txt` (12.0, 70 files / 1245 matches) ∪ `manifest-archive-2026-08-28-newseason.txt`
+   > (12.1, 18,134 files). Additive by design: an id observed dispelled in either corpus stays in.
+   > Old table: 305 ids / 1245 matches (2026-08-27).
 6. **eval baseline / candidate incidence rates full recalibration**: 63.6/14.1/15.6 and other old numbers considered
    expired after 12.1; rerun `/eval-baseline`, rate-limiting type (#22 temporary gate) thresholds reviewed alongside incidence rates.
+   > **2026-09-01 status (GH #44)**: the deterministic half already exists — the 2026-08-22 skill-gradient study
+   > (`eval-private/reports/signal-skill-gradient-2026-08-22`, 10,301 12.1 matches / 23,056 healer rounds) carries every
+   > signal's S2 per-opportunity conversion rate by bracket (#34 rulings were made on it), which supersedes the 12.0
+   > per-match incidence numbers as the calibration reference. Still open and **both user calls**: (a) the model-run
+   > `/eval-baseline` (batched sonnet responder/judge cost — say the word and it runs); (b) the #22 cap review — the
+   > 2026-08-11 dry run ruled "do not remove" pending batch 2 (DEATH-002 / OFFENSIVE-001), and batch 2 has not landed,
+   > so the removal condition is still unmet; nothing to re-decide until it does.
 7. ~~observedSpellIds +7 new ids into icons/offGcd universe~~ **Done 2026-08-11**
    (pipeline fix ac3a6a2f same-day opportunistic: observed 3346→3353, icons 41729→41734,
    offGcd 295→296, validateCatalogs green) — didn't actually depend on S2 corpus, was incorrectly categorized in this batch.
@@ -827,10 +852,33 @@ Classified by suspected root cause; work begins after completing the currently r
    > SPELL_PERIODIC_DAMAGE present, 363405 absent). Its KNOWN_REMOVED_SPELLS tombstone was therefore
    > dead weight (the @69382 SpellCategories orphan row is also gone) — deleted, validateCatalogs
    > green without it (5 catalogs OK, same counts). SpellName deregistration ruling itself unchanged.
-9. **Ancient of Lore (473909) 20% damage reduction not in mitigation table**: cc_immunity side already registered
-   with the 2026-08-13 patch review batch in talentBehaviors (corpus empirically verified 7d74b373), but its
-   20% damage reduction during transformation still lacks DB2 aura87 evidence chain — enter
-   mitigationData after S2 corpus + DB2 review, don't fill numbers based solely on patch notes text.
+9. ~~**Ancient of Lore (473909) 20% damage reduction not in mitigation table**~~ **Closed 2026-09-01 (GH #44)** — and the
+   "don't fill numbers from patch notes" clause earned its keep: the official value is **30%, not 20%**.
+   DB2 SpellEffect@12.1.0.69404 has the row on the cast id itself (EffectIndex 2: `aura87 pts=-30 misc=127`, all
+   schools; the other 21 rows are the shapeshift/override-bar/mechanic-immunity set), wowhead tooltip says 30% (12s,
+   1.5min CD), S2 archive observes the aura (2.0% of a 605-file sample, 12 files, plus the original 7d74b373).
+   Registration went through the generation layer, not a hand override: `473909` added to
+   `spellIdLists.attributedMitigationSpellIds` (the Blur 198589 precedent) → `genMitigation` regenerated on the same
+   build → `mitigationGenerated.json` +1 entry exactly (18 → 19, unresolved 8 → 8); `mitigationVerdicts.ts` gets the
+   mandatory entry as `unresolved` (tier is the user's word — precedents: 40% wall → kill-live-gated, 25% Blur → never;
+   30% + full CC immunity sits between them); `talentBehaviors` label 20% → 30%. Note `talentMitigationGenerated.json`
+   (2026-08-18) had already mined the same −30 for 473909 but that table has zero consumers — product arithmetic reads
+   `MITIGATION_TABLE` only.
+   **Acceptance (same criterion before/after, 12 S2 files with the aura / 32 rounds / 92 owner views, healer + every
+   DPS owner)**: per-type candidate counts identical (burst-into-mitigation 5 → 5 — verdict `unresolved` never
+   surfaces), findings-prompt SHA256 identical; match-context changed in exactly one mechanism — the kill-attempt
+   ledger (`killAttempts.ts` reads `MITIGATION_TABLE` for "popped a real defensive"): 13 of 609 `FAILED:` lines
+   (6 distinct attempt windows, rendered per owner view) moved from `not enough damage` ×9 / `popped Barkskin` ×2 /
+   `popped Ironbark` ×2 to `popped Ancient of Lore` / `Barkskin/Ancient of Lore` / `Ironbark/Ancient of Lore`.
+   **Side finding fixed in the same commit**: the first pass rendered `popped Ancient of Lore/Ancient of Lore/Ancient
+   of Lore` — the shapeshift aura re-applies on every form refresh (match ad329f4a: 3 casts, 23 `SPELL_AURA_APPLIED`,
+   same-millisecond REMOVED+APPLIED pairs) and `defensivePopped` pushed one name per APPLIED; it now dedupes by
+   spellId (a wall whose CD exceeds the span cannot be popped twice in one attempt), pinned by a flicker fixture in
+   `killAttempts.test.ts`. Not fixed, recorded: an in-span *re-application* of an aura that was already up before the
+   attempt started still counts as "popped during the attempt" — the ledger keys on APPLIED events, not aura
+   intervals; a proper fix routes through `buildAuraIntervals` (#28) and is a semantics call, so it is parked here.
+   Also caught: `writeManifest.ts` did not know `spellReachGenerated.json` (hand-registered with GH #34 ② on
+   2026-08-29) and silently dropped it on the next run — the script now emits that entry.
 
 New season log collection/archival (launchd loading etc.) see #19, user-managed, not in this item.
 

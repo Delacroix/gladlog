@@ -63,16 +63,13 @@ import {
   LogEvent,
 } from "@gladlog/parser-compat";
 
+import { CandidateEvent } from "../analysis/types";
 import { MITIGATION_TABLE } from "../data/mitigationData";
 import { ATTEMPT_INTO_TRINKET_OUTCOME_REF } from "../data/outcomeRefs";
 import spellIdListsData from "../data/spellIdLists";
-
-import { analyzeOutgoingCCChains, drResetMsAt, DRLevel } from "./drAnalysis";
 import { burstCastSpan, KILL_CREDIT_SLACK_S } from "./burstLedger";
+import { analyzeOutgoingCCChains, DRLevel,drResetMsAt } from "./drAnalysis";
 import { reconstructEnemyCDTimeline } from "./enemyCDs";
-import { KW_BURST_MIN_DAMAGE } from "./offensiveWindows";
-import { CandidateEvent } from "../analysis/types";
-
 import {
   getHpPercentAtTime,
   IKillOpportunity,
@@ -80,6 +77,7 @@ import {
   PVP_TRINKET_SPELL_IDS,
   STUN_USABLE_MIT_IDS,
 } from "./killWindowTargetSelection";
+import { KW_BURST_MIN_DAMAGE } from "./offensiveWindows";
 import { fmtTime } from "./renderGrid";
 
 const EXTERNAL_DEF_IDS = new Set<string>(
@@ -559,6 +557,13 @@ function attributeFailure(
 
   let immunityBaited = false;
   const defensivePopped: string[] = [];
+  // One name per spell: a shapeshift-type defensive re-applies its aura
+  // whenever the form refreshes (Ancient of Lore 473909 in S2 archive match
+  // ad329f4a: 3 casts, 23 SPELL_AURA_APPLIED, same-millisecond REMOVED+APPLIED
+  // pairs), and a wall whose cooldown exceeds the span cannot be popped twice
+  // inside one attempt — without this guard the ledger rendered
+  // "popped Ancient of Lore/Ancient of Lore/Ancient of Lore" (GH #44, 2026-09-01).
+  const poppedIds = new Set<string>();
   for (const aura of target.auraEvents) {
     if (aura.destUnitId !== target.id) continue;
     if ((aura.logLine.event as string) !== LogEvent.SPELL_AURA_APPLIED)
@@ -568,9 +573,11 @@ function attributeFailure(
     // The stun-usable subset is called out by name — those are the cards the
     // gated tier told the coach to bait; seeing one here closes that loop.
     if (
-      MITIGATION_AURA_IDS.has(aura.spellId) ||
-      STUN_USABLE_MIT_IDS.has(aura.spellId)
+      (MITIGATION_AURA_IDS.has(aura.spellId) ||
+        STUN_USABLE_MIT_IDS.has(aura.spellId)) &&
+      !poppedIds.has(aura.spellId)
     ) {
+      poppedIds.add(aura.spellId);
       defensivePopped.push(aura.spellName ?? aura.spellId);
     }
   }

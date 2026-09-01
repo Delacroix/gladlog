@@ -17,14 +17,10 @@
  *
  * Usage: npx tsx packages/eval/scripts/confidenceAudit.ts --manifest <file>
  *        [--emit-table [--date YYYY-MM-DD]]
+ * Manifest entries may be `.txt` or `.txt.gz` (PvP archive); with --emit-table
+ * the per-match candidate extraction is skipped (the table only needs the
+ * observation side), so the full archive is affordable.
  */
-import { readFileSync } from "fs";
-import { GladLogParser, type GladMatch } from "@gladlog/parser";
-import {
-  toLegacyMatch,
-  CombatUnitReaction,
-  LogEvent,
-} from "@gladlog/parser-compat";
 import {
   buildCastMatchIndex,
   classifyDispel,
@@ -32,8 +28,17 @@ import {
   extractCandidateFindings,
   isHealerSpec,
 } from "@gladlog/analysis";
+import { GladLogParser, type GladMatch } from "@gladlog/parser";
+import {
+  CombatUnitReaction,
+  LogEvent,
+  toLegacyMatch,
+} from "@gladlog/parser-compat";
+import { readFileSync } from "fs";
+import { gunzipSync } from "zlib";
 
 const argv = process.argv.slice(2);
+const emitTable = argv.includes("--emit-table");
 const mIdx = argv.indexOf("--manifest");
 if (mIdx < 0) {
   console.error("Usage: confidenceAudit --manifest <file>");
@@ -71,7 +76,11 @@ for (const f of files) {
   const items: GladMatch[] = [];
   parser.on("match", (m) => items.push(m));
   parser.on("shuffle", (s) => items.push(...(s.rounds as never[])));
-  for (const line of readFileSync(f, "utf8").split("\n")) parser.push(line);
+  // Manifest entries ending in `.gz` are gunzipped in memory (the PvP log
+  // archive stores raw gzip bytes) — same convention as observedSpellIds.ts.
+  const raw = readFileSync(f);
+  const text = (f.endsWith(".gz") ? gunzipSync(raw) : raw).toString("utf8");
+  for (const line of text.split("\n")) parser.push(line);
   parser.end();
   for (const m of items) {
     try {
@@ -115,6 +124,10 @@ for (const f of files) {
         );
       if (!owner) continue;
       matches++;
+      // --emit-table only needs the observation side (dispelledIds /
+      // kindTally / riderOnlyIds / matches); skip the candidate extraction,
+      // which is the expensive half, when nothing below will be printed.
+      if (emitTable) continue;
       for (const c of extractCandidateFindings(legacy, owner.id)) {
         if (c.type === "missed-cleanse" && c.spellId) {
           const e = cleanseCands.get(c.spellId) ?? {
@@ -172,7 +185,10 @@ if (eIdx >= 0) {
     (id) => !dispelledIds.has(id),
   );
   const dIdx = argv.indexOf("--date");
-  const args = { date: dIdx >= 0 ? argv[dIdx + 1] : "unknown date" };
+  const args = {
+    date: dIdx >= 0 ? argv[dIdx + 1] : "unknown date",
+    manifest: argv[mIdx + 1]!.replace(process.env.HOME ?? "~", "~"),
+  };
   const rows = [...dispelledIds.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([id, n]) => `  "${id}", // ×${n}`)
@@ -195,8 +211,9 @@ if (eIdx >= 0) {
  * rider ${kindTally.rider} (excluded); ${riderOnly.length} ids were rider-only.
  *
  * Regenerate: npx tsx packages/eval/scripts/confidenceAudit.ts \\
- *   --manifest $GLADLOG_EVAL_HOME/corpus/manifest-fullscale.txt --emit-table \\
+ *   --manifest <manifest> --emit-table --date YYYY-MM-DD \\
  *   > packages/analysis/src/data/dispelObservedGenerated.ts
+ * Manifest: ${args.manifest}
  * Corpus snapshot: ${matches} matches, ${dispelledIds.size} ids (${args.date}).
  */
 export const CORPUS_OBSERVED_DISPEL_IDS: ReadonlySet<string> = new Set([

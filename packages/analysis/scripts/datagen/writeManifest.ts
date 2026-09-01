@@ -4,8 +4,9 @@
  * needed.
  */
 import { readFileSync, statSync } from "fs";
-import { fetchLatestBuild } from "./lib/wagoCsv";
+
 import { writeArtifact } from "./lib/emit";
+import { fetchLatestBuild } from "./lib/wagoCsv";
 
 export async function main(): Promise<void> {
   // DATAGEN_BUILD pins the build number: stay on the same build as every
@@ -257,6 +258,19 @@ export async function main(): Promise<void> {
       // skipping it is that a new expansion's new specs are absent from the
       // enum, and absence raises no error, it just silently drops data.
       "parser-compat/enumsGenerated.ts": countEnumMembers(),
+      // GH #34 ② (2026-08-29): per-spell official reach for externals
+      // (genSpellReach.ts). Was registered in the manifest by hand when it
+      // landed; the script did not know it, so the next writeManifest run
+      // silently dropped the entry and datagenManifest.test went red
+      // (caught 2026-09-01 while refreshing mitigationGenerated for GH #44).
+      "spellReachGenerated.json": {
+        spells: Object.keys(readJson("spellReachGenerated.json").spells)
+          .length,
+        bytes: statSync(dataDir + "spellReachGenerated.json").size,
+        generator: "scripts/datagen/genSpellReach.ts",
+        consumer:
+          "utils/deathOutcomeAnalysis.ts externalReachYards (GH #34 ②)",
+      },
     },
   };
 

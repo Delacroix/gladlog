@@ -1,15 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { LogEvent } from "@gladlog/parser-compat";
 import { describe, expect, it } from "vitest";
 
-import { LogEvent } from "@gladlog/parser-compat";
-
+import { extractCandidateFindings } from "../src/analysis/candidateFindings";
+import { CANDIDATE_TYPE_FLAGS } from "../src/data/candidateTypeFlags";
 import {
   attemptIntoTrinketEvents,
   extractKillAttempts,
   formatKillAttemptsForContext,
 } from "../src/utils/killAttempts";
-import { CANDIDATE_TYPE_FLAGS } from "../src/data/candidateTypeFlags";
-import { extractCandidateFindings } from "../src/analysis/candidateFindings";
 
 /**
  * 钉的是四条会静默出错的边界,不是 happy path:
@@ -239,6 +238,41 @@ describe("extractKillAttempts", () => {
     });
     const a = extractKillAttempts([f1], [e1], makeCombat(f1, e1))[0];
     expect(a.attribution?.primary).toBe("outhealed");
+  });
+
+  it("同一减伤在 span 内反复 APPLIED(变形闪烁)只记一次:知识古树 S2 语料 3 次施放 / 23 次 APPLIED 的形状", () => {
+    // 473909 知识古树:MITIGATION_TABLE 30%(GH #44 登记),光环每次形态刷新都
+    // 同毫秒 REMOVED+APPLIED 一对;1.5min CD 的墙在一次尝试里不可能交三次。
+    const flicker = (atS: number, event: LogEvent): any => ({
+      spellId: "473909",
+      spellName: "Ancient of Lore",
+      srcUnitId: "e1",
+      srcUnitName: "e1",
+      destUnitId: "e1",
+      destUnitName: "e1",
+      timestamp: ms(atS),
+      logLine: { event, timestamp: ms(atS), parameters: [] },
+      auraType: "BUFF",
+    });
+    const e1 = unit("e1", {
+      auraEvents: [
+        ...stunAuras("e1", KIDNEY, 10, 5),
+        flicker(11, LogEvent.SPELL_AURA_APPLIED),
+        flicker(12, LogEvent.SPELL_AURA_REMOVED),
+        flicker(12, LogEvent.SPELL_AURA_APPLIED),
+        flicker(12.02, LogEvent.SPELL_AURA_REMOVED),
+        flicker(12.02, LogEvent.SPELL_AURA_APPLIED),
+      ],
+    });
+    const f1 = unit("f1", {
+      reaction: 1,
+      damageOut: [dmg("f1", "e1", 12, 50_000)],
+    });
+    const a = extractKillAttempts([f1], [e1], makeCombat(f1, e1))[0];
+    expect(a.attribution?.defensivePopped).toEqual(["Ancient of Lore"]);
+    expect(formatKillAttemptsForContext([a]).join("\n")).toContain(
+      "popped Ancient of Lore",
+    );
   });
 });
 
