@@ -38,6 +38,7 @@ import * as momentSnapshot from "@gladlog/analysis/src/analysis/momentSnapshot";
 import * as buildExemplarLedPrompt from "@gladlog/analysis/src/compare/buildExemplarLedPrompt";
 import * as cellLookup from "@gladlog/analysis/src/compare/cellLookup";
 import * as claimChecker from "@gladlog/analysis/src/compare/claimChecker";
+import * as burstAnswered from "@gladlog/analysis/src/context/burstAnswered";
 import * as matchTimelineSections from "@gladlog/analysis/src/context/matchTimelineSections";
 import * as timelineHelpers from "@gladlog/analysis/src/context/timelineHelpers";
 import * as arenaGeometry from "@gladlog/analysis/src/data/arenaGeometry";
@@ -705,6 +706,21 @@ const INDEX: PredicateRow[] = [
     file: `${A}/analysis/burstWindowDecisionPoints.ts`,
     symbol: "BURST_TRIAGE_MIN_HP_DROP_PP",
     mod: burstWindowDecisionPoints,
+  },
+  {
+    file: `${A}/context/burstAnswered.ts`,
+    symbol: "formatBurstAnsweredLines",
+    mod: burstAnswered,
+  },
+  {
+    file: `${A}/context/burstAnswered.ts`,
+    symbol: "BURST_ANSWERED_CAP",
+    mod: burstAnswered,
+  },
+  {
+    file: `${A}/context/burstAnswered.ts`,
+    symbol: "BURST_ANSWERED_MAX_HP_PCT",
+    mod: burstAnswered,
   },
   // Formatting and notation
   {

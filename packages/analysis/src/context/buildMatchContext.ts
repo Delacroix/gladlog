@@ -86,6 +86,10 @@ import {
   computeRootReachability,
   formatRootReachabilityEntries,
 } from "../utils/rootReachability";
+import {
+  burstWindowDecisionPoints,
+  type BurstWindowDecisionPoint,
+} from "../analysis/burstWindowDecisionPoints";
 
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -631,6 +635,22 @@ export function buildMatchContext(
     };
   };
 
+  // [BURST ANSWERED] context lines (GH #60 follow-up, 2026-09-01). Computed
+  // here — the timeline builder has no `combat` — and handed to the timeline
+  // as data, so "a burst window" stays the one definition the
+  // slow-defensive-response candidate and the corpus reference table share.
+  // `friendlyReaction` is the owner's, exactly as `candidateFindings` passes
+  // it. Fails silently: an uncomputable engine ⇒ no lines, never a broken
+  // timeline (same posture as [ROOT] below).
+  let burstWindows: BurstWindowDecisionPoint[] = [];
+  try {
+    burstWindows = burstWindowDecisionPoints(combat, {
+      friendlyReaction: owner?.reaction,
+    });
+  } catch {
+    /* no burst windows → no [BURST ANSWERED] lines */
+  }
+
   const timelineText = buildMatchTimeline({
     owner: owner as ICombatUnit,
     ownerSpec,
@@ -659,6 +679,7 @@ export function buildMatchContext(
     stasisEvents,
     criticalWindowSeconds,
     counterfactualOf,
+    burstWindows,
   } as BuildMatchTimelineParams);
 
   // Merge each per-window exposure entry into the timeline at its timestamp so the

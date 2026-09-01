@@ -63,6 +63,11 @@ import { sumIncomingPressure } from "../utils/incomingPressure";
 import { resourceDeltaPct } from "../utils/resourceAt";
 import { getHpPercentAtTime } from "../utils/killWindowTargetSelection";
 import { getInterruptImmunityConditions } from "../utils/talentBehaviors";
+import { type BurstWindowDecisionPoint } from "../analysis/burstWindowDecisionPoints";
+import {
+  BURST_ANSWERED_LEGEND,
+  formatBurstAnsweredLines,
+} from "./burstAnswered";
 import {
   emitDmgSpikeEntries,
   emitEnemyDeathEntries,
@@ -206,6 +211,15 @@ export interface BuildMatchTimelineParams {
     auditLines: string[];
     decisiveLines: string[];
   };
+  /**
+   * Bounded enemy burst windows (`burstWindowDecisionPoints`), passed in by
+   * buildMatchContext rather than derived here — this file has no `combat`,
+   * and re-deriving them would fork the definition of "a burst window" away
+   * from the one the `slow-defensive-response` candidate and the corpus
+   * reference table share. Feeds the `[BURST ANSWERED]` context lines
+   * (`context/burstAnswered.ts`); absent ⇒ no such lines and no legend.
+   */
+  burstWindows?: BurstWindowDecisionPoint[];
 }
 
 /**
@@ -290,6 +304,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     spiritOfRedemptionIntervals = [],
     criticalWindowSeconds: criticalWindowSet,
     counterfactualOf,
+    burstWindows,
   } = params;
 
   const matchDurationS = (matchEndMs - matchStartMs) / 1000;
@@ -2278,6 +2293,22 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     addEntry,
   });
 
+  // ── [BURST ANSWERED] context lines ─────────────────────────────────────────
+  // Descriptive credit for a correct reaction, NOT a candidate — see
+  // context/burstAnswered.ts. Capped and gated there; emitted here so the
+  // lines land in the same time-sorted stream as every other per-second entry
+  // (and so the legend below can be conditional on there being any).
+  // `addEntry` silently drops anything past match end (B103), so the legend
+  // must be decided on what actually RENDERS, not on what the builder
+  // returned — otherwise a window opening after [MATCH END] leaves a legend
+  // describing lines that are not in the prompt (1 of 309 corpus prompts).
+  const burstAnsweredEntries = formatBurstAnsweredLines(
+    burstWindows ?? [],
+  ).filter((e) => e.atSeconds <= matchEndSeconds);
+  for (const e of burstAnsweredEntries) {
+    addEntry(e.atSeconds, `${fmtTime(e.atSeconds)}  ${e.line}`);
+  }
+
   // ── [HEALER INACTIVITY] events (healer only) ────────────────────────────────────
 
   if (isHealer) {
@@ -2734,6 +2765,8 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     "    that changed nothing are omitted. Roots have no DR tier and are not hard CC (the rooted player can still cast).",
     "  [OFFENSIVE WINDOW] `X on <unit>` = damage DEALT TO that unit (it is the victim, not the dealer);",
     "    its `peak spike` figure covers the spike's own sub-window, printed after it — not the whole offensive window.",
+    // Conditional: a round with no such line pays no tokens for its legend.
+    ...(burstAnsweredEntries.length > 0 ? BURST_ANSWERED_LEGEND : []),
     "",
     `[PERSPECTIVE: Log Owner - ${ownerSpec}]`,
     `(You are the ${ownerSpec} in this match. Your actions are marked with [YOU].)`,

@@ -266,4 +266,27 @@
 //     fired on somebody who was already low when the burst opened — a
 //     sentence about the previous exchange. The reference table is untouched:
 //     it is built over FEASIBLE windows and never reads `triaged`.
-export const PROMPT_VERSION = 45;
+//
+//  v46 (2026-09-01, GH #60 follow-up — the POSITIVE side): the match timeline
+//  gained `[BURST ANSWERED]` context lines. Same engine, opposite sign: a
+//  window that `burstWindowDecisionPoints` marks feasible AND answered (the
+//  exact complement of what makes slow-defensive-response fire) is credited
+//  with one descriptive line at its start second —
+//  "enemy opened <leadCd>(+<extras>) (<spec> <caster>): <responder> answered
+//  with <spell> in <latency>s; <pressured> bottomed at <minHp>%", plus
+//  "— <name> still died" when the pressured friendly died anyway. It is NOT a
+//  candidate, carries NO corpus reference numbers (the kick-eaten A/B showed
+//  per-line references inflate whatever they touch) and never reaches the
+//  menu, mistakes.ts or any verdict surface.
+//  Volume is capped: 71.4% of bounded windows are answered, so
+//  context/burstAnswered.ts renders at most BURST_ANSWERED_CAP = 2 per round,
+//  selected by danger (a death in the window first, then the lowest grid min
+//  HP), and only when the pressured friendly's min HP reached
+//  BURST_ANSWERED_MAX_HP_PCT = 60 or lower. A two-line legend is appended to
+//  the timeline header only when at least one such line renders.
+//  Measured on the 309-prompt findings corpus: 205 of 309 prompts gain lines
+//  (89 with one, 116 with two), 321 lines total, +0.86% tokens; every other
+//  byte of every prompt is unchanged (diff: 731 insertions, 0 deletions).
+//  The prompt text changed, so the version rolls; old caches carry no
+//  [BURST ANSWERED] lines and must be void.
+export const PROMPT_VERSION = 46;
