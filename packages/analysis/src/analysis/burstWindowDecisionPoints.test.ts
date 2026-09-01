@@ -19,8 +19,10 @@ import {
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { ensureAnalysisData } from "../data/ensure";
+import { CRISIS_HP_PCT_RENDERED } from "./crisisDecisionPoints";
 import {
   BURST_HEAL_CD_IDS,
+  BURST_LEAD_CD_EXCLUDED_IDS,
   BURST_OUTCOME_FIELDS,
   BURST_RESPONSE_WINDOW_MS,
   burstWindowDecisionPoints,
@@ -40,6 +42,11 @@ const BARKSKIN = "22812";
 const HEALING_TIDE = "108280";
 /** Storm Bolt (107570) — hard CC, used as the control-on-caster answer. */
 const STORM_BOLT = "107570";
+/** Power Infusion (10060) — the one `BURST_LEAD_CD_EXCLUDED_IDS` entry. */
+const PI = "10060";
+/** Tranquility (740) — a `TEAM_HEAL_CD_IDS` entry the hand-built Restoration
+ * Druid actually owns, so `extractMajorCooldowns` puts it in their ledger. */
+const TRANQUILITY = "740";
 
 const cast = (spellId: string, tSec: number, destUnitId?: string) => ({
   spellId,
@@ -388,12 +395,129 @@ describe("burstWindowDecisionPoints — outcomes are table-only", () => {
     expect(dead.feasibleUnits).toEqual(alive.feasibleUnits);
   });
 
-  it("the outcome-field list is exactly the four fields the producer must not read", () => {
+  it("the outcome-field list is exactly the three fields the producer must not read", () => {
+    // `anyFriendlyDeath` left this list on 2026-09-01 (approved correction 2):
+    // it is the triage door AND `facts.diedInWindow`, and it is deliberately
+    // the same predicate the reference table's own outcome uses.
     expect([...BURST_OUTCOME_FIELDS]).toEqual([
-      "anyFriendlyDeath",
       "deathsInWindow",
       "minFriendlyHpPct",
       "friendlyOutcomes",
     ]);
+  });
+});
+
+describe("burstWindowDecisionPoints — the pressured friendly (correction 1)", () => {
+  /** two friendlies: F1 takes the damage, F2 is the healer standing next to
+   * it. `over1`/`over2` add whatever the case under test needs. */
+  const twoFriendlies = (over1: any = {}, over2: any = {}) => [
+    friendly({
+      damageIn: steadyDamage(10, 20),
+      advancedActions: hpTrack("F1", 0, 40, 25),
+      ...over1,
+    }),
+    friendly({
+      id: "F2",
+      name: "Mate-R",
+      info: { teamId: "0", specId: "257" },
+      advancedActions: hpTrack("F2", 0, 40, 95),
+      ...over2,
+    }),
+    hostile({ spellCastEvents: [cast(AR, 10)] }),
+  ];
+
+  it("names the LOWEST-HP friendly as pressured, not merely the most-damaged one", () => {
+    const pts = burstWindowDecisionPoints(combat(twoFriendlies()));
+    expect(pts[0]!.pressured?.name).toBe("Friend-R");
+    expect(pts[0]!.pressured?.minHpPct).toBe(25);
+  });
+
+  it("a teammate's ready wall does NOT make the window feasible — it cannot reach the pressured friendly", () => {
+    // Barkskin on the healer is a personal wall: ready, but useless to F1.
+    const pts = burstWindowDecisionPoints(
+      combat(twoFriendlies({}, { spellCastEvents: [cast(BARKSKIN, 120)] })),
+    );
+    expect(pts[0]!.pressured?.name).toBe("Friend-R");
+    expect(pts[0]!.feasible).toBe(false);
+  });
+
+  it("a teammate's ready major healing CD DOES make it feasible (it reaches the pressured friendly)", () => {
+    const pts = burstWindowDecisionPoints(
+      combat(twoFriendlies({}, { spellCastEvents: [cast(TRANQUILITY, 120)] })),
+    );
+    expect(pts[0]!.feasible).toBe(true);
+    expect(pts[0]!.feasibleUnits).toEqual(["Mate-R"]);
+  });
+
+  it("the pressured friendly's OWN wall makes it feasible even with a useless team", () => {
+    const pts = burstWindowDecisionPoints(
+      combat(twoFriendlies({ spellCastEvents: [cast(BARKSKIN, 120)] })),
+    );
+    expect(pts[0]!.feasible).toBe(true);
+    expect(pts[0]!.feasibleUnits).toEqual(["Friend-R"]);
+  });
+});
+
+describe("burstWindowDecisionPoints — severity triage (correction 2)", () => {
+  const at = (hpValue: number, deaths: any[] = []) =>
+    burstWindowDecisionPoints(
+      combat([
+        friendly({
+          damageIn: steadyDamage(10, 20),
+          advancedActions: hpTrack("F1", 0, 40, hpValue),
+          deathRecords: deaths,
+        }),
+        hostile({ spellCastEvents: [cast(AR, 10)] }),
+      ]),
+    )[0]!;
+
+  it("a window where nobody dropped to the crisis line is NOT triaged", () => {
+    expect(CRISIS_HP_PCT_RENDERED).toBe(40);
+    expect(at(75).triaged).toBe(false);
+  });
+
+  it("the pressured friendly reaching the crisis line triages the window", () => {
+    expect(at(CRISIS_HP_PCT_RENDERED).triaged).toBe(true);
+  });
+
+  it("a death inside the window triages it even at full HP", () => {
+    expect(at(99, [{ timestamp: T0 + 15_000 }]).triaged).toBe(true);
+  });
+});
+
+describe("burstWindowDecisionPoints — excluded lead CDs (correction 3)", () => {
+  it("Power Infusion is registered as an excluded opener", () => {
+    expect([...BURST_LEAD_CD_EXCLUDED_IDS]).toEqual(["10060"]);
+  });
+
+  it("a window Power Infusion opens is led — and time-anchored — by the next real CD", () => {
+    const pts = burstWindowDecisionPoints(
+      combat([
+        friendly({
+          damageIn: steadyDamage(10, 30),
+          advancedActions: hpTrack("F1", 0, 40, 60),
+        }),
+        hostile({
+          spellCastEvents: [cast(PI, 10), cast(AR, 13), cast(RECK, 14)],
+        }),
+      ]),
+    );
+    expect(pts[0]!.leadCd.spellId).toBe(AR);
+    expect(pts[0]!.tSec).toBe(13);
+    // PI is not erased — it is still one of the window's casts
+    expect(pts[0]!.extraCds.map((c) => c.spellId)).toContain(PI);
+  });
+
+  it("a window whose only CD is Power Infusion is dropped entirely", () => {
+    const pts = burstWindowDecisionPoints(
+      combat([
+        friendly({
+          damageIn: steadyDamage(10, 30),
+          advancedActions: hpTrack("F1", 0, 40, 60),
+        }),
+        hostile({ spellCastEvents: [cast(PI, 10)] }),
+      ]),
+    );
+    expect(pts).toEqual([]);
   });
 });

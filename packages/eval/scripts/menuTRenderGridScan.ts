@@ -32,12 +32,14 @@
  * can be measured against this exact criterion rather than re-derived from
  * scratch.
  *
- * Only 4 (type, factKey) pairs have an unambiguous 1:1 timeline marker and
+ * Only 5 (type, factKey) pairs have an unambiguous 1:1 timeline marker and
  * are checked (`MENU_T_RENDER_GRID_SPECS` in promptQualityCheck.ts):
  * kick-eaten.t -> [KICK], death.t -> [DEATH], missed-cleanse.t ->
  * [UNCLEANSED DEBUFF], death-setup.deathT -> [DEATH] (death-setup shares its
- * later death's own `t`, so it shares that marker). Explicitly SKIPPED, and
- * why:
+ * later death's own `t`, so it shares that marker), and — added 2026-09-01
+ * with GH #60 phase 2 — slow-defensive-response.t -> [ENEMY CD] (the fact IS
+ * the lead enemy cooldown's cast second, which the timeline prints as its own
+ * `[ENEMY CD]` line at that second). Explicitly SKIPPED, and why:
  *   - death-setup's OWN `t` (the setup moment, not `deathT`): the matching
  *     marker varies by `facts.kind` (healer-locked -> a [CC ON TEAM] line on
  *     the healer; trinket-early -> a [TRINKET]/[CD] press; defensive-early ->

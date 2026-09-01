@@ -34,6 +34,7 @@ const rec = (
     friendlyDeaths: 0,
     ownerHardCasts: 0,
     friendlyDamageSpikes: 0,
+    burstWindowOpportunities: 0,
     crisisWindows: 0,
     ownerMajorCdCasts: 0,
     ownerMajorCdsInKit: 0,

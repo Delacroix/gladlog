@@ -412,7 +412,39 @@ function report(): void {
 
   const feas = rows.filter((r) => r.point.feasible);
   lines.push(
-    `feasibility gate: ${pctStr(feas.length, rows.length)} of windows had a friendly with a tool ready and not hard-CC'd for the full 8 s.\n`,
+    `feasibility gate: ${pctStr(feas.length, rows.length)} of windows were answerable BY OR FOR THE PRESSURED FRIENDLY (their own tool ready, or a teammate's ally-reaching tool ready, and that unit not hard-CC'd for the full 8 s).\n`,
+  );
+
+  // Triage + fire rate (approved correction 2). The "fire rate" is exactly
+  // what the product candidate would emit before its per-round cap: feasible
+  // AND triaged AND unanswered.
+  const triaged = feas.filter((r) => r.point.triaged);
+  const unanswered = feas.filter((r) => !r.point.responded);
+  const fire = unanswered.filter((r) => r.point.triaged);
+  lines.push(`## triage + fire rate\n`);
+  lines.push(
+    `triaged (pressured friendly reached the crisis HP line, or a friendly died in the window): ${pctStr(triaged.length, feas.length)} of feasible windows`,
+  );
+  lines.push(
+    `unanswered within 8 s: ${pctStr(unanswered.length, feas.length)} of feasible windows`,
+  );
+  lines.push(
+    `**FIRE (feasible ∧ triaged ∧ unanswered)**: ${pctStr(fire.length, feas.length)} of feasible windows, ${(fire.length / Math.max(1, rounds.length)).toFixed(3)} per round`,
+  );
+  lines.push(
+    `  · of which the pressured friendly died in the window: ${pctStr(fire.filter((r) => r.point.anyFriendlyDeath).length, fire.length)}`,
+  );
+  const fireHp = fire
+    .map((r) => r.point.pressured?.minHpPct)
+    .filter((v): v is number => v != null);
+  lines.push(
+    `  · pressured min HP among fired windows: p10=${q(fireHp, 0.1)}% p25=${q(fireHp, 0.25)}% p50=${q(fireHp, 0.5)}% p75=${q(fireHp, 0.75)}%`,
+  );
+  const unansweredHp = unanswered
+    .map((r) => r.point.pressured?.minHpPct)
+    .filter((v): v is number => v != null);
+  lines.push(
+    `  · pressured min HP among ALL unanswered feasible windows (the triage denominator): p10=${q(unansweredHp, 0.1)}% p25=${q(unansweredHp, 0.25)}% p50=${q(unansweredHp, 0.5)}% p75=${q(unansweredHp, 0.75)}%\n`,
   );
 
   // opportunity normalisation (Value-Gate rule 4): windows per match, split by
@@ -584,8 +616,13 @@ function renderExample(
   const head = `${fmtTime(p.tSec)} 对方开了 ${p.leadCd.spellName}${extras}(${p.leadCd.casterSpec} ${p.leadCd.casterName})`;
   const body = p.responded
     ? `应对了:${p.responseCasts
-        .map((r) => `${r.casterName} 交了 ${r.spellName},latency ${r.latencySec} 秒`)
-        .join(";")}${p.responseCasts.length === 0 && p.responses.kite ? "拉开了距离(无施法)" : ""}`
+        .map(
+          (r) =>
+            `${r.casterName} 交了 ${r.spellName},latency ${r.latencySec} 秒`,
+        )
+        .join(
+          ";",
+        )}${p.responseCasts.length === 0 && p.responses.kite ? "拉开了距离(无施法)" : ""}`
     : `8 秒内你们没有任何应对——当时 ${p.feasibleUnits.join("、")} 手上有可用的减伤/救人/控制大招,且没有被硬控整整 8 秒`;
   return [
     `## ${file}${seq === null ? "" : ` round ${seq}`} · ${bracket} · window ${fmtTime(p.tSec)}–${fmtTime(p.endSec)} (${p.durationSec}s)`,

@@ -1933,7 +1933,14 @@ SP-B1.5 的 `buildGroups`(本条要替换的就是它的分组维度)。
 (按 CLAUDE.md 验证规则,必须报告替换前后的 `cd-hoarded` 发生率与逐类候选计数)。
 ⚠️ 表要按**英雄天赋**分,见 (f)。
 
-### (b) `slow-defensive-response` **不用改** —— 记录佐证,防止将来有人"修"它
+### (b) `slow-defensive-response` —— 已于 2026-09-01 整体重写(GH #60 第二期),以下为历史记录
+
+**2026-09-01 更新:这条已经不是原来那条判据了。**GH #60 第二期把它换成了决策点形态
+(`analysis/burstWindowDecisionPoints.ts` + `candidates/burstWindowResponse.ts`):判的是
+**按交火切分过的**爆发窗口(旧的判无界构建器窗口,语料 p50 21.6s),问的是**全队**有没有
+在 8 秒内应对(旧的只问 owner),可行性按**承压的那个人**判,并加了严重度分诊。下面这段
+「不用改」的佐证针对的是**旧判据**,保留是为了记录 8 秒这个数字的来源 —— 新判据沿用了同
+一个 8 秒响应窗(`BURST_RESPONSE_WINDOW_MS`),理由相同。
 
 这条已经语料标定过(p50 反应延迟 6.9s、门设在 8s ≈ p66,就是为了不把中位数判成错误,
 且已有「工具可用 + 窗口开始时没被控」的门)。本轮独立测得:
@@ -1944,7 +1951,14 @@ SP-B1.5 的 `buildGroups`(本条要替换的就是它的分组维度)。
 (会话中我一度按「首个动作延迟 0.8–1.0s」去质疑这条门,那是**另一个量**
 (任意施法 vs 防御反应),不构成反驳,在此存档以免重复踩。)
 
-### (c) `SLOW_DEF_REACTION_IDS` 漏掉专精自己的救人 CD
+### (c) `SLOW_DEF_REACTION_IDS` 漏掉专精自己的救人 CD —— 2026-09-01 随该表一起下线,问题换了形态
+
+**2026-09-01:`SLOW_DEF_REACTION_IDS` 这张并集表已随 (b) 的重写删除。**新判据的「算不算应对」
+走 `burstWindowDecisionPoints` 的 `wall`/`external`/`healCd`/`control`/`kite` 五类,其中
+`healCd` = `TEAM_HEAL_CD_IDS` ∪ `HEALING_VERDICTS` 里用户签过字的 `burst-answer` 条目 ——
+两张表都已登记在 `curatedIdRegistry`,反向腐烂扫描能看见。下面点名的那几个技能是否已被覆盖,
+仍然值得按同样的观测真值做一次正向体检(圣洁鸣钟、神圣壁垒、终极苦修、麦琳瑟拉的祝福、
+风暴涌流图腾),只是要对着新的五类去查,不再是对着这张已删除的表。
 
 `SLOW_DEF_REACTION_IDS = MAJOR_DEFENSIVE_IDS ∪ trinketSpellIds ∪ REPOSITIONING_SPELL_IDS`
 是三张手工表的并集。语料按「同技能相邻施法中位间隔 ≥35s + 按该专精基准率归一化的反应性」

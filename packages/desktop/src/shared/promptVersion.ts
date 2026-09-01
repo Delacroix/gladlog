@@ -224,4 +224,23 @@
 //    `deathT`), so a menu line's second can never sit one second ahead of the
 //    `fmtTime`-floored timeline marker it points at.
 // 菜单构成变(少一类)+ 多类 facts/legend 全变 → prompt 变 → 旧缓存作废。
-export const PROMPT_VERSION = 43;
+//
+//  v44 (2026-09-01, GH #60 phase 2): slow-defensive-response rewritten to
+//  decision-point form. The type name is unchanged and every fact under it is
+//  new: the retired predicate judged the UNBOUNDED enemy-CD builder window
+//  (corpus p50 21.6 s) with `damageRatio >= 1.5`, asked only whether the
+//  HEALER OWNER reacted within 8 s, and rendered
+//  enemyCds/windowEndT/damageK/dmgRatio/reacted/delayS/reactSpell. The new one
+//  (analysis/burstWindowDecisionPoints.ts + candidates/burstWindowResponse.ts)
+//  judges a per-exchange BOUNDED window, asks whether ANY friendly answered,
+//  gates feasibility on the PRESSURED friendly (their own tool, or a
+//  teammate's ally-reaching one, and that unit not hard-CC'd for the whole
+//  8 s), triages on that friendly reaching CRISIS_HP_PCT or a death in the
+//  window, and renders
+//  t/leadCd/leadCdId/casterSpec/caster/extras/pressured/pressuredHpPct/
+//  pressuredHpT/diedInWindow plus the corpus reference
+//  (refN/refDeathResp/refDeathNoResp/refTop/cellKey/fellBack) from
+//  data/burstWindowPriorGenerated.json. Power Infusion (10060) can no longer
+//  open a window at all. Old caches carry the retired facts under the same
+//  type name, which the new legend does not describe — they must be void.
+export const PROMPT_VERSION = 44;

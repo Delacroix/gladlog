@@ -90,7 +90,13 @@ export const DENOMINATOR_OF: Record<string, keyof RoundExposure> = {
   "external-unused": "friendlyDeaths",
   "death-unused-defensive": "friendlyDeaths",
   "kick-eaten": "ownerHardCasts",
-  "slow-defensive-response": "friendlyDamageSpikes",
+  // 2026-09-01 (GH #60 phase 2, decision-point rewrite): the retired predicate
+  // fired on unbounded builder windows filtered by `damageRatio`, for which
+  // "a friendly took 20% of a health bar in 2 s" was a rough stand-in. The new
+  // one fires on BOUNDED burst windows that are feasible for the pressured
+  // friendly AND triaged — which is an exactly countable opportunity, so the
+  // denominator is now that count instead of a proxy.
+  "slow-defensive-response": "burstWindowOpportunities",
   // 2026-08-30 (GH #34, cd-hoarded decision-point rewrite): the producer
   // itself now scans `crisisDecisionPoints` (owner's own crises + every
   // teammate's), the same predicate `crisis-no-response` already uses — so
@@ -157,6 +163,13 @@ export interface RoundExposure {
   /** friendly aligned burst windows opening while the owner had a CC major
    * available (cc-held-burst's denominator, 2026-08-29) */
   ccBurstOpportunities: number;
+  /** bounded enemy burst windows that were feasible for the pressured friendly
+   * AND triaged — slow-defensive-response's own opportunity gate
+   * (`burstWindowDecisionPoints(legacy).filter(p => p.feasible && p.triaged
+   * && p.durationSec >= BURST_WINDOW_MIN_JUDGED_S)`),
+   * i.e. every window the candidate could have fired on had the team not
+   * answered (2026-09-01, GH #60 phase 2) */
+  burstWindowOpportunities: number;
 }
 
 /** Single-source (spec 2026-08-29): the crisis threshold and merge gap live

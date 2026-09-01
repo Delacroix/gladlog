@@ -18,6 +18,7 @@
  * spell ids anywhere in this package, add an entry — the registry is the
  * index, and the rule has never been the missing piece (CLAUDE.md).
  */
+import { BURST_LEAD_CD_EXCLUDED_IDS } from "../analysis/burstWindowDecisionPoints";
 import { IMMUNITY_BREAKERS } from "../analysis/candidates/death";
 import { classMetadata } from "./classSpells";
 import { CURATED_ABILITY_FACTS } from "./curatedAbilityFacts";
@@ -292,6 +293,12 @@ export const CURATED_ID_TABLES: readonly CuratedIdTable[] = [
   ),
   t("IMMUNITY_BREAKERS", "analysis/candidates/death.ts", "cast", () =>
     IMMUNITY_BREAKERS.map((b) => b.spellId),
+  ),
+  t(
+    "BURST_LEAD_CD_EXCLUDED_IDS",
+    "analysis/burstWindowDecisionPoints.ts",
+    "cast",
+    () => set(BURST_LEAD_CD_EXCLUDED_IDS),
   ),
   t("PHYSICAL_CC_IDS", "utils/ccTrinketAnalysis.ts", "aura", () =>
     set(PHYSICAL_CC_IDS),

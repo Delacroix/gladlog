@@ -75,11 +75,14 @@ const CHAIN_LEGENDS: Record<string, string> = {
   // banned inference the wording below is written to avoid — the tool may
   // well have been better saved for later.
   "cc-avoidable": `- "cc-avoidable": the player ate hard CC facts.spell for facts.durationS seconds at full effect, and the enemy was VISIBLY CASTING it beforehand (facts.castBarSeen) — so there was a cast bar to react to. Before it landed, facts.avoidableWith was available — can be used to avoid this kind of control. Coach reacting with one of these tools next time, or note that holding it for a bigger threat may have been the right call — never assert that using it would certainly have prevented what followed.`,
-  // DEFENSIVE-003 (2026-08-11). No-causation guard: "the first defensive
-  // response came late/never while a tool was off cooldown" is a FACT about
-  // reaction timing; "responding faster would have prevented the damage" is
-  // the banned inference — the wording below must not cross that line.
-  "slow-defensive-response": `- "slow-defensive-response": the enemy opened offensive cooldown(s) facts.enemyCds at facts.t and real pressure followed (facts.damageK k team damage over facts.t–facts.windowEndT, facts.dmgRatio× the match-average rate) while the player had a defensive off cooldown and was not CC'd. facts.reacted="none" means no defensive, external, trinket, mobility, or CC response came inside that window; otherwise facts.delayS is the seconds until the first response (facts.reactSpell). Coach recognizing the enemy opener and answering sooner — a wall, an external, a reposition, or CC on the attacker — or note that holding may have been deliberate; never assert a faster response would certainly have changed what followed.`,
+  // DEFENSIVE-003, rewritten 2026-09-01 (GH #60 phase 2, user-approved
+  // sentence shape). Same no-causation guard as before — "nobody answered
+  // inside 8 s while a tool was ready" is a FACT, "answering would have saved
+  // them" is the banned inference — plus the crisis-no-response discipline for
+  // the corpus reference: it is a descriptive contrast between two
+  // populations, never a prescription, and the numbers must be cited, not
+  // invented.
+  "slow-defensive-response": `- "slow-defensive-response": at facts.t the enemy opened facts.leadCd (+facts.extras): no friendly answered within 8 s although a tool was ready (wall/external/healing CD/control on the caster/kite); facts.pressured fell to facts.pressuredHpPct% inside the window. Corpus reference (n=facts.refN facts.leadCd burst windows): a friendly died inside the window facts.refDeathResp% of the time when answered within 8 s vs facts.refDeathNoResp% when not — descriptive contrast, not causal proof; cite the numbers, do not invent others.`,
   // crisis-no-response (spec 2026-08-29 §1b, GH #58, Task 10, further
   // amended same-day — "不管分数线", the rating line is out entirely): the
   // reference is OUTCOME-based (death-within-10s for responders vs

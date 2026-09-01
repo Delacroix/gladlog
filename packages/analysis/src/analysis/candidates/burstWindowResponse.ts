@@ -1,0 +1,130 @@
+/**
+ * `slow-defensive-response` — the enemy opened a burst window, nobody answered
+ * inside 8 s, and the person under it went somewhere bad.
+ *
+ * GH #60 phase 2 (2026-09-01). The type name is unchanged; everything behind
+ * it is. The retired predicate asked a per-OWNER question over the UNBOUNDED
+ * builder windows ("did the healer react within 8 s of a window whose
+ * `damageRatio` ≥ 1.5"); this one is decision-point shaped, exactly like
+ * `crisisNoResponse.ts`:
+ *
+ *   decision point  the START of a bounded enemy burst window
+ *                   (`burstWindowDecisionPoints`)
+ *   behaviour       any friendly answering within 8 s — wall / external /
+ *                   major healing CD / control on a caster / kite
+ *   feasibility     the PRESSURED friendly could have saved themselves, or a
+ *                   teammate had an ally-reaching tool ready (correction 1)
+ *   triage          the pressured friendly reached the crisis HP line, or a
+ *                   friendly died in the window (correction 2)
+ *   outcome         never asserted — only the corpus reference
+ *                   (`lookupBurstWindowPrior`) is cited, per lead CD and
+ *                   bracket, as a descriptive contrast
+ *
+ * Every one of those predicates lives in the engine, which is also what the
+ * corpus scan consumes, so the accused window and the quoted reference are
+ * about the same population by construction (CLAUDE.md shared-predicate rule).
+ * This module only selects, caps and renders.
+ */
+import type { BurstWindowPriorRef } from "../../data/burstWindowPrior";
+import type { BurstWindowDecisionPoint } from "../burstWindowDecisionPoints";
+import { BURST_RESPONSE_WINDOW_SEC } from "../burstWindowDecisionPoints";
+import { fmtFactTime } from "../factFormat";
+import type { CandidateEvent } from "../types";
+
+/** At most this many windows per round reach the menu. Same cap as
+ * `crisisNoResponse` / the retired predicate — two is what a coach can act on
+ * and what every sibling producer in this directory uses. */
+export const BURST_WINDOW_RESPONSE_CAP = 2;
+
+/**
+ * A window shorter than the response horizon it is judged against never
+ * fires. Carried over from the retired predicate, whose own fairness gate
+ * read "a no-reaction verdict requires the window itself to have lasted at
+ * least the delay threshold — a player given a 6 s window is not held to an
+ * 8 s standard"; the rewrite dropped it and this puts it back, as the SAME
+ * number (`BURST_RESPONSE_WINDOW_SEC`, imported, never a second 8) compared
+ * against the engine's already-render-grid `durationSec`.
+ *
+ * Measured on the 2026-09-01 archive scan (36,649 rounds, 62,298 feasible
+ * windows): of the 7,301 windows that would otherwise fire, 1,009 (13.8%)
+ * were shorter than the 8 s they were being judged over — 385 of them under
+ * 4 s. Fire rate 11.7% → 10.1% of feasible windows, 0.199 → 0.172 per round.
+ * The cut is in the "don't accuse" direction, not a volume knob.
+ */
+export const BURST_WINDOW_MIN_JUDGED_S = BURST_RESPONSE_WINDOW_SEC;
+
+export function burstWindowResponseEvents(
+  points: BurstWindowDecisionPoint[],
+  owner: { id: string; name: string },
+  probes: { lookup: (leadCdSpellId: string) => BurstWindowPriorRef | null },
+  overrides?: { cap?: number },
+): CandidateEvent[] {
+  const cap = overrides?.cap ?? BURST_WINDOW_RESPONSE_CAP;
+  const eligible = points.filter(
+    (p) =>
+      p.feasible &&
+      p.triaged &&
+      !p.responded &&
+      p.pressured !== null &&
+      p.durationSec >= BURST_WINDOW_MIN_JUDGED_S,
+  );
+  // Danger order: a window somebody died in first, then the deepest HP dip.
+  // This is the SELECTION order only — the emitted order is time (see below),
+  // the same split every sibling producer makes (spec §4, 2026-08-29 ruling).
+  const ranked = [...eligible].sort(
+    (a, b) =>
+      Number(b.anyFriendlyDeath) - Number(a.anyFriendlyDeath) ||
+      (a.pressured!.minHpPct ?? 101) - (b.pressured!.minHpPct ?? 101),
+  );
+  const out: CandidateEvent[] = [];
+  for (const p of ranked.slice(0, cap)) {
+    const ref = probes.lookup(p.leadCd.spellId);
+    if (!ref) continue; // no baseline → no accusation
+    // Only the CDs that landed inside the 8 s this sentence judges: a CD cast
+    // 21 s later belongs to a different exchange and would read as if it had
+    // opened alongside the lead (real case: match 2195ab6e round 1, window
+    // 2:17–2:58).
+    const extras = p.extraCds
+      .filter((c) => c.castSec <= p.tSec + BURST_RESPONSE_WINDOW_SEC)
+      .map((c) => c.spellName)
+      // "; " — ", " is the facts separator the gates split on
+      .join("; ");
+    out.push({
+      id: `slow-defensive-response:${owner.id}:${p.tSec}`,
+      type: "slow-defensive-response",
+      t: p.tSec,
+      unitNames: [owner.name],
+      spell: p.leadCd.spellName,
+      spellId: p.leadCd.spellId,
+      facts: {
+        // `tSec` is already a whole rendered second (the engine floors the
+        // lead cast onto `fmtTime`'s grid); `fmtFactTime` keeps it there.
+        t: fmtFactTime(p.tSec),
+        leadCd: p.leadCd.spellName,
+        // The reference cell is keyed by this id, so the gate
+        // (`checkBurstWindowRefConsistency`) needs it in the rendered text to
+        // redo the lookup: `cellKey` alone cannot name it once the lookup fell
+        // back to a `bracket|*` cell.
+        leadCdId: p.leadCd.spellId,
+        casterSpec: p.leadCd.casterSpec,
+        caster: p.leadCd.casterName,
+        ...(extras ? { extras } : {}),
+        pressured: p.pressured!.name,
+        pressuredHpPct: String(p.pressured!.minHpPct),
+        // The rendered second `pressuredHpPct` was sampled at — NOT decoration:
+        // it is what lets `checkCrisisHpStateConsistency` cross-check the HP
+        // claim against that second's own `[STATE]` tick (the fact is a MIN
+        // over the window, so the line's own `t` is the wrong second to check).
+        pressuredHpT: fmtFactTime(p.pressured!.minHpSec ?? p.tSec),
+        diedInWindow: p.anyFriendlyDeath ? "yes" : "no",
+        refN: String(ref.nResp + ref.nNoResp),
+        refDeathResp: String(ref.deathRespPct),
+        refDeathNoResp: String(ref.deathNoRespPct),
+        refTop: ref.topResponses.map(([k, v]) => `${k} ${v}%`).join("; "),
+        cellKey: ref.cellKey,
+        fellBack: ref.fellBack ? "yes" : "no",
+      },
+    });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}

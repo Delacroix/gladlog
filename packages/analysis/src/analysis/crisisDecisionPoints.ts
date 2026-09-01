@@ -232,8 +232,12 @@ function samplesOf(u: any): Sample[] {
 }
 
 /** `CRISIS_HP_PCT` on the scale [STATE] rounds to — an integer percent. The
- * crossing test must compare like with like: 0.4 → 40. */
-const CRISIS_HP_PCT_RENDERED = Math.round(CRISIS_HP_PCT * 100);
+ * crossing test must compare like with like: 0.4 → 40.
+ * Exported 2026-09-01 (GH #60 phase 2): `burstWindowDecisionPoints`'s severity
+ * triage asks the SAME question ("is this friendly's rendered HP at or under
+ * the crisis line") against the SAME `gridHpPct` samples, so it must ask it
+ * with this number, not a second `Math.round(CRISIS_HP_PCT * 100)`. */
+export const CRISIS_HP_PCT_RENDERED = Math.round(CRISIS_HP_PCT * 100);
 /** How many whole seconds forward the grid re-anchor may search from the
  * crossing's own second. Derived from `CRISIS_WINDOW_GAP_MS` — anything
  * further away would already be a separate crisis by the merge rule. */

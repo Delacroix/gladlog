@@ -33,6 +33,7 @@ import {
   lookupBehaviorPrior,
   outcomePhrase,
 } from "@gladlog/analysis/src/data/behaviorPrior";
+import { lookupBurstWindowPrior } from "@gladlog/analysis/src/data/burstWindowPrior";
 import { classMetadata } from "@gladlog/analysis/src/data/classSpells";
 import { ATTEMPT_INTO_TRINKET_OUTCOME_REF } from "@gladlog/analysis/src/data/outcomeRefs";
 import { canHelpAnotherUnit } from "@gladlog/analysis/src/utils/cooldowns";
@@ -657,17 +658,88 @@ export function checkBehaviorPriorConsistency(lines: string[]): string[] {
   return failures;
 }
 
+/**
+ * 14th hardFailure class (2026-09-01, GH #60 phase 2). Exactly the same shape
+ * as `checkBehaviorPriorConsistency` above and for the same reason: the
+ * producer renders the corpus reference from
+ * `lookupBurstWindowPrior(bracket, leadCdId)`, and this gate re-parses the
+ * rendered menu line and demands the SAME lookup return the SAME numbers
+ * (CLAUDE.md shared-predicate rule — one import, two sides). A drifting
+ * producer, a stale cached round or a model-edited prompt all go red.
+ *
+ * The bracket is read out of `cellKey`'s first field, exactly as
+ * `checkBehaviorPriorConsistency` does. When the reference fell all the way
+ * back to the global `*|*` cell, that field IS `*`, so the re-lookup can only
+ * confirm the global cell's own numbers — a real (and stated) limit, not a
+ * hole: a `*|*` line is by definition not making a bracket-specific claim.
+ * Fails closed — a missing fact is a failure, otherwise a producer that simply
+ * stopped emitting the reference would leave the legend citing facts that do
+ * not exist.
+ */
+export function checkBurstWindowRefConsistency(lines: string[]): string[] {
+  const failures: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    // `type=<t> ` — the menu renderer always follows the type with a space
+    if (!line.includes("type=slow-defensive-response ")) continue;
+    const m = line.match(/facts=\{(.*)\}\s*$/);
+    if (!m) {
+      failures.push(`line ${i + 1}: slow-defensive-response 行无 facts`);
+      continue;
+    }
+    const f = parseFactsBlock(m[1]!);
+    const leadCdId = f.leadCdId;
+    const cellKey = f.cellKey ?? "";
+    if (!leadCdId || !cellKey) {
+      failures.push(
+        `line ${i + 1}: slow-defensive-response 缺 leadCdId/cellKey,无法核对语料参照`,
+      );
+      continue;
+    }
+    const bracket = cellKey.split("|")[0] ?? "";
+    const ref = lookupBurstWindowPrior(bracket, leadCdId);
+    if (!ref) {
+      failures.push(
+        `line ${i + 1}: slow-defensive-response 引用了表里查不到的单元格 ${cellKey}`,
+      );
+      continue;
+    }
+    const expect: Record<string, string> = {
+      cellKey: ref.cellKey,
+      refN: String(ref.nResp + ref.nNoResp),
+      refDeathResp: String(ref.deathRespPct),
+      refDeathNoResp: String(ref.deathNoRespPct),
+      refTop: ref.topResponses.map(([k, v]) => `${k} ${v}%`).join("; "),
+      fellBack: ref.fellBack ? "yes" : "no",
+    };
+    for (const [k, v] of Object.entries(expect))
+      if (f[k] !== v)
+        failures.push(
+          `line ${i + 1}: slow-defensive-response ${k}=${f[k]} 与参照表 ${v} 不一致(${ref.cellKey})`,
+        );
+  }
+  return failures;
+}
+
 /** The roster line that assigns every player the numeric id each [STATE]
  * token is keyed on: `<unit id="3" name="Supatease-Tichondrius-US" …>`. */
 const UNIT_ROSTER_LINE = /<unit\s+id="(\d+)"\s+name="([^"]+)"/;
 /** One [STATE] HP token: `3(BDruid):97`, `2(SHunter):dead`,
  * `1(HPriest):ghost`. */
 const STATE_TOKEN = /(\d+)\([^)]*\):(\d+|dead|ghost)\b/g;
-/** The two candidate-menu types that cite a crisis unit's HP at a rendered
- * second, and which facts carry the unit name / the HP claim. */
+/** The candidate-menu types that cite a unit's HP at a rendered second, and
+ * which facts carry the unit name / the HP claim / the second the claim is
+ * about. `t` is that second by default; `slow-defensive-response` overrides it
+ * because its HP fact is a MIN over the window, not the value at the window
+ * start, so it renders (and is checked at) its own `pressuredHpT`. */
 const CRISIS_HP_FACT_KEYS = {
-  "cd-hoarded": { unit: "crisisUnit", hp: "crisisHpPct" },
-  "crisis-no-response": { unit: "unit", hp: "hpPct" },
+  "cd-hoarded": { unit: "crisisUnit", hp: "crisisHpPct", at: "t" },
+  "crisis-no-response": { unit: "unit", hp: "hpPct", at: "t" },
+  "slow-defensive-response": {
+    unit: "pressured",
+    hp: "pressuredHpPct",
+    at: "pressuredHpT",
+  },
 } as const;
 
 export interface CrisisHpStateProbe {
@@ -721,12 +793,12 @@ export function crisisHpStateProbes(lines: string[]): CrisisHpStateProbe[] {
       const m = line.match(/facts=\{(.*)\}\s*$/);
       if (!m) continue;
       const f = parseFactsBlock(m[1]!);
-      const t = Number(f.t);
+      const t = Number(f[keys.at]);
       const hp = Number(f[keys.hp]);
       const unitName = f[keys.unit];
       if (!Number.isFinite(t) || !Number.isFinite(hp) || !unitName) continue;
-      // The fact's `t` is rendered on the fmtFactNum scale (crisis-no-response
-      // keeps one decimal); [STATE] is rendered by fmtTime, i.e. floored.
+      // The fact is rendered on the fmtFactNum scale (crisis-no-response keeps
+      // one decimal); [STATE] is rendered by fmtTime, i.e. floored.
       const tSecond = Math.floor(t);
       const unitId = idByName.get(unitName) ?? null;
       const tick =
@@ -875,6 +947,11 @@ export const MENU_T_RENDER_GRID_SPECS: readonly MenuTRenderGridSpec[] = [
   { type: "death", factKey: "t", marker: "[DEATH]" },
   { type: "missed-cleanse", factKey: "t", marker: "[UNCLEANSED DEBUFF]" },
   { type: "death-setup", factKey: "deathT", marker: "[DEATH]" },
+  // 2026-09-01 (GH #60 phase 2): slow-defensive-response's `t` is the lead
+  // enemy cooldown's own cast second, which the timeline prints as an
+  // `[ENEMY CD]` line at that same second — a genuine 1:1 marker, unlike
+  // crisis-no-response's derived HP-threshold moment.
+  { type: "slow-defensive-response", factKey: "t", marker: "[ENEMY CD]" },
 ];
 
 export type MenuTRenderGridStatus = "ok" | "off-by-one" | "no-marker";
@@ -1212,6 +1289,7 @@ export function checkMatch(
   hardFailures.push(...checkDmgSpikeCcCoverConsistency(lines));
   hardFailures.push(...checkHealedThroughConsistency(lines));
   hardFailures.push(...checkBehaviorPriorConsistency(lines));
+  hardFailures.push(...checkBurstWindowRefConsistency(lines));
   hardFailures.push(...checkCrisisHpStateConsistency(lines));
   hardFailures.push(...checkOutcomeRefConsistency(lines));
   hardFailures.push(...checkMenuTRenderGrid(lines));

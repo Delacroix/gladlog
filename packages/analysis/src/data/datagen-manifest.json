@@ -94,7 +94,7 @@
       "producer": "packages/eval/scripts/behaviorPriorScan.ts emit-table"
     },
     "burstWindowPriorGenerated.json": {
-      "entries": 109,
+      "entries": 106,
       "producer": "packages/eval/scripts/burstWindowScan.ts emit-table"
     },
     "usableWhileCcGenerated.ts": {

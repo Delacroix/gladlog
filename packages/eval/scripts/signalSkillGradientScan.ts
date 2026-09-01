@@ -30,6 +30,8 @@ import {
   spellIdLists,
   specToString,
 } from "@gladlog/analysis";
+import { burstWindowDecisionPoints } from "@gladlog/analysis/src/analysis/burstWindowDecisionPoints";
+import { BURST_WINDOW_MIN_JUDGED_S } from "@gladlog/analysis/src/analysis/candidates/burstWindowResponse";
 import { crisisDecisionPoints } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
 import {
   cdAvailableAt,
@@ -126,6 +128,7 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
     enemyCyclones: 0,
     crisisDecisionPoints: 0,
     ccBurstOpportunities: 0,
+    burstWindowOpportunities: 0,
   };
   const friendIds = new Set(friends.map((u) => u.id));
   for (const u of Object.values(legacy.units ?? {}) as any[]) {
@@ -250,6 +253,21 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
     legacy,
     isHealerSpec(owner.spec) ? "healer" : "dps",
   ).filter((p) => p.feasible && p.dangerous).length;
+  // slow-defensive-response's opportunity gate, read off the candidate's own
+  // engine rather than re-derived (GH #60 phase 2): a window that was not
+  // feasible or not triaged was never a chance the team had.
+  try {
+    e.burstWindowOpportunities = burstWindowDecisionPoints(legacy, {
+      friendlyReaction: owner.reaction,
+    }).filter(
+      (p) =>
+        p.feasible &&
+        p.triaged &&
+        p.durationSec >= BURST_WINDOW_MIN_JUDGED_S,
+    ).length;
+  } catch {
+    /* engine not computable for this round → 0 opportunities */
+  }
   return e;
 }
 

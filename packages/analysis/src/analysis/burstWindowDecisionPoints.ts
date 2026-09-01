@@ -38,12 +38,14 @@ import {
   spells as spellMeta,
 } from "../data/spellTags";
 import {
+  canHelpAnotherUnit,
   cdAvailableAt,
   extractMajorCooldowns,
   gridHpPct,
   type IMajorCooldownInfo,
   isDeadAtRenderSecond,
   isProcOnlyActivation,
+  SELF_CAST_NOOP_EXTERNAL_IDS,
   specToString,
   TEAM_HEAL_CD_IDS,
 } from "../utils/cooldowns";
@@ -53,9 +55,9 @@ import {
   reconstructEnemyCDTimeline,
   SOLO_WINDOW_MIN_WEIGHT,
 } from "../utils/enemyCDs";
-import { spellDangerWeight } from "../utils/spellDanger";
+import { isOffensiveSpell, spellDangerWeight } from "../utils/spellDanger";
 import { buildFilteredAuraIntervals } from "../utils/utils";
-import { kitedAway } from "./crisisDecisionPoints";
+import { CRISIS_HP_PCT_RENDERED, kitedAway } from "./crisisDecisionPoints";
 
 /** How long after the window start any friendly may answer and still count
  * (GH #60's agreed shape: "response = within 8 s of window start, by ANY
@@ -99,6 +101,66 @@ export const BURST_LAPSE_SECONDS = 3;
  * "the response window" stop being distinguishable objects.
  */
 export const BURST_LAPSE_DMG_PCT_PER_S = 0.03;
+
+/**
+ * **The one offensive-id predicate this engine consumes** (GH #60 coarse spot
+ * 4, correction 3 of the 2026-09-01 approved set). The repo carries two
+ * disjoint "is this an offensive cooldown" tables and this engine now names
+ * the one it accepts instead of inheriting whatever the window builder used:
+ * every cast that reaches `boundBurstWindow` is re-asserted against it, the
+ * same structural coupling `SOLO_WINDOW_MIN_WEIGHT` gives the qualification
+ * bar. Today it agrees with `reconstructEnemyCDTimeline`'s own filter (so the
+ * assertion drops nothing); the point is that a future change to the builder
+ * cannot silently widen what this engine calls a burst.
+ *
+ * The audit behind the choice (2026-09-01, both directions of the
+ * Curated-List Completeness Rule, ground truth
+ * `eval-private/corpus/observedSpellIds-S2-archive-2026-08-21.json`):
+ *
+ * | table | entries | overlap | zero S2 occurrences |
+ * |---|---|---|---|
+ * | `isOffensiveSpell` (spellTags ← `SPELL_CATEGORIES`) | 41 | 19 | **0** |
+ * | `OFFENSIVE_SPELL_IDS` (`classMetadata` `SpellTag.Offensive`, cooldowns.ts) | 34 | 19 | **9** |
+ *
+ * `isOffensiveSpell` wins on both directions: none of its 41 entries is dead,
+ * while 9 of the classMetadata table's 34 are ids the whole 10,682-match S2
+ * archive never saw (Dark Soul: Misery 113860, Storm Earth and Fire 137639,
+ * Unholy Assault 207289, Avenging Wrath 231895, Coordinated Assault 266779,
+ * Apocalypse 275699, Convoke the Spirits 323764, Call of the Wild 359844,
+ * Dark Ascension 391109 — 323764 is the very id `SPELL_EFFECT_OVERRIDES`
+ * already replaced with 322109 in 2026-08-21). The FORWARD gap is recorded,
+ * not silently closed: 6 live ids sit in the classMetadata table and not here
+ * (Empower Rune Weapon 47568, Ascendance 114050 (Elemental — 114051
+ * Enhancement IS here), Invoke Xuen 123904, Metamorphosis 191427, Bladestorm
+ * 227847, Summon Demonic Tyrant 265187), so this engine cannot see a window
+ * those six open alone. Widening means widening
+ * `reconstructEnemyCDTimeline`, which every other burst-window consumer reads
+ * — out of scope here; the divergence is registered in
+ * `docs/predicate-index.md` "Not yet unified". Both source tables are already
+ * in `curatedIdRegistry` (`SPELL_CATEGORIES`, `classMetadata`), so the rot
+ * scans already cover them and no new registration is owed.
+ */
+export const isBurstWindowOffensiveCd = isOffensiveSpell;
+
+/**
+ * Ids that may never be a window's `leadCd` (they stay in `extraCds`).
+ *
+ * Hand-maintained, therefore registered in `data/curatedIdRegistry.ts`
+ * (Curated-List Completeness Rule) — one entry today:
+ *
+ * **Power Infusion (10060)**, killed as an opener by the user on 2026-09-01.
+ * Phase 1 measured it as 21% of ALL bounded windows (16,482 of 78,377) and
+ * the weakest contrast in the set (death-in-window 3.1% answered vs 5.8% not,
+ * Δ +2.7 pp against Deathmark's +15.3). It is a healer's throughput buff,
+ * usually handed to a partner, and "the enemy opened Power Infusion on you"
+ * is not a sentence about an opener at all. A window whose ONLY casts are
+ * excluded ids is dropped entirely; otherwise the lead becomes the earliest
+ * surviving cast and `tSec` follows it, so "at M:SS they opened X" stays
+ * literally true.
+ */
+export const BURST_LEAD_CD_EXCLUDED_IDS: ReadonlySet<string> = new Set([
+  "10060",
+]);
 
 export interface BurstWindowResponses {
   /** a friendly pressed a personal wall (`bigDefensiveSpellIds`) */
@@ -162,20 +224,65 @@ export interface BurstWindowDecisionPoint {
   extraCds: BurstCdRef[];
   /** unit ids of the enemies who cast this window's CDs */
   casterIds: string[];
+  /**
+   * The friendly the window is actually about: the LOWEST `gridHpPct` reached
+   * inside the outcome horizon, ties broken by damage taken. One window, one
+   * pressured friendly — the feasibility gate, the `kite` response and the
+   * severity triage all ask about this same unit, so they cannot disagree
+   * about who was under the burst (phase 1 measured `kite` on the
+   * most-damaged friendly and the feasibility gate on the whole team; the two
+   * could name different people). Null only when no friendly has any HP
+   * sample in reach, in which case the window is neither feasible nor
+   * triaged — there is nothing to say about it.
+   */
+  pressured: BurstFriendlyOutcome | null;
   responses: BurstWindowResponses;
   responded: boolean;
   /** latency of the FIRST response cast, seconds after `tSec`; null when the
    * only response was a kite (no cast instant) or there was none */
   firstResponseSec: number | null;
   responseCasts: BurstResponseCast[];
-  /** Value-Gate rule 3: at least one friendly had a relevant tool off
-   * cooldown at `tSec` and was not hard-CC'd for the whole response window. */
+  /**
+   * Value-Gate rule 3, tightened 2026-09-01 (approved correction 1). Phase 1
+   * asked "did ANYBODY on the team have ANY relevant tool" and passed 99.6%
+   * of 78,377 windows — a gate that removes 278 windows is not a gate. The
+   * question is now asked about the person under the burst:
+   *
+   *  (a) the **pressured friendly** had a tool that works on themselves
+   *      (`!SELF_CAST_NOOP_EXTERNAL_IDS` over the wall / external / major
+   *      heal union — cd-hoarded's own-crisis readiness predicate) off
+   *      cooldown at `tSec`, and was not hard-CC'd for the whole 8 s; OR
+   *  (b) a **teammate** had a tool that can reach somebody else
+   *      (`canHelpAnotherUnit`, GH #28's predicate) off cooldown at `tSec`,
+   *      and was not hard-CC'd for the whole 8 s.
+   *
+   * Control cooldowns no longer make a window feasible on their own (they
+   * still count as a *response*): "you could have stunned somebody" is not
+   * "you had an answer for the person being trained".
+   */
   feasible: boolean;
   /** names of the friendlies that satisfied the gate (empty ⇒ !feasible) */
   feasibleUnits: string[];
-  // ── OUTCOMES — reference table only. The product producer must NEVER read
-  // these four fields (same red line as crisisDecisionPoints' diedWithin10s).
-  /** any friendly `deathRecords` entry inside the outcome horizon */
+  /**
+   * Severity triage (approved correction 2): the pressured friendly's grid
+   * min HP inside the window reached `CRISIS_HP_PCT_RENDERED` — the same
+   * crisis line `crisisDecisionPoints` uses, imported — or a friendly died in
+   * the window. Phase 1 would have fired on 28.6% of feasible windows (0.6
+   * per round); the product must not hand a coach a menu of every burst that
+   * went unanswered, only the ones that went somewhere.
+   */
+  triaged: boolean;
+  // ── OUTCOMES — reference table only, EXCEPT `anyFriendlyDeath`.
+  /**
+   * Any friendly `deathRecords` entry inside the outcome horizon.
+   *
+   * 2026-09-01: this one field crossed the line into product facts, on the
+   * user's approved shape (`facts.diedInWindow`, and death-first cap
+   * ordering). It is deliberately the SAME predicate the reference table's
+   * own outcome uses, so the rendered "a friendly died inside the window"
+   * fact and the rendered "…died inside the window N% of the time" reference
+   * mean the same thing. The three fields below stay table-only.
+   */
   anyFriendlyDeath: boolean;
   deathsInWindow: number;
   /** the lowest `minHpPct` across friendlies */
@@ -184,9 +291,9 @@ export interface BurstWindowDecisionPoint {
 }
 
 /** The outcome fields the producer must not read. Exported so a test can pin
- * the list rather than trusting the comment above it. */
+ * the list rather than trusting the comment above it. `anyFriendlyDeath` left
+ * this list on 2026-09-01 — see its doc comment. */
 export const BURST_OUTCOME_FIELDS = [
-  "anyFriendlyDeath",
   "deathsInWindow",
   "minFriendlyHpPct",
   "friendlyOutcomes",
@@ -293,9 +400,14 @@ export function boundBurstWindow(
   const lapseSeconds = opts.lapseSeconds ?? BURST_LAPSE_SECONDS;
   const dmgFloor = opts.dmgFloor ?? BURST_LAPSE_DMG_PCT_PER_S;
   const cdBuffIsPressure = opts.cdBuffIsPressure ?? false;
-  const casts = [...window.activeCDs].sort(
-    (a, b) => a.castSeconds - b.castSeconds,
-  );
+  // Re-assert the engine's own offensive-id predicate on every inherited cast
+  // (`isBurstWindowOffensiveCd`, see its doc block): today a no-op against
+  // `reconstructEnemyCDTimeline`'s filter, kept as structural coupling so the
+  // builder cannot widen what this engine calls a burst without this line
+  // going with it.
+  const casts = [...window.activeCDs]
+    .filter((c) => isBurstWindowOffensiveCd(c.spellId))
+    .sort((a, b) => a.castSeconds - b.castSeconds);
   if (!casts.length) return [];
 
   const buffEnd = (c: IAlignedBurstWindow["activeCDs"][number]) =>
@@ -498,8 +610,14 @@ export function burstWindowDecisionPoints(
     }
   friendlyCasts.sort((a, b) => a.tMs - b.tMs);
 
-  // per-friendly ledgers, computed once per round (not per window)
-  const cdsByUnit = new Map<string, IMajorCooldownInfo[]>();
+  // per-friendly ledgers, computed once per round (not per window).
+  // Two ledgers, not one, because the tightened feasibility gate asks two
+  // different questions (see `feasible`): "could this unit save ITSELF" and
+  // "could this unit reach SOMEBODY ELSE". Both predicates are imported, not
+  // re-derived — `SELF_CAST_NOOP_EXTERNAL_IDS` is the #25-1 fix's list of
+  // externals that do nothing self-cast, `canHelpAnotherUnit` is GH #28's.
+  const selfCdsByUnit = new Map<string, IMajorCooldownInfo[]>();
+  const allyCdsByUnit = new Map<string, IMajorCooldownInfo[]>();
   const ccByUnit = new Map<string, { startMs: number; endMs: number }[]>();
   for (const u of friendlies) {
     let cds: IMajorCooldownInfo[] = [];
@@ -508,17 +626,21 @@ export function burstWindowDecisionPoints(
     } catch {
       cds = [];
     }
-    cdsByUnit.set(
+    const answers = cds.filter(
+      (cd) =>
+        !isProcOnlyActivation(cd.spellId) &&
+        !cd.isThroughput &&
+        (PERSONAL_WALL_IDS.has(cd.spellId) ||
+          EXTERNAL_IDS.has(cd.spellId) ||
+          BURST_HEAL_CD_IDS.has(cd.spellId)),
+    );
+    selfCdsByUnit.set(
       u.id,
-      cds.filter(
-        (cd) =>
-          !isProcOnlyActivation(cd.spellId) &&
-          (cd.tag === "Control" ||
-            (!cd.isThroughput &&
-              (PERSONAL_WALL_IDS.has(cd.spellId) ||
-                EXTERNAL_IDS.has(cd.spellId) ||
-                BURST_HEAL_CD_IDS.has(cd.spellId)))),
-      ),
+      answers.filter((cd) => !SELF_CAST_NOOP_EXTERNAL_IDS.has(cd.spellId)),
+    );
+    allyCdsByUnit.set(
+      u.id,
+      answers.filter((cd) => canHelpAnotherUnit(cd.spellId, cd.tag)),
     );
     ccByUnit.set(u.id, buildFilteredAuraIntervals(u, ccSpellIds, combat));
   }
@@ -526,7 +648,31 @@ export function burstWindowDecisionPoints(
   const out: BurstWindowDecisionPoint[] = [];
   {
     for (const seg of segments) {
-      const tSec = Math.floor(seg.fromSeconds);
+      const orderedAll = [...seg.casts].sort(
+        (a, b) => a.castSeconds - b.castSeconds,
+      );
+      // Lead selection first: `BURST_LEAD_CD_EXCLUDED_IDS` can move the window
+      // start, and everything below is anchored on it.
+      const leadPool = orderedAll.filter(
+        (c) => !BURST_LEAD_CD_EXCLUDED_IDS.has(c.spellId),
+      );
+      if (!leadPool.length) continue; // nothing here can open a window
+      let leadRaw = leadPool[0]!;
+      let leadW = weightOf(leadRaw, facts);
+      for (const c of leadPool) {
+        if (Math.floor(c.castSeconds) !== Math.floor(leadPool[0]!.castSeconds))
+          break;
+        const cw = weightOf(c, facts);
+        if (cw > leadW) {
+          leadW = cw;
+          leadRaw = c;
+        }
+      }
+      // `tSec` follows the lead cast, not the segment's first cast: with an
+      // excluded opener (Power Infusion) the two differ, and the rendered
+      // sentence "at M:SS the enemy opened X" must name what was pressed at
+      // M:SS. Without an excluded opener they are the same second.
+      const tSec = Math.floor(leadRaw.castSeconds);
       const tMs = start + tSec * 1000;
       const endSec = Math.max(tSec, Math.floor(seg.toSeconds));
       // Outcome horizon: the bounded window, but never shorter than the
@@ -536,9 +682,7 @@ export function burstWindowDecisionPoints(
       const outcomeEndSec = Math.max(endSec, tSec + BURST_RESPONSE_WINDOW_SEC);
       const outcomeEndMs = start + outcomeEndSec * 1000;
 
-      const ordered = [...seg.casts].sort(
-        (a, b) => a.castSeconds - b.castSeconds,
-      );
+      const ordered = orderedAll;
       const refOf = (
         c: IAlignedBurstWindow["activeCDs"][number],
       ): BurstCdRef => {
@@ -551,24 +695,14 @@ export function burstWindowDecisionPoints(
           castSec: Math.floor(c.castSeconds),
         };
       };
-      // lead = the FIRST cast of the window, heavier `spellDangerWeight`
-      // breaking a same-second tie. GH #60 wrote this "first/heaviest"; first
-      // is the half that keeps the rendered sentence true — the decision point
-      // is the window START, so "at M:SS they opened <leadCd>" must name what
-      // was actually pressed at M:SS. Taking the heaviest instead named a CD
-      // cast up to 16 s later in real windows (match 2195ab6e round 4: window
-      // opens on Recklessness at 0:09, heaviest is Trueshot at 0:25).
-      let leadRaw = ordered[0]!;
-      let leadW = weightOf(leadRaw, facts);
-      for (const c of ordered) {
-        if (Math.floor(c.castSeconds) !== Math.floor(leadRaw.castSeconds))
-          break;
-        const cw = weightOf(c, facts);
-        if (cw > leadW) {
-          leadW = cw;
-          leadRaw = c;
-        }
-      }
+      // lead = the FIRST eligible cast of the window (chosen above, before
+      // `tSec`), heavier `spellDangerWeight` breaking a same-second tie.
+      // GH #60 wrote this "first/heaviest"; first is the half that keeps the
+      // rendered sentence true — the decision point is the window START, so
+      // "at M:SS they opened <leadCd>" must name what was actually pressed at
+      // M:SS. Taking the heaviest instead named a CD cast up to 16 s later in
+      // real windows (match 2195ab6e round 4: window opens on Recklessness at
+      // 0:09, heaviest is Trueshot at 0:25).
       const leadCd = refOf(leadRaw);
       const extraCds = ordered.filter((c) => c !== leadRaw).map(refOf);
       const casterIds = [
@@ -610,11 +744,28 @@ export function burstWindowDecisionPoints(
             Math.round(((c.tMs - tMs) / 1000 + Number.EPSILON) * 10) / 10,
         });
       }
-      // kite is measured on the friendly the burst is actually hitting
-      let pressuredUnit: any = null;
-      let topDmg = -1;
-      for (const f of friendlies) {
-        const dmg = ((f.damageIn ?? []) as any[])
+      // ── outcomes per friendly, and the ONE pressured friendly ────────────
+      // Computed before the kite/feasibility/triage work below, because all
+      // three ask about the same unit (see `pressured`).
+      const friendlyOutcomes: BurstFriendlyOutcome[] = friendlies.map((f) => {
+        let minHpPct: number | null = null;
+        let minHpSec: number | null = null;
+        for (let s = tSec; s <= outcomeEndSec; s++) {
+          if (isDeadAtRenderSecond(f, start, s)) break;
+          const hp = gridHpPct(f, start + s * 1000);
+          if (hp === null) continue;
+          if (minHpPct === null || hp < minHpPct) {
+            minHpPct = hp;
+            minHpSec = s;
+          }
+        }
+        const died = ((f.deathRecords ?? []) as any[]).some(
+          (d) => d.timestamp >= tMs && d.timestamp <= outcomeEndMs,
+        );
+        return { unitId: f.id, name: f.name, minHpPct, minHpSec, died };
+      });
+      const damageTakenIn = (f: any): number =>
+        ((f.damageIn ?? []) as any[])
           .filter((d) => {
             const ts = d.timestamp ?? d.logLine?.timestamp;
             return ts != null && ts >= tMs && ts <= outcomeEndMs;
@@ -623,14 +774,25 @@ export function burstWindowDecisionPoints(
             (n, d) => n + Math.abs(d.effectiveAmount ?? d.amount ?? 0),
             0,
           );
-        if (dmg > topDmg) {
-          topDmg = dmg;
-          pressuredUnit = f;
-        }
-      }
+      const dmgByUnitId = new Map<string, number>(
+        friendlies.map((f) => [f.id, damageTakenIn(f)]),
+      );
+      // lowest grid-sampled HP wins; equal HP goes to whoever took more damage
+      const pressured =
+        [...friendlyOutcomes]
+          .filter((f) => f.minHpPct !== null)
+          .sort(
+            (a, b) =>
+              a.minHpPct! - b.minHpPct! ||
+              (dmgByUnitId.get(b.unitId) ?? 0) -
+                (dmgByUnitId.get(a.unitId) ?? 0),
+          )[0] ?? null;
+      const pressuredUnit = pressured
+        ? (friendlies.find((f) => f.id === pressured.unitId) ?? null)
+        : null;
       const kite =
-        topDmg > 0 &&
         pressuredUnit != null &&
+        (dmgByUnitId.get(pressuredUnit.id) ?? 0) > 0 &&
         kitedAway(
           pressuredUnit,
           casterIds.map((id) => units.find((u) => u.id === id)),
@@ -654,36 +816,35 @@ export function burstWindowDecisionPoints(
         ? Math.min(...responseCasts.map((r) => r.latencySec))
         : null;
 
-      // ── feasibility (Value-Gate rule 3) ─────────────────────────────────
+      // ── feasibility (Value-Gate rule 3, per the pressured friendly) ──────
+      const freeToAct = (u: any): boolean =>
+        !coveredThroughout(ccByUnit.get(u.id) ?? [], tMs, w1);
       const feasibleUnits: string[] = [];
+      if (pressuredUnit && freeToAct(pressuredUnit)) {
+        // (a) the person under the burst could have saved themselves
+        if (
+          (selfCdsByUnit.get(pressuredUnit.id) ?? []).some((cd) =>
+            cdAvailableAt(cd, tSec),
+          )
+        )
+          feasibleUnits.push(pressuredUnit.name);
+      }
       for (const u of friendlies) {
-        const ready = (cdsByUnit.get(u.id) ?? []).some((cd) =>
-          cdAvailableAt(cd, tSec),
-        );
-        if (!ready) continue;
-        const cc = ccByUnit.get(u.id) ?? [];
-        if (coveredThroughout(cc, tMs, w1)) continue; // hard-CC'd the whole time
+        // (b) a teammate could have reached them
+        if (pressuredUnit && u.id === pressuredUnit.id) continue;
+        if (!freeToAct(u)) continue;
+        if (
+          !(allyCdsByUnit.get(u.id) ?? []).some((cd) => cdAvailableAt(cd, tSec))
+        )
+          continue;
         feasibleUnits.push(u.name);
       }
+      // Reachability (docs/…root-reachability) is NOT applied to (b): telling
+      // an external apart by its cast range needs official per-spell range
+      // facts the cooldown ledger does not carry, and every window would then
+      // pay a position/LoS sweep in a scan that already runs ~55 minutes.
+      // Recorded as future work rather than approximated.
 
-      // ── outcomes (TABLE ONLY) ───────────────────────────────────────────
-      const friendlyOutcomes: BurstFriendlyOutcome[] = friendlies.map((f) => {
-        let minHpPct: number | null = null;
-        let minHpSec: number | null = null;
-        for (let s = tSec; s <= outcomeEndSec; s++) {
-          if (isDeadAtRenderSecond(f, start, s)) break;
-          const hp = gridHpPct(f, start + s * 1000);
-          if (hp === null) continue;
-          if (minHpPct === null || hp < minHpPct) {
-            minHpPct = hp;
-            minHpSec = s;
-          }
-        }
-        const died = ((f.deathRecords ?? []) as any[]).some(
-          (d) => d.timestamp >= tMs && d.timestamp <= outcomeEndMs,
-        );
-        return { unitId: f.id, name: f.name, minHpPct, minHpSec, died };
-      });
       const deathsInWindow = friendlyOutcomes.filter((f) => f.died).length;
       const mins = friendlyOutcomes
         .map((f) => f.minHpPct)
@@ -697,12 +858,18 @@ export function burstWindowDecisionPoints(
         leadCd,
         extraCds,
         casterIds,
+        pressured,
         responses,
         responded,
         firstResponseSec,
         responseCasts,
         feasible: feasibleUnits.length > 0,
         feasibleUnits,
+        triaged:
+          pressured !== null &&
+          ((pressured.minHpPct !== null &&
+            pressured.minHpPct <= CRISIS_HP_PCT_RENDERED) ||
+            deathsInWindow > 0),
         anyFriendlyDeath: deathsInWindow > 0,
         deathsInWindow,
         minFriendlyHpPct: mins.length ? Math.min(...mins) : null,

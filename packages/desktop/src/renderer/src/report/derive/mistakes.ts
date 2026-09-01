@@ -155,11 +155,12 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     source: "candidate",
   },
   {
-    // DEFENSIVE-003 (2026-08-11): the enemy opened a pressured offensive-CD
-    // burst window and the healer owner's first defensive reaction came >8s
-    // in or never, with a tool off cooldown and no CC excuse. Real team
-    // damage is attached (unlike cc-held's pure uptime fact), hence
-    // "average" rather than "minor" — same tier as healing-gap.
+    // DEFENSIVE-003 (rewritten 2026-09-01, GH #60 phase 2): the enemy opened
+    // a bounded burst window, nobody answered inside 8 s although the
+    // pressured friendly (or a teammate who could reach them) had a tool
+    // ready, and that friendly dropped to the crisis HP line or died. A real
+    // consequence context is attached (unlike cc-held's pure uptime fact),
+    // hence "average" rather than "minor" — same tier as healing-gap.
     type: "slow-defensive-response",
     label: "敌方开大应对迟缓",
     severity: "average",
@@ -347,11 +348,11 @@ export function candidateDetail(c: CandidateEvent): string {
     case "questionable-external":
       return `${f.spell ?? ""} 给 ${f.target ?? ""}(${f.targetHp ?? "?"}% HP,距最近爆发窗 ${f.nearestBurstGapS ?? "?"}s)`;
     case "slow-defensive-response":
-      return `${f.enemyCds ?? ""} 开启后${
-        f.reacted === "none"
-          ? "窗口内无防御反应"
-          : `${f.delayS ?? "?"}s 才有防御反应(${f.reactSpell ?? ""})`
-      },窗口承伤 ${f.damageK ?? "?"}k`;
+      // 2026-09-01 决策点重写(GH #60 phase 2):facts 从
+      // enemyCds/reacted/delayS/damageK/dmgRatio 换成了
+      // leadCd/extras/pressured/pressuredHpPct/diedInWindow —— 判据从「owner
+      // 反应慢」变成「整队 8 秒内没人应对承压的那个人」。
+      return `${f.leadCd ?? ""}${f.extras ? `(+${f.extras})` : ""} 开启后 8 秒内全队无应对,${f.pressured ?? ""} 被打到 ${f.pressuredHpPct ?? "?"}%${f.diedInWindow === "yes" ? "、窗口内阵亡" : ""}`;
     case "missed-sync-window":
       return `${f.healer ?? ""} 被 ${f.cc ?? ""} 控 ${f.durationS ?? "?"}s,${f.readyCds ?? ""} 均 ready 未按`;
     case "unsynced-burst":
@@ -500,9 +501,10 @@ export function deriveMistakes(
  * `cc-locked + missed-sync-window`(45)、`cc-locked + missed-purge/cleanse`
  * (36/35),都是「你被控住的同一波」里的不同侧面,本来就该并成一件事讲。
  *
- * 刻意**不复用** `SLOW_DEF_RESPONSE_DEDUP_SLACK_S`(同样是 10):那是候选层
- * 的去重松弛,是另一个事实。审计记过 `POSITION_MAX_GAP_MS` 被当成 HP 半径
- * 用的教训 —— 数值相同不等于概念相同,不共享。
+ * 历史注记:这里曾刻意**不复用** `SLOW_DEF_RESPONSE_DEDUP_SLACK_S`(同样是
+ * 10)—— 那是候选层的去重松弛,是另一个事实。该常量已随 slow-defensive-response
+ * 的决策点重写下线(2026-09-01,GH #60 phase 2),但结论照旧:数值相同不等于
+ * 概念相同,不共享(审计记过 `POSITION_MAX_GAP_MS` 被当成 HP 半径用的教训)。
  */
 export const MISTAKE_MOMENT_GAP_S = 10;
 

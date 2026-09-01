@@ -29,6 +29,7 @@ import * as bracketKey from "@gladlog/analysis/src/utils/bracketKey";
 import * as cooldownTiming from "@gladlog/analysis/src/analysis/candidates/cooldownTiming";
 import * as candidatesShared from "@gladlog/analysis/src/analysis/candidates/shared";
 import * as burstWindowDecisionPoints from "@gladlog/analysis/src/analysis/burstWindowDecisionPoints";
+import * as burstWindowResponse from "@gladlog/analysis/src/analysis/candidates/burstWindowResponse";
 import * as crisisDecisionPoints from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
 import * as findingCategories from "@gladlog/analysis/src/analysis/findingCategories";
@@ -670,6 +671,26 @@ const INDEX: PredicateRow[] = [
     symbol: "SOLO_WINDOW_MIN_WEIGHT",
     mod: enemyCDs,
   },
+  {
+    file: `${A}/analysis/candidates/burstWindowResponse.ts`,
+    symbol: "burstWindowResponseEvents",
+    mod: burstWindowResponse,
+  },
+  {
+    file: `${A}/analysis/burstWindowDecisionPoints.ts`,
+    symbol: "isBurstWindowOffensiveCd",
+    mod: burstWindowDecisionPoints,
+  },
+  {
+    file: `${A}/analysis/burstWindowDecisionPoints.ts`,
+    symbol: "BURST_LEAD_CD_EXCLUDED_IDS",
+    mod: burstWindowDecisionPoints,
+  },
+  {
+    file: `${A}/analysis/crisisDecisionPoints.ts`,
+    symbol: "CRISIS_HP_PCT_RENDERED",
+    mod: crisisDecisionPoints,
+  },
   // Formatting and notation
   {
     file: `${A}/compare/claimChecker.ts`,
@@ -721,6 +742,11 @@ const INDEX: PredicateRow[] = [
   {
     file: `${E}/quality/promptQualityCheck.ts`,
     symbol: "checkCrisisHpStateConsistency",
+    mod: promptQualityCheck,
+  },
+  {
+    file: `${E}/quality/promptQualityCheck.ts`,
+    symbol: "checkBurstWindowRefConsistency",
     mod: promptQualityCheck,
   },
   {
