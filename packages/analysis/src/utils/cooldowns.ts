@@ -2374,7 +2374,7 @@ const TANK_SPECS = new Set([
 // Shuffle, per-spec floors 2700/2400 — see benchmark_data.json meta). Positioning rule (same as the
 // 2026-04-08 calibration): healer threshold ≈ 0.86 × the LOWEST-pressure healer spec's 7s-scaled P90
 // (10s-window P90 × 0.7), so the most chip-resistant spec's genuinely pressured presses are never
-// flagged panic. Benchmark source: packages/tools/benchmarks/benchmark_data.json
+// flagged panic. Benchmark source: packages/analysis/benchmarks/benchmark_data.json
 //
 //   Healer: lowest 7s-P90 is Discipline 84k (10s P90 120k, n=204@2700) → 0.86 × 84k ≈ 70k.
 //           Damage inflation vs April roughly doubled healer pressure (HPriest P90 58k→129k/10s).

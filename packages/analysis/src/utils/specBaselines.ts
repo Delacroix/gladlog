@@ -2,7 +2,7 @@ import benchmarksJson from '../data/benchmarks.json';
 import { IMajorCooldownInfo } from './cooldowns';
 import { fmtTime } from './renderGrid';
 
-// benchmarks.json is a copy of packages/tools/benchmarks/benchmark_data.json.
+// benchmarks.json is a copy of packages/analysis/benchmarks/benchmark_data.json (collectBenchmarks.ts default --out).
 // Re-run collectBenchmarks and copy the output here to keep them in sync.
 
 interface ISpecCDBaseline {

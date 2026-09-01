@@ -84,6 +84,19 @@ npx tsx packages/eval/scripts/burstWindowScan.ts report --in $R/windows.jsonl > 
 npx tsx packages/eval/scripts/burstWindowScan.ts emit-table --in $R/windows.jsonl \
   --out packages/analysis/src/data/burstWindowPriorGenerated.json \
   --corpus "wowarenalogs archive $(date +%F)"
+# 6b-pre-4. Corpus-attested dispellable id set (dispelObservedGenerated.ts; gates the dispellability claim
+#   behind missed-cleanse / missed-purge — "someone actually dispelled it in a real match", GH #32 kind
+#   predicate). Corpus-driven, NOT DB2; additive across seasons ("hasn't happened ≠ can't happen"), so
+#   feed it the union of the local 12.0 library manifest and the current-season archive manifest.
+#   Single process, no shards: ~0.75 s per archive file (18k files ≈ 4 h, run it nice'd in the background);
+#   the 70 local 12.0 logs at the top of the union (single files up to 375 MB) spike RSS to ~6 GB —
+#   a transient peak, not a leak. Same `>` caveat as 6b-pre: write to a scratch file first, then copy in.
+#   Afterwards re-run the batch's step 7 (writeManifest) — it counts this table's ids. (BACKLOG #24-5, 2026-09-01)
+cat $GLADLOG_EVAL_HOME/corpus/manifest-fullscale.txt \
+    $GLADLOG_EVAL_HOME/corpus/manifest-archive-<date>.txt > /tmp/manifest-dispel-union.txt
+nice -n 10 npx tsx packages/eval/scripts/confidenceAudit.ts --manifest /tmp/manifest-dispel-union.txt \
+  --emit-table --date $(date +%F) > /tmp/dispelObservedGenerated.ts \
+  && cp /tmp/dispelObservedGenerated.ts packages/analysis/src/data/dispelObservedGenerated.ts
 # 6b. Spell icon names (desktop swimlane/replay icons; SpellMisc -> ManifestInterfaceData;
 #     universe = observed ∪ SpellCooldowns ∪ candidates; do not revert to full table — 13.8MB busts initial render budget)
 npx tsx packages/analysis/scripts/datagen/genSpellIcons.ts

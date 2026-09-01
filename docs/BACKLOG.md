@@ -815,16 +815,49 @@ Classified by suspected root cause; work begins after completing the currently r
 4. **benchmarks.json rebuild**: current baseline from 2026-07-20 based on 12.0 corpus (2100+),
    healing/damage numbers significantly retuned and now stale; rerun after S2 corpus reaches volume, note
    [[metric-scale-vs-agreement]] — compare scale-independent counts before drawing conclusions.
-   > **2026-09-01 in progress (GH #44)**: `collectBenchmarks.ts` taught to read the `.txt.gz` archive; full rebuild
-   > running over `manifest-archive-2026-08-28-newseason.txt` (18,134 12.1 files, minRating 2100 as before).
-   > Old baseline for the comparison: generatedAt 2026-07-20, 34 specs / 2 insufficient / Σn=4215.
+   ~~Rerun after S2 corpus reaches volume~~ **Rebuilt 2026-09-01 (GH #44)**: `collectBenchmarks.ts` taught to read the
+   `.txt.gz` archive, then run over `manifest-archive-2026-08-28-newseason.txt` — 18,134 12.1 files, 0 parse failures,
+   minRating 2100 / minN 30 / perStratumCap 40 exactly as the 2026-07-20 run (single nice'd process, ≈1.3 s/file pass 1
+   + 1,288 selected logs re-parsed in pass 2, ~2.6 h). Old → new, scale-independent counts first: pool 18,864 samples
+   ≥2100 (old corpus was 12.0 local + public-dps), stratified selection Σn 4,215 → 7,041; bySpec 34 → 34 specs but a
+   different set — **gained** Arcane Mage / Fire Mage / Havoc DH / Balance Druid / Demonology Warlock / Outlaw Rogue /
+   Protection Paladin (absent from the 12.0 corpus), **lost** Augmentation Evoker (6 samples ≥2100 in the whole 12.1
+   archive, below minN; old table had it at n=16 — Aug owners no longer get a SPEC BASELINES block, recorded, not
+   worked around). Shape identical (same 9 bySpec keys; every spec has defensiveTiming / cdUsage / pressureWindows; *Pct
+   fields sum to 100; pressureWindows p50 ≤ p75 ≤ p90 ≤ p95 for all 34 — the percentile-monotonicity gate cannot go
+   red on this data). Scale-free rates moved by season-retune amounts, not pathologically: e.g. Pain Suppression used
+   96% → 93% of matches (median first use 27 s → 34 s), Aura Mastery 76% → 86%, Resto Druid Barkskin 47% → 52%; the one
+   0% → 78% (Preservation Renewing Blaze) is the 2026-08-23 aura-only-activation ruling now being applied by the
+   collector, not a data artifact. Acceptance on the 12-file S2 sample (32 rounds / 92 owner views): findings-prompt
+   SHA256 identical (benchmarks feed no candidate), match context changes only in the SPEC BASELINES / INCOMING DAMAGE
+   BASELINES blocks (n= headers e.g. Resto Druid n=75 → 197, Fury Warrior n=9 → 69; one new block — Balance Druid).
+   `packages/analysis/benchmarks/benchmark_data.json` (the collector's default output, which `specBaselines.ts` names as the source — its
+   comment and `cooldowns.ts`'s pointed at a non-existent `packages/tools/…` path, both corrected) refreshed in step.
 5. **dispelObservedGenerated backfill**: `confidenceAudit --emit-table`,
    observational table "hasn't happened ≠ can't happen", feed new corpus entries back one by one.
-   > **2026-09-01 in progress (GH #44)**: `confidenceAudit.ts` taught to read `.txt.gz` and to skip the candidate
-   > extraction under `--emit-table` (the table only needs the observation side); regeneration running over the
-   > union manifest = `manifest-fullscale.txt` (12.0, 70 files / 1245 matches) ∪ `manifest-archive-2026-08-28-newseason.txt`
-   > (12.1, 18,134 files). Additive by design: an id observed dispelled in either corpus stays in.
-   > Old table: 305 ids / 1245 matches (2026-08-27).
+   ~~Feed new corpus entries back~~ **Regenerated 2026-09-01 (GH #44)**: `confidenceAudit.ts` taught to read `.txt.gz` and to skip
+   the candidate extraction under `--emit-table` (the table only needs the observation side), then run once, single
+   nice'd process, over the union manifest `manifest-fullscale.txt` (12.0, 70 files / 1245 matches) ∪
+   `manifest-archive-2026-08-28-newseason.txt` (12.1, 18,134 files) — 18,204 files, ≈0.75 s/file, 2 h 56 min (the 70
+   local 12.0 logs, single files up to 375 MB, spike RSS to ~6 GB; a transient peak). Kind tally under the GH #32
+   predicate: deliberate 786,976 / proc 111,995 / rider 231,060 excluded, 8 rider-only ids. Table 305 → **421 ids
+   (+116, −0)** — additive by construction, every old id kept. Top new attestations: Stellar Flare 202347 ×2,426, the
+   12.1 Frostbolt ids 1292107 ×785 / 317792 ×360, Denounce 2812 ×564, Hamstring 1715 ×549, Storm of Destruction 424597
+   ×524, Chrono Shift 236299 ×356, Time Warp 342242 ×278, two Polymorph variants (161354 / 460392); 23 of the 116 have
+   ≥100 observations, 47 have <10. Manifest + runbook step 6b-pre-4 added so the next season does not need this
+   archaeology again. Acceptance (same criterion, same code): `acceptanceHash 300` on the local library — 1,127 rounds,
+   aggregate prompt SHA256 identical, zero per-type deltas (the library is 12.0-era, the new ids are largely 12.1);
+   12 S2 files / 32 rounds / 92 owner views — identical; 605-file S2 sample (every 30th archive file) — identical too (1,270 rounds / 3,520 owner views, healer + every DPS
+   owner: findings-prompt and match-context SHA256 unchanged, all 26 per-type counts unchanged, missed-cleanse 231 dps /
+   276 healer both sides). **Why zero, and it is not a measurement problem**: `CORPUS_OBSERVED_DISPEL_IDS` filters
+   `ds.missedCleanseWindows` *after* `dispelAnalysis.getPriority` has already decided which debuffs are worth a
+   candidate, and that priority is the hand registry (`spellCategories` + the mitigation allow-list — see the
+   2026-08-13 entry under the Curated-List rule): **0 of the 116 newly attested ids are in `spellCategories`**, so every
+   one of them is `Low` and never reaches the observed-set gate at all. The regeneration removes the observed-set
+   gate as a reason those ids are invisible; the priority registry remains the binding one. Which of the 23 ids with
+   ≥100 observations (Stellar Flare, the 12.1 Frostbolts, Denounce, Hamstring, Storm of Destruction, Chrono Shift,
+   Time Warp, Creeping Venom, …) deserve a tier is a **user ruling** (tier criteria: [[gladlog-dispel-priority-registry]]),
+   not something to fill in from counts — parked in GH #44's comment..
 6. **eval baseline / candidate incidence rates full recalibration**: 63.6/14.1/15.6 and other old numbers considered
    expired after 12.1; rerun `/eval-baseline`, rate-limiting type (#22 temporary gate) thresholds reviewed alongside incidence rates.
    > **2026-09-01 status (GH #44)**: the deterministic half already exists — the 2026-08-22 skill-gradient study

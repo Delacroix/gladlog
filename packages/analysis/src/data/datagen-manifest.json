@@ -1,6 +1,6 @@
 {
   "build": "12.1.0.69404",
-  "generatedAt": "2026-09-01T19:51:02.112Z",
+  "generatedAt": "2026-09-01T22:20:01.661Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
@@ -82,7 +82,7 @@
       "entries": 40
     },
     "dispelObservedGenerated.ts": {
-      "entries": 305,
+      "entries": 421,
       "producer": "packages/eval/scripts/confidenceAudit.ts --emit-table"
     },
     "observedSpellIdsGenerated.json": {
