@@ -14,8 +14,17 @@
 import { ICombatUnit } from "@gladlog/parser-compat";
 
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
-import { cdAvailableAt, FORBEARANCE_GATED_IDS, IMajorCooldownInfo, IOverlappedDefensive, IPanicDefensive, isAllyCastableDefensive, selfForbearanceActiveAt, specToString } from "../utils/cooldowns";
-import { fmtTime, toRenderSecond } from "../utils/renderGrid";
+import {
+  CD_INSTANT_SLACK_S,
+  cdAvailableAt,
+  FORBEARANCE_GATED_IDS,
+  IMajorCooldownInfo,
+  IOverlappedDefensive,
+  IPanicDefensive,
+  isAllyCastableDefensive,
+  selfForbearanceActiveAt,
+  specToString,
+} from "../utils/cooldowns";
 import { COUNTERFACTUAL_WINDOW_S } from "../utils/counterfactual";
 import { IEnemyCDTimeline } from "../utils/enemyCDs";
 import { IHealingGap } from "../utils/healingGaps";
@@ -23,6 +32,7 @@ import {
   getHpPercentAtTime,
   getLowestHpPercentInWindow,
 } from "../utils/killWindowTargetSelection";
+import { fmtTime, toRenderSecond } from "../utils/renderGrid";
 import { countActiveAtonements } from "./resourceSnapshot";
 import { getTopDamageSourcesInWindow, lastCastBefore } from "./timelineHelpers";
 
@@ -124,13 +134,17 @@ export function getOwnerCDsAvailable(
       );
       continue;
     }
-    const castsBeforeNow = cd.casts.filter((c) => c.timeSeconds <= timeSeconds);
+    // Rendered-second slack (CD_INSTANT_SLACK_S, GH #61): same instant the
+    // [RES] ledger answers for.
+    const castsBeforeNow = cd.casts.filter(
+      (c) => c.timeSeconds <= timeSeconds + CD_INSTANT_SLACK_S,
+    );
     if (castsBeforeNow.length === 0) {
       available.push(`${cd.spellName} (not yet used)`);
     } else {
       const lastCast = castsBeforeNow[castsBeforeNow.length - 1];
       const readyAt = lastCast.timeSeconds + cd.cooldownSeconds;
-      if (readyAt <= timeSeconds) {
+      if (readyAt <= timeSeconds + CD_INSTANT_SLACK_S) {
         available.push(`${cd.spellName} (ready since ${fmtTime(readyAt)})`);
       } else {
         onCD.push(`${cd.spellName} (on CD until ~${fmtTime(readyAt)})`);
@@ -230,8 +244,11 @@ export function buildDeathRootCauseTrace(
       );
       continue;
     }
+    // Rendered-second slack (CD_INSTANT_SLACK_S, GH #61): a press within 0.5 s
+    // after the death is "pressed", exactly as the [RES] ledger under the
+    // [DEATH] line renders it.
     const castsBeforeDeath = cd.casts.filter(
-      (c) => c.timeSeconds <= deathTimeSeconds,
+      (c) => c.timeSeconds <= deathTimeSeconds + CD_INSTANT_SLACK_S,
     );
     if (castsBeforeDeath.length === 0) {
       // Never used before this death — was available (unless Forbearance-locked)
@@ -244,7 +261,7 @@ export function buildDeathRootCauseTrace(
     }
     const lastCast = castsBeforeDeath[castsBeforeDeath.length - 1];
     const readyAt = lastCast.timeSeconds + cd.cooldownSeconds;
-    if (readyAt > deathTimeSeconds) {
+    if (readyAt > deathTimeSeconds + CD_INSTANT_SLACK_S) {
       // On cooldown at death — trace why
       const timeAgo = Math.round(deathTimeSeconds - lastCast.timeSeconds);
       const timing =

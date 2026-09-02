@@ -1,0 +1,131 @@
+{
+  "generatedAt": "2026-09-02T17:12:10.414Z",
+  "generator": "packages/eval/scripts/kickLockoutScan.ts",
+  "manifest": "corpus/manifest-archive-2026-08-28-newseason.txt",
+  "every": 30,
+  "files": 605,
+  "interrupts": 6134,
+  "paired": 5322,
+  "rule": "first same-school cast after SPELL_INTERRUPT; 0.5s-bin mode (lower edge) over gaps >= 1.5s; n >= 20",
+  "entries": {
+    "1766": {
+      "name": "Kick",
+      "lockoutSeconds": 3,
+      "n": 473,
+      "p25": 3.01,
+      "p50": 3.5
+    },
+    "2139": {
+      "name": "Counterspell",
+      "lockoutSeconds": 6,
+      "n": 619,
+      "p25": 5.04,
+      "p50": 6.1
+    },
+    "6552": {
+      "name": "Pummel",
+      "lockoutSeconds": 3,
+      "n": 543,
+      "p25": 3,
+      "p50": 3.38
+    },
+    "19647": {
+      "name": "Spell Lock",
+      "lockoutSeconds": 5,
+      "n": 446,
+      "p25": 4.66,
+      "p50": 5.08
+    },
+    "47528": {
+      "name": "Mind Freeze",
+      "lockoutSeconds": 3,
+      "n": 504,
+      "p25": 3,
+      "p50": 3.31
+    },
+    "57994": {
+      "name": "Wind Shear",
+      "lockoutSeconds": 2,
+      "n": 684,
+      "p25": 2.01,
+      "p50": 2.38
+    },
+    "91807": {
+      "name": "Shambling Rush",
+      "lockoutSeconds": 2,
+      "n": 34,
+      "p25": 2,
+      "p50": 2.38
+    },
+    "93985": {
+      "name": "Skull Bash",
+      "lockoutSeconds": 3,
+      "n": 164,
+      "p25": 3.03,
+      "p50": 3.65
+    },
+    "96231": {
+      "name": "Rebuke",
+      "lockoutSeconds": 3,
+      "n": 385,
+      "p25": 3,
+      "p50": 3.3
+    },
+    "97547": {
+      "name": "Solar Beam",
+      "lockoutSeconds": 5,
+      "n": 43,
+      "p25": 5,
+      "p50": 5.88
+    },
+    "116705": {
+      "name": "Spear Hand Strike",
+      "lockoutSeconds": 3,
+      "n": 141,
+      "p25": 3.01,
+      "p50": 3.42
+    },
+    "132409": {
+      "name": "Spell Lock",
+      "lockoutSeconds": 5,
+      "n": 20,
+      "p25": 5,
+      "p50": 5.13
+    },
+    "147362": {
+      "name": "Counter Shot",
+      "lockoutSeconds": 3,
+      "n": 706,
+      "p25": 3,
+      "p50": 3.53
+    },
+    "183752": {
+      "name": "Disrupt",
+      "lockoutSeconds": 3,
+      "n": 357,
+      "p25": 3,
+      "p50": 3.43
+    },
+    "187707": {
+      "name": "Muzzle",
+      "lockoutSeconds": 3,
+      "n": 71,
+      "p25": 2.98,
+      "p50": 3.17
+    },
+    "347008": {
+      "name": "Axe Toss",
+      "lockoutSeconds": 3.5,
+      "n": 40,
+      "p25": 3.67,
+      "p50": 4.07
+    },
+    "351338": {
+      "name": "Quell",
+      "lockoutSeconds": 4,
+      "n": 92,
+      "p25": 3.55,
+      "p50": 4.1
+    }
+  }
+}

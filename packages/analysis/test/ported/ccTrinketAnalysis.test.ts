@@ -211,7 +211,8 @@ describe("analyzePlayerCCAndTrinket — root/disarm/interrupt tracking", () => {
   });
 
   it("tracks a kick from an enemy (SPELL_INTERRUPT)", () => {
-    // Kick (Rogue) = extraSpellId '1766', lockout 5s; interrupted = Frost Bolt
+    // Kick (Rogue) = extraSpellId '1766', lockout 3s (corpus-observed in 12.1, GH #62 —
+    // the old comment said 5s while the code answered the 3s fallback); interrupted = Frost Bolt
     const kick = makeInterruptEvent(
       "1766",
       "Kick",

@@ -264,12 +264,21 @@ export async function main(): Promise<void> {
       // silently dropped the entry and datagenManifest.test went red
       // (caught 2026-09-01 while refreshing mitigationGenerated for GH #44).
       "spellReachGenerated.json": {
-        spells: Object.keys(readJson("spellReachGenerated.json").spells)
-          .length,
+        spells: Object.keys(readJson("spellReachGenerated.json").spells).length,
         bytes: statSync(dataDir + "spellReachGenerated.json").size,
         generator: "scripts/datagen/genSpellReach.ts",
-        consumer:
-          "utils/deathOutcomeAnalysis.ts externalReachYards (GH #34 ②)",
+        consumer: "utils/deathOutcomeAnalysis.ts externalReachYards (GH #34 ②)",
+      },
+      // Corpus-observed kick lockouts (GH #62, 2026-09-02): not a DB2 artifact —
+      // regenerated per season from the archive by the eval script; listed here
+      // so the manifest test notices a stale or missing table.
+      "kickLockoutObservedGenerated.json": {
+        kicks: Object.keys(
+          readJson("kickLockoutObservedGenerated.json").entries,
+        ).length,
+        bytes: statSync(dataDir + "kickLockoutObservedGenerated.json").size,
+        generator: "packages/eval/scripts/kickLockoutScan.ts",
+        consumer: "data/spellCategories.ts kickLockoutSeconds (GH #62)",
       },
     },
   };

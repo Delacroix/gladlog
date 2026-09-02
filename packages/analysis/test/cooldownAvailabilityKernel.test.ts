@@ -17,14 +17,13 @@
  *    to a locally hand-written formula, this fails the moment it diverges from
  *    the shared kernel's semantics.
  */
-import { describe, expect, it } from "vitest";
-
 import {
   AtomicArenaCombat,
   CombatUnitClass,
   CombatUnitSpec,
   LogEvent,
 } from "@gladlog/parser-compat";
+import { describe, expect, it } from "vitest";
 
 import {
   cdAvailableAt,
@@ -103,7 +102,43 @@ describe("cdAvailableAt 与 isAvailableAt 在重叠语义上必须同判(断言�
       casts: [0, 450],
       atSeconds: 400,
     },
+    // GH #61 (2026-09-02): both sides read casts through CD_INSTANT_SLACK_S —
+    // a press 0.3 s after the instant is "pressed" (same rendered second, as
+    // the [RES] ledger shows it), 0.6 s after is not.
+    {
+      name: "施放落在查询时刻后 0.3s(同一渲染秒)",
+      casts: [40.3],
+      atSeconds: 40,
+    },
+    {
+      name: "施放落在查询时刻后 0.6s(下一渲染秒)",
+      casts: [40.6],
+      atSeconds: 40,
+    },
   ];
+
+  it("GH #61:查询后 0.3s 内的施放算已按下(不可用),0.6s 后的不算(可用)—— 与 [RES] 台账同容差", () => {
+    expect(cdAvailableAt(cdWith([40.3]), 40)).toBe(false);
+    expect(
+      isAvailableAt(
+        unitWith([40.3]),
+        SPELL_ID,
+        COOLDOWN_SECONDS,
+        40,
+        MATCH_START,
+      ),
+    ).toBe(false);
+    expect(cdAvailableAt(cdWith([40.6]), 40)).toBe(true);
+    expect(
+      isAvailableAt(
+        unitWith([40.6]),
+        SPELL_ID,
+        COOLDOWN_SECONDS,
+        40,
+        MATCH_START,
+      ),
+    ).toBe(true);
+  });
 
   for (const { name, casts, atSeconds } of scenarios) {
     it(`${name}(casts=${JSON.stringify(casts)}, t=${atSeconds}s)`, () => {

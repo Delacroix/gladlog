@@ -17,8 +17,8 @@
 import {
   CombatUnitReaction,
   CombatUnitSpec,
-  LogEvent,
   type ICombatUnit,
+  LogEvent,
 } from "@gladlog/parser-compat";
 
 import {
@@ -29,8 +29,8 @@ import { kickLockoutSeconds } from "../src/data/spellCategories";
 import {
   formatMissedCleanseExemption,
   formatMissedPurgeExemption,
-  reconstructDispelSummary,
   purgePriorityForTest,
+  reconstructDispelSummary,
 } from "../src/utils/dispelAnalysis";
 import {
   makeAdvancedAction,
@@ -138,6 +138,14 @@ describe("门 b+c 无法施法(硬控∪踢锁,自由时间 < 3s 反应阈值)",
     // An unknown interrupt id falls back to a conservative 3s lockout (the same
     // fallback predicate as ccTrinketAnalysis)
     expect(kickLockoutSeconds("999999")).toBe(3);
+    // GH #62 (2026-09-02): known kicks read the corpus-observed table —
+    // before it every kick answered the fallback. Counterspell 6, Wind Shear 2,
+    // Spell Lock (felhunter) 5, Quell 4, melee kicks 3 (12.1 archive, 605 files).
+    expect(kickLockoutSeconds("2139")).toBe(6);
+    expect(kickLockoutSeconds("57994")).toBe(2);
+    expect(kickLockoutSeconds("19647")).toBe(5);
+    expect(kickLockoutSeconds("351338")).toBe(4);
+    expect(kickLockoutSeconds("1766")).toBe(3);
     const h1 = discPriest("h1", {
       actionIn: [
         makeInterruptEvent("999999", "Kick", "585", "Smite", S(10), "e1"),

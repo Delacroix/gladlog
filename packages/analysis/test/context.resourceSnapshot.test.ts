@@ -1,29 +1,30 @@
-import { describe, it, expect } from "vitest";
 import {
-  countActiveAtonements,
-  buildPlayerLoadout,
-  chargesReadyCount,
-  computeReadyNames,
-  computeOnCDDisplayNames,
-  buildResourceSnapshot,
-} from "../src/context/resourceSnapshot";
-import {
-  LogEvent,
-  CombatUnitSpec,
   CombatUnitReaction,
+  CombatUnitSpec,
+  LogEvent,
 } from "@gladlog/parser-compat";
-import { makeUnit, makeAuraEvent } from "./ported/testHelpers";
-import { loadLegacyMatchFixture } from "./helpers/legacyFixture";
+import { describe, expect,it } from "vitest";
+
 import {
-  specToString,
-  extractMajorCooldowns,
-  IMajorCooldownInfo,
-} from "../src/utils/cooldowns";
+  buildPlayerLoadout,
+  buildResourceSnapshot,
+  chargesReadyCount,
+  computeOnCDDisplayNames,
+  computeReadyNames,
+  countActiveAtonements,
+} from "../src/context/resourceSnapshot";
 import { analyzePlayerCCAndTrinket } from "../src/utils/ccTrinketAnalysis";
 import {
-  reconstructEnemyCDTimeline,
+  extractMajorCooldowns,
+  IMajorCooldownInfo,
+  specToString,
+} from "../src/utils/cooldowns";
+import {
   IEnemyCDTimeline,
+  reconstructEnemyCDTimeline,
 } from "../src/utils/enemyCDs";
+import { loadLegacyMatchFixture } from "./helpers/legacyFixture";
+import { makeAuraEvent,makeUnit } from "./ported/testHelpers";
 
 describe("context.resourceSnapshot unit tests", () => {
   // ── 1. countActiveAtonements ────────────────────────────────────────────────
@@ -512,7 +513,9 @@ describe("context.resourceSnapshot unit tests", () => {
       // Verify the enemy CD information
       expect(resText).toContain("enemy:Combustion/Fire Mage");
       // Verify the CC information
-      expect(resText).toContain("cc:1/Counterspell-1s[kick]");
+      // Counterspell locks for 6 s (corpus-observed, GH #62; the old 3 s
+      // fallback rendered "-1s" here for the same fixture)
+      expect(resText).toContain("cc:1/Counterspell-4s[kick]");
       expect(resText).toContain("2/Rake-1s[stun]");
     });
 

@@ -11,16 +11,17 @@ import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
 import {
   canHelpAnotherUnit,
+  CD_INSTANT_SLACK_S,
   cdAvailableAt,
   IMajorCooldownInfo,
   isHealerSpec,
   PASSIVE_SPELL_BLOCKLIST,
   specToString,
 } from "../utils/cooldowns";
-import { fmtTime } from "../utils/renderGrid";
 import { getDampeningPercentage } from "../utils/dampening";
 import { IEnemyCDTimeline } from "../utils/enemyCDs";
 import { getHpPercentAtTime } from "../utils/killWindowTargetSelection";
+import { fmtTime } from "../utils/renderGrid";
 import { getSpellSchoolName } from "../utils/spellSchools";
 
 export { PASSIVE_SPELL_BLOCKLIST };
@@ -28,8 +29,15 @@ export { PASSIVE_SPELL_BLOCKLIST };
 // ── Shared helpers ─────────────────────────────────────────────────────────
 
 /** Returns the last cast at or before `timeSeconds`, or undefined if none. */
+/** Most recent cast at or before the rendered instant — reads casts through
+ * CD_INSTANT_SLACK_S like every other "available at t" predicate (GH #61), so
+ * the "on CD since / ready since" copy built from it agrees with cdAvailableAt
+ * and the [RES] ledger. Consumers: criticalMoments, matchNarrative,
+ * candidates/death. */
 export function lastCastBefore(cd: IMajorCooldownInfo, timeSeconds: number) {
-  return cd.casts.filter((c) => c.timeSeconds <= timeSeconds).slice(-1)[0];
+  return cd.casts
+    .filter((c) => c.timeSeconds <= timeSeconds + CD_INSTANT_SLACK_S)
+    .slice(-1)[0];
 }
 
 export function getNpcIdFromGuid(guid: string): string | null {

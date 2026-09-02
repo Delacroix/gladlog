@@ -5,20 +5,21 @@ import {
   LogEvent,
 } from "@gladlog/parser-compat";
 
+import spellReachGenerated from "../data/spellReachGenerated.json";
 import { IPlayerCCTrinketSummary } from "./ccTrinketAnalysis";
-import { isStunCcInstance } from "./drAnalysis";
 import {
   auraOnlyActivationSeconds,
+  CD_INSTANT_SLACK_S,
   isCooldownAvailableFromLastUse,
   specToString,
 } from "./cooldowns";
-import spellReachGenerated from "../data/spellReachGenerated.json";
-import { talentOwnershipOf } from "./talentOwnership";
+import { isStunCcInstance } from "./drAnalysis";
 import {
   distanceBetween,
   getUnitPositionAtTime,
   hasLineOfSight,
 } from "./losAnalysis";
+import { talentOwnershipOf } from "./talentOwnership";
 
 interface IImmunitySpell {
   name: string;
@@ -294,24 +295,25 @@ export function isAvailableAt(
   matchStartMs: number,
   resetSpellIds?: string[],
 ): boolean {
-  const lastCast = lastCastSeconds(unit, spellId, matchStartMs, atSeconds);
+  // Rendered-second slack (CD_INSTANT_SLACK_S, GH #61): the same instant the
+  // [RES] ledger renders — a cast up to 0.5 s after the death counts as
+  // "pressed" (too late is not "never pressed"), exactly as the ledger shows
+  // it on cd: for the same rendered second.
+  const at = atSeconds + CD_INSTANT_SLACK_S;
+  const lastCast = lastCastSeconds(unit, spellId, matchStartMs, at);
   // The core predicate is shared with cdAvailableAt in cooldowns.ts
   // (isCooldownAvailableFromLastUse) — each side keeps its own data source
   // (raw spellCastEvents vs the resolved casts ledger) and this side keeps the
   // resetSpellIds extension below; see the comment above that function.
-  if (isCooldownAvailableFromLastUse(lastCast, cooldownSeconds, atSeconds))
+  if (isCooldownAvailableFromLastUse(lastCast, cooldownSeconds, at))
     return true;
 
   // B30: if a reset spell was cast between the last use and atSeconds, the cooldown was reset.
   // Treat the reset cast as the new "last cast" and check availability from there.
   if (lastCast !== null && resetSpellIds && resetSpellIds.length > 0) {
     for (const resetId of resetSpellIds) {
-      const resetCast = lastCastSeconds(unit, resetId, matchStartMs, atSeconds);
-      if (
-        resetCast !== null &&
-        resetCast > lastCast &&
-        resetCast <= atSeconds
-      ) {
+      const resetCast = lastCastSeconds(unit, resetId, matchStartMs, at);
+      if (resetCast !== null && resetCast > lastCast && resetCast <= at) {
         // Reset happened after the last use — it is now available
         return true;
       }

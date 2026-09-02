@@ -99,6 +99,15 @@ cat $GLADLOG_EVAL_HOME/corpus/manifest-fullscale.txt \
 nice -n 10 npx tsx packages/eval/scripts/confidenceAudit.ts --manifest /tmp/manifest-dispel-union.txt \
   --emit-table --date $(date +%F) > /tmp/dispelObservedGenerated.ts \
   && cp /tmp/dispelObservedGenerated.ts packages/analysis/src/data/dispelObservedGenerated.ts
+# 6b-pre-5. Kick school-lockout lengths (kickLockoutObservedGenerated.json; consumed by
+#   kickLockoutSeconds → the [RES] `-Ns[kick]` field, the kick-eaten candidate's lockout fact and the
+#   "dispeller was locked out" cleanse exemption). Corpus-driven, NOT DB2: a kick is Effect 68 with no
+#   SpellDuration row, so the lockout is only observable — first same-school cast after SPELL_INTERRUPT,
+#   0.5 s-bin mode. Every 30th archive file is enough (≈600 files, ~1 min, 5k+ pairs); ids under 20 pairs
+#   keep the 3 s fallback. Season-dependent (12.1: Counterspell 6, Spell Lock 5, Quell 4, Wind Shear 2,
+#   melee kicks 3), so re-run per season and diff the entries. Then re-run step 7 (writeManifest). (GH #62)
+npx tsx packages/eval/scripts/kickLockoutScan.ts \
+  --manifest $GLADLOG_EVAL_HOME/corpus/manifest-archive-<date>.txt --every 30
 # 6b. Spell icon names (desktop swimlane/replay icons; SpellMisc -> ManifestInterfaceData;
 #     universe = observed ∪ SpellCooldowns ∪ candidates; do not revert to full table — 13.8MB busts initial render budget)
 npx tsx packages/analysis/scripts/datagen/genSpellIcons.ts
@@ -260,7 +269,7 @@ npx tsx packages/eval/scripts/menuTRenderGridScan.ts \
 # or: npm run -w @gladlog/eval scan:menu-t -- --dir <prompts-dir>
 ```
 
-Both re-run the *same* function their hard-failure gate calls (`crisisHpStateProbes`,
+Both re-run the _same_ function their hard-failure gate calls (`crisisHpStateProbes`,
 `scanMenuTRenderGrid` in `promptQualityCheck.ts`) — there is no second implementation to drift.
 The gate answers pass/fail on one prompt; these answer "how many, of what type, and here are
 examples" over a whole corpus, which is what a before/after number needs.

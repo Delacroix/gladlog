@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { cdAvailableAt, chargesAvailableAt } from "../src/utils/cooldowns";
+import {
+  CD_INSTANT_SLACK_S,
+  cdAvailableAt,
+  chargesAvailableAt,
+} from "../src/utils/cooldowns";
 
 /**
  * `chargesAvailableAt` — sequential charge recharge.
@@ -48,10 +52,13 @@ describe("chargesAvailableAt — 充能串行恢复", () => {
     expect(chargesAvailableAt([0, 5, 10], 20, 2, 30)).toBe(1);
   });
 
-  it("单充能与 cdAvailableAt 逐点等价(含端点)", () => {
+  it("单充能与 cdAvailableAt 逐点等价(含端点;cdAvailableAt 多带 CD_INSTANT_SLACK_S 渲染秒容差,GH #61)", () => {
     const casts = [10, 40];
     for (const t of [9.9, 10, 10.1, 39.9, 40, 49.9, 50, 50.1, 69.9, 70, 70.1]) {
-      const viaCharges = chargesAvailableAt(casts, 30, 1, t) > 0;
+      // The kernel is strict; the consumer-facing predicate answers for the
+      // rendered instant (t + slack) so it agrees with the [RES] ledger.
+      const viaCharges =
+        chargesAvailableAt(casts, 30, 1, t + CD_INSTANT_SLACK_S) > 0;
       const viaLegacy = cdAvailableAt(
         {
           casts: casts.map((timeSeconds) => ({ timeSeconds })),
@@ -95,9 +102,13 @@ describe("cdAvailableAt — 充能感知(GH #22)", () => {
     expect(cdAvailableAt(ledger(2), 30)).toBe(true);
   });
 
-  it("2 层技能两层都用掉,第一层要到 lastCast+cd 才回来", () => {
-    const cd = { ...ledger(2), casts: [{ timeSeconds: 10 }, { timeSeconds: 12 }] };
-    expect(cdAvailableAt(cd, 69.9)).toBe(false);
+  it("2 层技能两层都用掉,第一层要到 lastCast+cd 才回来(渲染秒容差 0.5s 内算回来,GH #61)", () => {
+    const cd = {
+      ...ledger(2),
+      casts: [{ timeSeconds: 10 }, { timeSeconds: 12 }],
+    };
+    expect(cdAvailableAt(cd, 69.4)).toBe(false);
+    expect(cdAvailableAt(cd, 69.5)).toBe(true); // 69.5 + CD_INSTANT_SLACK_S reaches 70
     expect(cdAvailableAt(cd, 70)).toBe(true);
   });
 
@@ -125,9 +136,8 @@ describe("cdAvailableAt — 充能感知(GH #22)", () => {
  */
 describe("STUN_USABLE_MIT_IDS — 官方基础数据无多充能条目(stunUsableMitReadyAt 单充能台账前提)", () => {
   it("每个 id 的官方 charges 都 ≤ 1", async () => {
-    const { STUN_USABLE_MIT_IDS } = await import(
-      "../src/utils/killWindowTargetSelection"
-    );
+    const { STUN_USABLE_MIT_IDS } =
+      await import("../src/utils/killWindowTargetSelection");
     const { spellEffectData } = await import("../src/data/spellEffectData");
     const multi = [...STUN_USABLE_MIT_IDS].filter(
       (id) => (spellEffectData[id]?.charges?.charges ?? 1) > 1,

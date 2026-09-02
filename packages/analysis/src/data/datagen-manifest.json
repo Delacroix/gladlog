@@ -1,6 +1,6 @@
 {
   "build": "12.1.0.69404",
-  "generatedAt": "2026-09-01T22:20:01.661Z",
+  "generatedAt": "2026-09-02T17:15:07.318Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
@@ -115,6 +115,12 @@
       "bytes": 2463,
       "generator": "scripts/datagen/genSpellReach.ts",
       "consumer": "utils/deathOutcomeAnalysis.ts externalReachYards (GH #34 ②)"
+    },
+    "kickLockoutObservedGenerated.json": {
+      "kicks": 17,
+      "bytes": 2546,
+      "generator": "packages/eval/scripts/kickLockoutScan.ts",
+      "consumer": "data/spellCategories.ts kickLockoutSeconds (GH #62)"
     }
   }
 }

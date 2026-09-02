@@ -255,6 +255,11 @@ const INDEX: PredicateRow[] = [
     mod: matchExplore,
   },
   {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "CD_INSTANT_SLACK_S",
+    mod: cooldowns,
+  },
+  {
     file: `${A}/utils/deathOutcomeAnalysis.ts`,
     symbol: "isAvailableAt",
     mod: deathOutcomeAnalysis,

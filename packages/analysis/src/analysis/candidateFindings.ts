@@ -54,9 +54,7 @@ import {
   reconstructDispelSummary,
 } from "../utils/dispelAnalysis";
 import { drResetMsAt } from "../utils/drAnalysis";
-import {
-  reconstructEnemyCDTimeline,
-} from "../utils/enemyCDs";
+import { reconstructEnemyCDTimeline } from "../utils/enemyCDs";
 import { detectHealingGaps, type IHealingGap } from "../utils/healingGaps";
 import {
   attemptIntoTrinketEvents,
@@ -830,7 +828,9 @@ export function ccLockedEvents(
  * interrupt (especially coachable for healers: fake-casting).
  *
  * 排序键:2026-08-20 实测 lockoutDurationSeconds 无信息(840 条全部落在
- * 3–4s),当时挂账「要新的排序谓词,另行立项」—— 2026-08-25 落地为
+ * 3–4s —— 2026-09-02 GH #62 查明那不是信息缺失而是 kickLockoutSeconds 当时
+ * 对每个踢技都回答 3s 回退;现在读语料实测表,反震 6 / 法术封锁 5 / 压制 4 /
+ * 风剪 2 / 近战踢 3,但排序键仍不用它),当时挂账「要新的排序谓词,另行立项」—— 2026-08-25 落地为
  * BACKLOG #36(b) 的 `postKick`(被踢后 5s 的行为):idle(整窗零施法,
  * 最该教)排最前,acted(动了但没换学派)次之,switched(换学派打穿
  * 锁定,几乎不用教)最后;同档内按时间。语料锚:切换率跟专精能力上限走
@@ -1413,7 +1413,6 @@ export function ccAvoidableEvents(
     });
 }
 
-
 /** Team-play event integration: missed cleanse / missed purge (whole-team
  * scope) plus the owner being CC'd / interrupted. */
 function teamPlayEvents(
@@ -1886,8 +1885,10 @@ function teamPlayEvents(
             friendlyReaction: owner.reaction,
           }),
           owner,
-          { lookup: (leadCdSpellId) =>
-              lookupBurstWindowPrior(bracket, leadCdSpellId) },
+          {
+            lookup: (leadCdSpellId) =>
+              lookupBurstWindowPrior(bracket, leadCdSpellId),
+          },
         ),
       );
     } catch {

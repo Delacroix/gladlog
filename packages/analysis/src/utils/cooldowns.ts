@@ -812,23 +812,45 @@ export function cdAvailableAt(
   // charge spent unavailable. At <=1 charge the two agree point-by-point
   // (pinned in chargeAvailability.test.ts), so single-charge callers are
   // byte-for-byte unchanged.
+  // Rendered-second slack (CD_INSTANT_SLACK_S, GH #61): the instant this
+  // predicate answers for is the same one the [RES] ledger renders.
+  const t = tSeconds + CD_INSTANT_SLACK_S;
   if ((cd.charges ?? 1) > 1) {
     return (
       chargesAvailableAt(
         cd.casts.map((c) => c.timeSeconds),
         cd.cooldownSeconds,
         cd.charges as number,
-        tSeconds,
+        t,
       ) > 0
     );
   }
-  const last = [...cd.casts].filter((c) => c.timeSeconds <= tSeconds).pop();
+  const last = [...cd.casts].filter((c) => c.timeSeconds <= t).pop();
   return isCooldownAvailableFromLastUse(
     last ? last.timeSeconds : null,
     cd.cooldownSeconds,
-    tSeconds,
+    t,
   );
 }
+
+/**
+ * Rendered-second slack shared by EVERY "is cooldown X available at instant
+ * t" consumer: a cast up to this many seconds AFTER the queried instant counts
+ * as already consumed, and a cooldown that comes back within this many seconds
+ * after the instant counts as ready. The `[RES]` ledger (resourceSnapshot.ts)
+ * has rendered this way since the 2026-07-15 RES-lag fix — a snapshot printed
+ * under a [CD] line must show the state AFTER that line's cast — and the
+ * prompt's rendered clock is whole seconds, so a claim and the ledger it sits
+ * next to can only agree if both read casts through the same slack.
+ *
+ * GH #61 (2026-09-02): `cdAvailableAt` and `deathOutcomeAnalysis.isAvailableAt`
+ * used a strict `<= t` while the ledger used `<= t + 0.5`, so a Blessing of
+ * Protection pressed 0.3 s after a death rendered as "had Blessing of
+ * Protection available, caster was free" one line above a `[RES]` that listed
+ * it on `cd:` (3/309 prompts of the 12.1 eval corpus; hard-failure class
+ * "cooldown ledger consistency"). One constant, three consumers.
+ */
+export const CD_INSTANT_SLACK_S = 0.5;
 
 /**
  * For a given unit, return all class-tagged major cooldowns (>= 30s) with

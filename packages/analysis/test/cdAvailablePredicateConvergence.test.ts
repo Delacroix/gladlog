@@ -23,9 +23,8 @@
  * behaviour. It is not part of this convergence and is honestly recorded in the
  * BACKLOG as a separate item pending a generalized predicate.
  */
-import { describe, expect, it } from "vitest";
-
 import { CombatUnitReaction, CombatUnitSpec } from "@gladlog/parser-compat";
+import { describe, expect, it } from "vitest";
 
 import { deathUnusedDefensiveEvents } from "../src/analysis/candidateFindings";
 import { buildKillMomentFields } from "../src/context/criticalMoments";
@@ -182,7 +181,24 @@ describe("cdAvailableAt 消费点防漂移一致性(BACKLOG #18 Minor #3 + 追�
       label: "两次施放取死亡前最近一次、仍在冷却 → 不可用",
       cd: makeCd([1, 12], 60),
     },
+    // GH #61 (2026-09-02): the press 0.3 s AFTER the death sits in the same
+    // rendered second, and the [RES] ledger lists it on cd: — every consumer
+    // must call it "pressed" too (CD_INSTANT_SLACK_S), or the prompt
+    // contradicts itself one line apart. 0.6 s after is the next second.
+    {
+      label: "施放落在死亡后 0.3s(同一渲染秒)→ 已按下,不可用(GH #61)",
+      cd: makeCd([DEATH_T + 0.3], 60),
+    },
+    {
+      label: "施放落在死亡后 0.6s(下一渲染秒)→ 可用",
+      cd: makeCd([DEATH_T + 0.6], 60),
+    },
   ];
+
+  it("GH #61 容差方向钉死:0.3s 后不可用、0.6s 后可用", () => {
+    expect(cdAvailableAt(makeCd([DEATH_T + 0.3], 60), DEATH_T)).toBe(false);
+    expect(cdAvailableAt(makeCd([DEATH_T + 0.6], 60), DEATH_T)).toBe(true);
+  });
 
   it.each(cases)("$label", ({ cd }) => {
     const expected = cdAvailableAt(cd, DEATH_T);
