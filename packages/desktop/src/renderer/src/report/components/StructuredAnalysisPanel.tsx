@@ -86,10 +86,11 @@ export function StructuredAnalysisPanel({
   // the cache, never handed to the coach chat, cleared on analyze / match
   // switch; its findings render with no seek handlers (fake events).
   const [demo, setDemo] = useState(false);
-  // Reset on match switch only — NOT in the [matchId, lang] effect below:
-  // settings.get() resolves after mount and flips `lang`, and a demo opened
-  // before that (the offer shows before settings arrive) would be wiped
-  // (CI-only race, 2026-08-22).
+  // Reset on match switch only — NOT in the cache-query effect below. (That
+  // effect used to key on `lang`, so the initial settings.get() flip re-ran it
+  // and would have wiped a demo opened before settings arrived — CI-only race,
+  // 2026-08-22. Since 2026-09-02 the effect keys on user language switches
+  // only, see `langSwitches`.)
   useEffect(() => setDemo(false), [matchId]);
   // matchId the result belongs to: at the instant of a match switch, result is
   // still the old match's data; the deep-dive trigger must verify ownership,
@@ -146,6 +147,15 @@ export function StructuredAnalysisPanel({
   // injects it into the system prompt and caches per language key; here we only
   // need to re-query the cache after switching.
   const [lang, setLang] = useState<"zh" | "en" | null>(null);
+  // Counts *user* language switches; the cache query effect keys on this, not
+  // on `lang`. GH #26 root cause (2026-09-02): keying on `lang` made the
+  // initial settings.get() flip (null → "zh") re-run the query on every mount
+  // — setResult(null), resultForRef = null, a second getState — and an onDone
+  // landing between the first result's commit and that effect's passive flush
+  // was swallowed by the match-switch guard (ref already null) while the
+  // second getState's cached answer overwrote the done payload. The main side
+  // resolves the language itself, so the initial flip never needed a re-query.
+  const [langSwitches, setLangSwitches] = useState(0);
   // Settings snapshot for the split-button menu (Task 4): only the sentinel
   // fields (key truthiness) and the current global default backend/model; no
   // extra request — reuses the settings.get() call made for lang below.
@@ -283,6 +293,7 @@ export function StructuredAnalysisPanel({
   const switchLang = async (next: "zh" | "en") => {
     if (next === lang || state === "running") return;
     setLang(next);
+    setLangSwitches((n) => n + 1); // re-runs the cache query (per-language cache key on the main side)
     try {
       await bridge().settings.save({ aiLanguage: next });
     } catch {
@@ -364,7 +375,7 @@ export function StructuredAnalysisPanel({
     return () => {
       cancelled = true;
     };
-  }, [matchId, lang]);
+  }, [matchId, langSwitches]);
 
   useEffect(() => {
     // After persistent mounting this effect runs in every view; a missing
@@ -431,13 +442,14 @@ export function StructuredAnalysisPanel({
                 activeKey?: string | null;
               }) => {
                 if (resultForRef.current !== matchId) {
-                  // GH #26 diagnostic (2026-08-29, user ruling): the flaky
-                  // "slotKey mismatch only warns" test times out with the warn
-                  // never emitted even at a 5 s wait, and this guard is the one
-                  // silent exit on the path. console.info (not warn — the test
-                  // spies on warn) so a CI log shows who moved the ref.
-                  // eslint-disable-next-line no-console -- GH #26 diagnostic; must not be warn (spied by the test)
-                  // eslint-disable-next-line no-console -- GH #26 diagnostic; must not be warn (spied by the test)
+                  // GH #26 diagnostic (2026-08-29) — and it delivered: the
+                  // 2026-09-02 deterministic reproduction printed
+                  // `resultFor=null matchId=m1` here, which named the mover of
+                  // the ref: the cache-query effect re-running on the initial
+                  // `lang` flip (fixed — see `langSwitches`). Kept as the
+                  // genuine match-switch trace. console.info, not warn (the
+                  // invariant test spies on warn).
+                  // eslint-disable-next-line no-console -- match-switch trace; must not be warn (spied by the test)
                   console.info(
                     `[analysis] onDone/getState resolved after a match switch: resultFor=${String(resultForRef.current)} matchId=${matchId} slotKey=${String(d.slotKey)} activeKey=${String(ak)}`,
                   );

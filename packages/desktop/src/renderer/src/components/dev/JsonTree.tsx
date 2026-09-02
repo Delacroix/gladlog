@@ -42,11 +42,22 @@ export function JsonTree({
   );
 
   // Switched match: reset all collapse state and page numbers, otherwise
-  // the previous match's paths stay attached to the new document
-  useEffect(() => {
+  // the previous match's paths stay attached to the new document.
+  //
+  // Done during render (React's "adjust state when a prop changes" pattern),
+  // NOT in a useEffect([root]): that effect also ran on mount as a passive
+  // effect, and a click landing between the mount commit and the passive
+  // flush was silently undone — React flushes pending passive effects before
+  // rendering the click's update, so the hook queue read [toggle → {path},
+  // reset → {}] and the node stayed collapsed. That was the GH #26 flaky
+  // ledger's devpanel record (CI snapshot: aria-expanded="false" after the
+  // click); pinned by test/devpanel.jsonTree.race.test.tsx.
+  const [prevRoot, setPrevRoot] = useState<unknown>(root);
+  if (prevRoot !== root) {
+    setPrevRoot(root);
     setExpanded(new Set<string>());
     setPages(new Map<string, number>());
-  }, [root]);
+  }
 
   useEffect(() => {
     if (!autoExpand || autoExpand.length === 0) return;

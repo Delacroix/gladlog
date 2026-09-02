@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import {
   act,
   fireEvent,
@@ -8,9 +7,13 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { StructuredAnalysisPanel } from "./StructuredAnalysisPanel";
-import { slotLabel } from "../derive/slotLabel";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { untilText } from "../../../../../test/support/untilDom";
 import { buildAnalysisInput } from "../derive/analysisInput";
+import { slotLabel } from "../derive/slotLabel";
+import { StructuredAnalysisPanel } from "./StructuredAnalysisPanel";
 
 // The split-button tests (Task 4) need a click to actually reach
 // handleAnalyze/runAnalyze, which first requires passing the `input !== null`
@@ -564,6 +567,120 @@ describe("多模型槽 tab 切换(Task 3)", () => {
     await waitFor(() => expect(warnSpy).toHaveBeenCalled());
     expect(screen.getByText(/第30秒阵亡/)).toBeTruthy();
     warnSpy.mockRestore();
+  });
+
+  /**
+   * GH #26 root cause, pinned deterministically (2026-09-02). Both ledger
+   * records from this describe block ("only warn" never warning; "override
+   * done" never showing the deepseek result) share one mechanism: on mount,
+   * settings.get() flips `lang` null → "zh", and that used to re-run the
+   * `[matchId, lang]` query effect — `setResult(null)`, `resultForRef =
+   * null`, a second getState. When onDone landed in the window between the
+   * commit that showed the first result and the passive flush of that effect,
+   * act() flushed the effect *after* the handler had set the ref, so the
+   * handler's getState resolved against a null ref (match-switch guard →
+   * swallowed) and the second getState's cached result overwrote the done
+   * payload. testing-library's waitFor opens that window (MutationObserver
+   * observe + setTimeout(0) drain vs React's setImmediate passive flush).
+   *
+   * These two tests enter the window on purpose: render outside act, observe
+   * the first result through a MutationObserver, fire onDone inside act right
+   * there.
+   */
+  function mountOutsideAct() {
+    const g = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const prevActEnv = g.IS_REACT_ACT_ENVIRONMENT;
+    g.IS_REACT_ACT_ENVIRONMENT = false;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    root.render(
+      <StructuredAnalysisPanel
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    return {
+      container,
+      /** Restore the act environment (call before act()) */
+      enterAct: () => {
+        g.IS_REACT_ACT_ENVIRONMENT = true;
+      },
+      cleanup: () => {
+        act(() => root.unmount());
+        container.remove();
+        g.IS_REACT_ACT_ENVIRONMENT = prevActEnv;
+      },
+    };
+  }
+
+  it("首个结果刚进 DOM、lang 翻转的 effect 尚未刷新时 onDone 到来 → 不变式 warn 仍然触发(GH #26 根因)", async () => {
+    const { getDoneCb, setDocSummary } = twoSlotFixture();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const m = mountOutsideAct();
+    try {
+      await untilText(m.container, /第30秒阵亡/);
+      setDocSummary(twoSlotSummary);
+      m.enterAct();
+      act(() => {
+        getDoneCb()?.({
+          matchId: "m1",
+          result: resultA,
+          slotKey: "codex:gpt-5.5",
+        });
+      });
+      await waitFor(() => expect(warnSpy).toHaveBeenCalled(), {
+        timeout: 1500,
+      });
+    } finally {
+      warnSpy.mockRestore();
+      m.cleanup();
+    }
+  });
+
+  it("同一窗口里 override 完成 → 展示的是 done payload 的结果,不被第二次 getState 的缓存覆盖(GH #26 根因)", async () => {
+    const { getDoneCb, setDocSummary } = twoSlotFixture();
+    const overrideResult = {
+      findings: [
+        {
+          eventIds: ["e3"],
+          severity: "low",
+          category: "cd",
+          title: "deepseek 的发现",
+          explanation: "deepseek 槽的结果。",
+        },
+      ],
+      dropped: 0,
+      hadNarration: true,
+    };
+    const m = mountOutsideAct();
+    try {
+      await untilText(m.container, /第30秒阵亡/);
+      setDocSummary({
+        slots: [
+          ...twoSlotSummary.slots,
+          { key: "deepseek:deepseek-chat", createdAt: 3, stale: false },
+        ],
+        activeKey: "deepseek:deepseek-chat",
+      });
+      m.enterAct();
+      act(() => {
+        getDoneCb()?.({
+          matchId: "m1",
+          result: overrideResult,
+          slotKey: "deepseek:deepseek-chat",
+        });
+      });
+      await waitFor(
+        () => expect(m.container.textContent).toMatch(/deepseek 槽的结果/),
+        { timeout: 1500 },
+      );
+      // and it must stay: the mount query's late answer may not clobber it
+      await new Promise((r) => setTimeout(r, 50));
+      expect(m.container.textContent).toMatch(/deepseek 槽的结果/);
+    } finally {
+      m.cleanup();
+    }
   });
 });
 
