@@ -31,8 +31,13 @@ export interface ISpellCategoryEntry {
    * `ccFullDurationSeconds` in spellEffectData.ts (official DB2 PvP duration),
    * and `test/ccFullDuration.test.ts` fails if a cc/root entry carries a hand
    * duration DB2 already covers (2026-09-02: 61 such numbers removed, 21 of
-   * the 22 that disagreed with DB2 were wrong). For `interrupts` it is the
-   * school-lockout length (`kickLockoutSeconds`). Other types: informational.
+   * the 22 that disagreed with DB2 were wrong). For `interrupts` it would be
+   * the school-lockout length (`kickLockoutSeconds`) — no interrupt entry
+   * carries one today, so that predicate always answers its 3 s fallback.
+   * Every other type: none — the 70 informational buff / debuff / immunity /
+   * disarm numbers were removed the same day (30 disagreed with DB2, zero
+   * consumers read them); `test/ccFullDuration.test.ts` pins the field to the
+   * four fallback ids.
    */
   duration?: number;
   priority?: boolean;
@@ -188,26 +193,26 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   // sole-dispeller exemption never fired for it.
   "1234195": cc(),
   // -- Disarms --
-  "236077": { type: "disarms", duration: 5 }, // Disarm (Warrior)
-  "207777": { type: "disarms", duration: 5 }, // Dismantle
-  "233759": { type: "disarms", duration: 5 }, // Grapple Weapon
+  "236077": { type: "disarms" }, // Disarm (Warrior)
+  "207777": { type: "disarms" }, // Dismantle
+  "233759": { type: "disarms" }, // Grapple Weapon
   // -- Immunities --
-  "642": { type: "immunities", duration: 8 }, // Divine Shield
-  "45438": { type: "immunities", duration: 10 }, // Ice Block
-  "186265": { type: "immunities", duration: 8 }, // Aspect of the Turtle
-  "31224": { type: "immunities", duration: 5 }, // Cloak of Shadows
-  "1022": { type: "immunities", duration: 10 }, // Blessing of Protection
+  "642": { type: "immunities" }, // Divine Shield
+  "45438": { type: "immunities" }, // Ice Block
+  "186265": { type: "immunities" }, // Aspect of the Turtle
+  "31224": { type: "immunities" }, // Cloak of Shadows
+  "1022": { type: "immunities" }, // Blessing of Protection
   // 2026-08-21(GH #17/D1 尾巴,免疫三表一致性测试上线时补):官方减伤表
   // pct=100 的七个免疫里唯独它不在本表 —— 法术护佑(魔法免疫,mask 0x7e),
   // duration 与官方表/override 一致取 10。
-  "204018": { type: "immunities", duration: 10 }, // Blessing of Spellwarding
+  "204018": { type: "immunities" }, // Blessing of Spellwarding
   // Added 2026-07-21: of the three Paladin blessings in the missed-cleanse
   // whitelist, only BoP had a category entry; Freedom/Sacrifice were missing
   // -> getPriority fell to Low -> not emitted once across the whole 1245-match
   // corpus. Their dispelType=Magic comes from DB2 mining (authoritative); only
   // the category label was missing.
-  "1044": { type: "buffs_defensive", duration: 8 }, // Blessing of Freedom
-  "6940": { type: "buffs_defensive", duration: 12 }, // Blessing of Sacrifice
+  "1044": { type: "buffs_defensive" }, // Blessing of Freedom
+  "6940": { type: "buffs_defensive" }, // Blessing of Sacrifice
   // Absorb shields (2026-08-12, user ruling: "they really are dispellable, and
   // their priority is moderate"). Both are officially Magic-dispellable, so an
   // offensive purger can strip them; durations come from the official table
@@ -217,28 +222,28 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   // invisible to the missed-purge analysis entirely: Ice Barrier had no
   // category at all (→ priority Low, never a candidate) and Power Word: Shield
   // was not even in the effect table (→ no dispel type, filtered out earlier).
-  "17": { type: "buffs_defensive", duration: 15 }, // Power Word: Shield
-  "11426": { type: "buffs_defensive", duration: 60 }, // Ice Barrier
+  "17": { type: "buffs_defensive" }, // Power Word: Shield
+  "11426": { type: "buffs_defensive" }, // Ice Barrier
   // ── 2026-08-13 可驱散增益补登(官方 DispelType × 120 场语料) ──────────────
   // 背景:能否驱散走官方数据,但**优先级**只认这张表和减伤白名单 —— 两处都没有
   // 就是 Low,永远进不了漏驱散分析。审计发现 72 个「官方可驱散却判 Low」的增益,
   // 下面登记的是其中「敌方交了它、你的击杀窗口就被实质拖住」的一档,统一 High
   // (与护盾同档,低于免疫/硬控的 Critical)。时长取官方表,括号内为语料出现段数
   // (共 342 段)。
-  "342246": { type: "buffs_defensive", duration: 10 }, // Alter Time(法师,128 段)——回溯血量,不驱掉等于白打
-  "1253593": { type: "buffs_defensive", duration: 15 }, // Void Shield(155 段)——吸收盾
-  "406220": { type: "buffs_defensive", duration: 10 }, // Chi Cocoon(武僧,66 段)——吸收盾
-  "1260681": { type: "buffs_defensive", duration: 10 }, // Chi Cocoon(另一 id,58 段)
-  "457387": { type: "buffs_defensive", duration: 30 }, // Wind Barrier(71 段)——吸收盾
+  "342246": { type: "buffs_defensive" }, // Alter Time(法师,128 段)——回溯血量,不驱掉等于白打
+  "1253593": { type: "buffs_defensive" }, // Void Shield(155 段)——吸收盾
+  "406220": { type: "buffs_defensive" }, // Chi Cocoon(武僧,66 段)——吸收盾
+  "1260681": { type: "buffs_defensive" }, // Chi Cocoon(另一 id,58 段)
+  "457387": { type: "buffs_defensive" }, // Wind Barrier(71 段)——吸收盾
   // Earth Shield:用户裁定「没那么高」(2026-08-13)。官方可驱散(Magic)且需逐个
   // 维持,所以不进常驻团队增益的 blocklist;但它随手就能重上,驱掉的收益远不如
   // 护盾/爆发类,故归 buffs_other(→Medium)—— 登记在案、可被其他消费方看到,
   // 但不进「漏驱散」结论,避免灌爆话题。
-  "974": { type: "buffs_other", duration: 600 }, // Earth Shield(萨满,77 段)
-  "383648": { type: "buffs_other", duration: 600 }, // Earth Shield(另一 id,56 段)
-  "41635": { type: "buffs_defensive", duration: 30 }, // Prayer of Mending(牧师,180 段)——弹射治疗
-  "81700": { type: "buffs_offensive", duration: 18 }, // Archangel(戒律,140 段)——治疗量爆发
-  "204361": { type: "buffs_offensive", duration: 10 }, // Bloodlust(69 段)——急速爆发
+  "974": { type: "buffs_other" }, // Earth Shield(萨满,77 段)
+  "383648": { type: "buffs_other" }, // Earth Shield(另一 id,56 段)
+  "41635": { type: "buffs_defensive" }, // Prayer of Mending(牧师,180 段)——弹射治疗
+  "81700": { type: "buffs_offensive" }, // Archangel(戒律,140 段)——治疗量爆发
+  "204361": { type: "buffs_offensive" }, // Bloodlust(69 段)——急速爆发
   // Decided 2026-07-22: missed cleanse only takes "discrete active
   // cooldowns", not permanent HoTs/shields (opening it up to permanent auras
   // measured 103 -> 892 rows, 59% of which was Rejuvenation-class noise --
@@ -251,36 +256,36 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   // Nature's Swiftness have a p50 of only 0.4s (consumed immediately by the
   // next cast), and the 3s "not cleansed" threshold naturally filters out the
   // instantly consumed instances.
-  "210256": { type: "buffs_defensive", duration: 5 }, // Blessing of Sanctuary (509 hits)
-  "29166": { type: "buffs_defensive", duration: 8 }, // Innervate (183 hits)
-  "212295": { type: "buffs_defensive", duration: 3 }, // Nether Ward (607 hits)
-  "378441": { type: "buffs_defensive", duration: 4 }, // Time Stop (48 hits)
-  "370553": { type: "buffs_defensive", duration: 3 }, // Tip the Scales (969 hits; p90=3.3s)
-  "132158": { type: "buffs_defensive", duration: 3 }, // Nature's Swiftness (1257 hits; p90=2.9s)
-  "378081": { type: "buffs_defensive", duration: 3 }, // Nature's Swiftness variant id (621 hits -- dual-id rot lesson, take both)
-  "79206": { type: "buffs_defensive", duration: 16 }, // Spiritwalker's Grace (705 hits)
+  "210256": { type: "buffs_defensive" }, // Blessing of Sanctuary (509 hits)
+  "29166": { type: "buffs_defensive" }, // Innervate (183 hits)
+  "212295": { type: "buffs_defensive" }, // Nether Ward (607 hits)
+  "378441": { type: "buffs_defensive" }, // Time Stop (48 hits)
+  "370553": { type: "buffs_defensive" }, // Tip the Scales (969 hits; p90=3.3s)
+  "132158": { type: "buffs_defensive" }, // Nature's Swiftness (1257 hits; p90=2.9s)
+  "378081": { type: "buffs_defensive" }, // Nature's Swiftness variant id (621 hits -- dual-id rot lesson, take both)
+  "79206": { type: "buffs_defensive" }, // Spiritwalker's Grace (705 hits)
   // -- Offensive buffs (consumed by spellDanger / isOffensiveSpell) --
-  "19574": { type: "buffs_offensive", duration: 15 }, // Bestial Wrath
-  "1719": { type: "buffs_offensive", duration: 16 }, // Recklessness
-  "13750": { type: "buffs_offensive", duration: 20 }, // Adrenaline Rush
-  "121471": { type: "buffs_offensive", duration: 20 }, // Shadow Blades
-  "190319": { type: "buffs_offensive", duration: 10 }, // Combustion
-  "365350": { type: "buffs_offensive", duration: 15 }, // Arcane Surge
-  "107574": { type: "buffs_offensive", duration: 20 }, // Avatar
-  "10060": { type: "buffs_offensive", duration: 20 }, // Power Infusion
-  "375087": { type: "buffs_offensive", duration: 18 }, // Dragonrage
-  "51271": { type: "buffs_offensive", duration: 12 }, // Pillar of Frost
-  "31884": { type: "buffs_offensive", duration: 20 }, // Avenging Wrath
-  "288613": { type: "buffs_offensive", duration: 15 }, // Trueshot
+  "19574": { type: "buffs_offensive" }, // Bestial Wrath
+  "1719": { type: "buffs_offensive" }, // Recklessness
+  "13750": { type: "buffs_offensive" }, // Adrenaline Rush
+  "121471": { type: "buffs_offensive" }, // Shadow Blades
+  "190319": { type: "buffs_offensive" }, // Combustion
+  "365350": { type: "buffs_offensive" }, // Arcane Surge
+  "107574": { type: "buffs_offensive" }, // Avatar
+  "10060": { type: "buffs_offensive" }, // Power Infusion
+  "375087": { type: "buffs_offensive" }, // Dragonrage
+  "51271": { type: "buffs_offensive" }, // Pillar of Frost
+  "31884": { type: "buffs_offensive" }, // Avenging Wrath
+  "288613": { type: "buffs_offensive" }, // Trueshot
   // Added by the 2026-07-14 full-corpus audit: 21% of the corpus had zero
   // [ENEMY CD] for the entire match -- the major burst cooldowns below had no
   // category, so isOffensiveSpell returned false and enemyCDs silently
   // dropped them (mostly DH / Rogue / Warlock / Elemental / Survival Hunter).
-  "370965": { type: "debuffs_offensive", duration: 6 }, // The Hunt
-  "185313": { type: "buffs_offensive", duration: 8 }, // Shadow Dance
-  "360194": { type: "debuffs_offensive", duration: 16 }, // Deathmark
-  "205180": { type: "buffs_offensive", duration: 20 }, // Summon Darkglare
-  "191634": { type: "buffs_offensive", duration: 15 }, // Ascendance (Elemental)
+  "370965": { type: "debuffs_offensive" }, // The Hunt
+  "185313": { type: "buffs_offensive" }, // Shadow Dance
+  "360194": { type: "debuffs_offensive" }, // Deathmark
+  "205180": { type: "buffs_offensive" }, // Summon Darkglare
+  "191634": { type: "buffs_offensive" }, // Ascendance (Elemental)
   // 2026-07-17 per-spec sweep: for specs with a 100% none-tracked rate (Frost
   // Mage 210/210, Windwalker 129/129) and other high-gap specs, the actual
   // 12.x burst buttons were filled in from corpus SPELL_CAST_SUCCESS evidence.
@@ -289,32 +294,32 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   // Most of Retribution's gap is Radiant Glory passively triggering Avenging
   // Wrath (no cast event), which a cast-based tracker cannot follow -- that is
   // expected.
-  "84714": { type: "debuffs_offensive", duration: 15 }, // Frozen Orb (Frost Mage, 60s)
-  "205021": { type: "debuffs_offensive", duration: 4 }, // Ray of Frost (Frost Mage, 60s charge)
-  "392983": { type: "debuffs_offensive", duration: 6 }, // Strike of the Windlord (Windwalker, 35s)
-  "1233448": { type: "buffs_offensive", duration: 15 }, // Dark Transformation (Unholy DK 12.x variant id, 45s)
-  "42650": { type: "buffs_offensive", duration: 30 }, // Army of the Dead (Unholy DK, 90s)
-  "102560": { type: "buffs_offensive", duration: 30 }, // Incarnation: Chosen of Elune (Balance Druid, 180s)
-  "194223": { type: "buffs_offensive", duration: 20 }, // Celestial Alignment (Balance Druid, 180s)
-  "102543": { type: "buffs_offensive", duration: 20 }, // Incarnation: Avatar of Ashamane (Feral Druid, 180s)
-  "106951": { type: "buffs_offensive", duration: 20 }, // Berserk (Feral Druid, 180s)
-  "274837": { type: "debuffs_offensive", duration: 6 }, // Feral Frenzy (Feral Druid, 45s)
-  "114051": { type: "buffs_offensive", duration: 15 }, // Ascendance (Enhancement, 180s)
+  "84714": { type: "debuffs_offensive" }, // Frozen Orb (Frost Mage, 60s)
+  "205021": { type: "debuffs_offensive" }, // Ray of Frost (Frost Mage, 60s charge)
+  "392983": { type: "debuffs_offensive" }, // Strike of the Windlord (Windwalker, 35s)
+  "1233448": { type: "buffs_offensive" }, // Dark Transformation (Unholy DK 12.x variant id, 45s)
+  "42650": { type: "buffs_offensive" }, // Army of the Dead (Unholy DK, 90s)
+  "102560": { type: "buffs_offensive" }, // Incarnation: Chosen of Elune (Balance Druid, 180s)
+  "194223": { type: "buffs_offensive" }, // Celestial Alignment (Balance Druid, 180s)
+  "102543": { type: "buffs_offensive" }, // Incarnation: Avatar of Ashamane (Feral Druid, 180s)
+  "106951": { type: "buffs_offensive" }, // Berserk (Feral Druid, 180s)
+  "274837": { type: "debuffs_offensive" }, // Feral Frenzy (Feral Druid, 45s)
+  "114051": { type: "buffs_offensive" }, // Ascendance (Enhancement, 180s)
   // Note on Enhancement's Doom Winds: activating it in 12.x produces no
   // standalone SPELL_CAST_SUCCESS (469270 is the per-attack proc cast, median
   // interval 1s), so a cast-based tracker cannot follow it -- the remaining
   // none-tracked share is expected.
-  "466772": { type: "buffs_offensive", duration: 8 }, // Doom Winds buff id (aura only, for spellDanger)
-  "1122": { type: "buffs_offensive", duration: 30 }, // Summon Infernal (Destruction, 120s; cast id, 111685 is the aura id)
-  "6353": { type: "debuffs_offensive", duration: 0 }, // Soul Fire (Destruction, 45s nuke)
-  "442726": { type: "buffs_offensive", duration: 20 }, // Malevolence (Destruction hero talent, 60s -- measured on corpus)
-  "1261193": { type: "debuffs_offensive", duration: 0 }, // Boomstick (Survival Hunter 12.x, 60s charge)
-  "1250646": { type: "debuffs_offensive", duration: 0 }, // Takedown (Survival Hunter 12.x, 90s)
+  "466772": { type: "buffs_offensive" }, // Doom Winds buff id (aura only, for spellDanger)
+  "1122": { type: "buffs_offensive" }, // Summon Infernal (Destruction, 120s; cast id, 111685 is the aura id)
+  "6353": { type: "debuffs_offensive" }, // Soul Fire (Destruction, 45s nuke)
+  "442726": { type: "buffs_offensive" }, // Malevolence (Destruction hero talent, 60s -- measured on corpus)
+  "1261193": { type: "debuffs_offensive" }, // Boomstick (Survival Hunter 12.x, 60s charge)
+  "1250646": { type: "debuffs_offensive" }, // Takedown (Survival Hunter 12.x, 90s)
   // Devourer Demon Hunter (new 12.1 spec) -- extracted from audit corpus
   // evidence (2026-07-14): cast frequency and event behaviour come from 123
   // real matches; durations are taken from the DB2 mining layer.
-  "1241937": { type: "buffs_offensive", duration: 5 }, // Soul Immolation (main burst, 60s charge)
-  "1246167": { type: "debuffs_offensive", duration: 2 }, // The Hunt (Devourer variant id)
+  "1241937": { type: "buffs_offensive" }, // Soul Immolation (main burst, 60s charge)
+  "1246167": { type: "debuffs_offensive" }, // The Hunt (Devourer variant id)
   // -- Interrupts --
   "1766": { type: "interrupts" },
   "2139": { type: "interrupts" },
@@ -342,9 +347,9 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "217824": { type: "interrupts" }, // Shield of Virtue (Protection Paladin PvP talent)
   "31935": { type: "interrupts" }, // Avenger's Shield
   // -- Speed boosts --
-  "2983": { type: "buffs_speed_boost", duration: 8 }, // Sprint
-  "1850": { type: "buffs_speed_boost", duration: 10 }, // Dash
-  "116841": { type: "buffs_speed_boost", duration: 6 }, // Tiger's Lust
+  "2983": { type: "buffs_speed_boost" }, // Sprint
+  "1850": { type: "buffs_speed_boost" }, // Dash
+  "116841": { type: "buffs_speed_boost" }, // Tiger's Lust
   // -- Offensive debuffs --
   "702": { type: "debuffs_offensive" }, // Curse of Weakness
   "1714": { type: "debuffs_offensive" }, // Curse of Tongues

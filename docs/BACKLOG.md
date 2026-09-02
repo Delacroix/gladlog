@@ -919,6 +919,14 @@ Classified by suspected root cause; work begins after completing the currently r
      exactly 6.0 s = broken on landing); 2 lines appear only after (Sleep Walk under Oppressing Roar crossing the
      2 s threshold); 73 lines that used to render without a number (ids with no hand duration) now carry the DB2
      one. Full analysis suite 148 files / 2,372 tests green, predicate-index test 222.
+     **Follow-up the same day (user: "把 3 清理掉吧")**: the remaining 70 hand durations on non-CC types (buffs_offensive 28,
+     buffs_defensive 18, debuffs_offensive 10, immunities 6, disarms 3, buffs_speed_boost 3, buffs_other 2) had **zero
+     consumers** (the only `.duration` readers are `ccFullDurationSeconds` for cc/roots and `kickLockoutSeconds` for
+     interrupts) and 30 of them disagreed with DB2 (Earth Shield 600 vs 3600, Summon Infernal 30 vs 0.25, Power Infusion
+     20 vs 15, …) — removed; `test/ccFullDuration.test.ts` now pins `duration` to the four cc fallback ids. Acceptance: S2
+     605-file capture, findings-prompt and match-context SHA256 both byte-identical to the previous run, 26 per-type counts
+     identical. Side finding recorded as GH #62: no `interrupts` entry has ever carried a duration and DB2 gives none for
+     kick ids, so `kickLockoutSeconds` has always returned its 3 s fallback for every kick.
 6. **eval baseline / candidate incidence rates full recalibration**: 63.6/14.1/15.6 and other old numbers considered
    expired after 12.1; rerun `/eval-baseline`, rate-limiting type (#22 temporary gate) thresholds reviewed alongside incidence rates.
    > **2026-09-01 status (GH #44)**: the deterministic half already exists — the 2026-08-22 skill-gradient study

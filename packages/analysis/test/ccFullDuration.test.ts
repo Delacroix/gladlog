@@ -70,6 +70,19 @@ describe("ccFullDurationSeconds — 官方时长单源", () => {
     expect(fallbacks.sort()).toEqual(["107570", "408", "46968", "5782"]);
   });
 
+  it("其他类型一律不带手工时长(2026-09-02 剔除 70 条零消费者的数字;interrupts 从未有过)", () => {
+    // Only the four cc fallbacks above may carry `duration` at all. The buff /
+    // debuff / immunity / disarm numbers had no reader (the two consumers are
+    // ccFullDurationSeconds for cc/roots and kickLockoutSeconds for interrupts)
+    // and 30 of the 70 disagreed with DB2 — a second table of facts nobody
+    // checks is exactly the drift the Shared-Predicate rule exists to stop.
+    const withDuration = Object.entries(SPELL_CATEGORIES)
+      .filter(([, e]) => e.duration !== undefined)
+      .map(([id]) => id)
+      .sort();
+    expect(withDuration).toEqual(["107570", "408", "46968", "5782"]);
+  });
+
   it("压迫咆哮:官方 aura 232 基点 50 × PvpMultiplier 0.6 = +30%", () => {
     expect(OPPRESSING_ROAR_SPELL_ID).toBe("372048");
     expect(OPPRESSING_ROAR_PVP_CC_DURATION_MULT).toBeCloseTo(1.3);
