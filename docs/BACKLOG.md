@@ -911,6 +911,8 @@ Classified by suspected root cause; work begins after completing the currently r
    `killAttempts.test.ts`. Not fixed, recorded: an in-span *re-application* of an aura that was already up before the
    attempt started still counts as "popped during the attempt" — the ledger keys on APPLIED events, not aura
    intervals; a proper fix routes through `buildAuraIntervals` (#28) and is a semantics call, so it is parked here.
+   **User ruling 2026-09-02: keep the current behaviour** ("popped" = an APPLIED inside the span + slack); no interval
+   rewrite, no new label. Closed as ruled.
    Also caught: `writeManifest.ts` did not know `spellReachGenerated.json` (hand-registered with GH #34 ② on
    2026-08-29) and silently dropped it on the next run — the script now emits that entry.
 
