@@ -328,15 +328,15 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线;Task 9 �
     },
   };
 
-  it("默认态(2026-08-19 起 missedSyncWindow=false)→ 即便菜单里塞了该类型事件,图例也不出;cd-hoarded 照常;现有图例不受影响", () => {
-    // 下架负控:flag 关死的类型连图例都不许出现 —— 单源门(candidateFindings
-    // 与 buildFindingsPrompt 读同一个 flag)在两头同时生效。
+  it("默认态(2026-09-02 起 missedSyncWindow 复活为 true,GH #13 撤销)→ 该类型图例随事件出现;unsyncedBurst/cdSpentIdle 仍关死连图例都不出;现有图例不受影响", () => {
+    // 单源门(candidateFindings 与 buildFindingsPrompt 读同一个 flag)在两头
+    // 同时生效:开的类型图例随菜单出现,关死的类型连图例都不许出现。
     const p = buildFindingsPrompt(
       [...candidates, missedSyncWindowEvent, cdHoardedEvent],
       "",
       "Discipline Priest",
     );
-    expect(p).not.toMatch(/"missed-sync-window"/);
+    expect(p).toMatch(/"missed-sync-window"/);
     expect(p).toMatch(/"cd-hoarded"/);
     expect(p).not.toMatch(/"unsynced-burst"/);
     expect(p).not.toMatch(/"cd-spent-idle"/);

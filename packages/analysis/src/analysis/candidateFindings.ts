@@ -11,13 +11,14 @@ import {
   BRACKET_TYPE_ALLOWLIST,
   CANDIDATE_TYPE_FLAGS,
 } from "../data/candidateTypeFlags";
-import { bracketKey } from "../utils/bracketKey";
 import { costNormPhrase } from "../data/curatedAbilityFacts";
 import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
 import { MITIGATION_TABLE } from "../data/mitigationData";
 import { spellEffectData } from "../data/spellEffectData";
 import { ccSpellIds } from "../data/spellTags";
+import { lookupSyncWindowPrior } from "../data/syncWindowPrior";
 import { buildAuraIntervals } from "../utils/auraIntervals";
+import { bracketKey } from "../utils/bracketKey";
 import { analyzeBurstLedger } from "../utils/burstLedger";
 import {
   analyzePlayerCCAndTrinket,
@@ -73,8 +74,11 @@ import {
 } from "../utils/positionAnalysis";
 import { type RawStreams } from "../utils/rawStreams";
 import { toRenderSecond } from "../utils/renderGrid";
+import { OFFENSIVE_CD_SPELL_IDS } from "../utils/spellDanger";
 import { getTalentAvoidanceTriggers } from "../utils/talentBehaviors";
 import { matchThreatLevel, threatActiveAt } from "../utils/threatAssessment";
+import { burstWindowDecisionPoints } from "./burstWindowDecisionPoints";
+import { burstWindowResponseEvents } from "./candidates/burstWindowResponse";
 import {
   cdHoardedEvents,
   cdSpentIdleEvents,
@@ -84,15 +88,14 @@ import {
   missedSyncWindowEvents,
   unsyncedBurstEvents,
 } from "./candidates/cooldownTiming";
-import { burstWindowResponseEvents } from "./candidates/burstWindowResponse";
 import { crisisNoResponseEvents } from "./candidates/crisisNoResponse";
 import {
   deathSetupEvents,
   type DeathSetupParts,
   deathUnusedDefensiveEvents,
+  enemyImmunityBreakers,
   externalUnusedEvents,
   questionableExternalEvents,
-  enemyImmunityBreakers,
 } from "./candidates/death";
 import {
   CYCLONE_SPELL_ID,
@@ -102,7 +105,6 @@ import {
   MD_SPELL_ID,
   mdCycloneWindowEvents,
 } from "./candidates/massDispel";
-import { burstWindowDecisionPoints } from "./burstWindowDecisionPoints";
 import { CRISIS_HP_PCT, crisisDecisionPoints } from "./crisisDecisionPoints";
 import { fmtFactNum as fmt, fmtFactTime } from "./factFormat";
 import type { CandidateEvent } from "./types";
@@ -1549,7 +1551,13 @@ function teamPlayEvents(
         for (const f of friends) {
           try {
             for (const cd of extractMajorCooldowns(f, combat)) {
-              if (!cd.isThroughput) continue;
+              // Resurrection redesign (2026-09-02, GH #13): the canonical
+              // offensive table (chg9) replaces `isThroughput`, which had
+              // been listing Tiger's Lust / Berserker Shout / racials as
+              // "ready offensive CDs". Deliberately also narrows
+              // unsynced-burst's input (retired, flag false) — if that type
+              // ever returns it must return on the canonical table too.
+              if (!OFFENSIVE_CD_SPELL_IDS.has(String(cd.spellId))) continue;
               teamOffensiveCds.push({ ...cd, ownerName: f.name });
             }
           } catch {
@@ -1557,10 +1565,18 @@ function teamPlayEvents(
           }
         }
         if (CANDIDATE_TYPE_FLAGS.missedSyncWindow) {
+          const startMs: number = combat.startTime;
+          const enemyDeathS: number[] = enemies.flatMap((e: any) =>
+            ((e.deathRecords ?? []) as any[]).map(
+              (d: any) => ((d.timestamp as number) - startMs) / 1000,
+            ),
+          );
           out.push(
             ...missedSyncWindowEvents(ccWindows, teamOffensiveCds, {
               enemyMinHpPctAt: (from, to) =>
                 enemyMinHpPctInWindow(enemies, combat, from, to),
+              enemyDeathS,
+              ref: lookupSyncWindowPrior(combat?.startInfo?.bracket ?? ""),
             }),
           );
         }

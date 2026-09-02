@@ -329,4 +329,9 @@
 //  new table, and a v47 cached line's reference numbers are hardFailures
 //  under checkBehaviorPriorConsistency. Scan artifacts:
 //  eval-private/reports/behavior-prior-2026-09-02/.
-export const PROMPT_VERSION = 48;
+//  v49 (2026-09-02, GH #13 resurrection): missed-sync-window back on by
+//  default, redesigned — canonical offensive table, t>=30s / rendered dur>=3s /
+//  enemy-death-in-window exclusion, per-bracket corpus reference facts
+//  (refN/refKillEntered/refKillUnentered/cellKey) with a >=3pp min-contrast
+//  door; its legend rewritten to explain the reference.
+export const PROMPT_VERSION = 49;

@@ -53,6 +53,7 @@ import {
 // (GH #34) scans crisisDecisionPoints directly, the same predicate
 // crisis-no-response uses.
 import { crisisDecisionPoints } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
+import { lookupSyncWindowPrior } from "@gladlog/analysis/src/data/syncWindowPrior";
 import type { ICombatUnit } from "@gladlog/parser-compat";
 
 import { type LegacyRound, splitTeams } from "./storeAccess.js";
@@ -334,6 +335,15 @@ export function countsAtThresholds(
       const syncProbes = {
         enemyMinHpPctAt: (from: number, to: number) =>
           enemyMinHpPctInWindow(enemies, legacy, from, to),
+        // Mirror teamPlayEvents' production wiring exactly (2026-09-02
+        // resurrection): same death list, same bracket-keyed reference —
+        // calibration densities are only comparable if the door is the same.
+        enemyDeathS: enemies.flatMap((e: any) =>
+          ((e.deathRecords ?? []) as any[]).map(
+            (d: any) => ((d.timestamp as number) - legacy.startTime) / 1000,
+          ),
+        ),
+        ref: lookupSyncWindowPrior(legacy?.startInfo?.bracket ?? ""),
       };
       missedSyncWindowCapped = missedSyncWindowEvents(
         ctx.ccWindows,

@@ -2372,8 +2372,22 @@ describe("missedSyncWindowEvents(P1 起爆-1,2026-08-15,纯函数)", () => {
     cooldownSeconds: 120,
     neverUsed: false,
   };
-  const probes = (minHp: number | null) => ({
+  // Door-passing reference fixture (2026-09-02 resurrection): 3v3-shaped
+  // numbers (entered 18% vs unentered 8% = 10pp >= SYNC_REF_MIN_CONTRAST_PP).
+  const REF = {
+    cellKey: "3v3",
+    nEntered: 174,
+    killEnteredPct: 18,
+    nUnentered: 497,
+    killUnenteredPct: 8,
+  };
+  const probes = (
+    minHp: number | null,
+    extra?: { enemyDeathS?: number[]; ref?: typeof REF | null },
+  ) => ({
     enemyMinHpPctAt: (_from: number, _to: number) => minHp,
+    enemyDeathS: extra?.enemyDeathS ?? [],
+    ref: extra && "ref" in extra ? extra.ref ?? null : REF,
   });
 
   it("① 60ab-7:19 形态:敌治疗被睡 8s + 我方锤 ready + 窗内无起爆 → 1 条,facts 含被控技能/时长/ready 清单/窗内敌方最低血", () => {
@@ -2393,6 +2407,59 @@ describe("missedSyncWindowEvents(P1 起爆-1,2026-08-15,纯函数)", () => {
     expect(e.facts["durationS"]).toBe("8");
     expect(e.facts["readyCds"]).toContain("Avenging Wrath");
     expect(e.facts["enemyMinHpPct"]).toBe("42");
+    // Resurrection reference facts: quoted verbatim from the ref cell — the
+    // gate (checkSyncWindowRefConsistency) re-checks these against the table.
+    expect(e.facts["refN"]).toBe("671");
+    expect(e.facts["refKillEntered"]).toBe("18");
+    expect(e.facts["refKillUnentered"]).toBe("8");
+    expect(e.facts["cellKey"]).toBe("3v3");
+  });
+
+  it("门:ref=null(bracket 无格/不够样本/对比不过门)→ 整轮静音", () => {
+    expect(
+      missedSyncWindowEvents([ccWindow], [readyHammer], probes(50, { ref: null })),
+    ).toEqual([]);
+  });
+
+  it("门:对比 <3pp(平/反)→ 静音(引用的数字在反驳指控本身)", () => {
+    const flat = { ...REF, killEnteredPct: 9, killUnenteredPct: 8 };
+    expect(
+      missedSyncWindowEvents([ccWindow], [readyHammer], probes(50, { ref: flat })),
+    ).toEqual([]);
+  });
+
+  it("t<30s(开场铺垫窗)→ 不产出", () => {
+    const opener = { ...ccWindow, fromSeconds: 12.4, toSeconds: 19.9 };
+    expect(
+      missedSyncWindowEvents([opener], [readyHammer], probes(50)),
+    ).toEqual([]);
+  });
+
+  it("渲染时长 <3s → 不产出(与 syncWindowScan 共享的 eligibility)", () => {
+    const blip = { ...ccWindow, fromSeconds: 439.62, toSeconds: 441.9 }; // 441-439=2
+    expect(
+      missedSyncWindowEvents([blip], [readyHammer], probes(50)),
+    ).toEqual([]);
+  });
+
+  it("窗内有敌人死亡 → 不产出(没压 CD 也在转化的击杀不是漏同步;非血线门,B8 仍然成立)", () => {
+    expect(
+      missedSyncWindowEvents(
+        [ccWindow],
+        [readyHammer],
+        probes(50, { enemyDeathS: [443.2] }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("提前 2s 内进窗(SYNC_ENTER_LEAD_S)也算已同步 → 不产出", () => {
+    const leadCast = {
+      ...readyHammer,
+      casts: [{ timeSeconds: 0 }, { timeSeconds: 438.0 }], // 439.62-2=437.62 <= 438
+    };
+    expect(
+      missedSyncWindowEvents([ccWindow], [leadCast], probes(50)),
+    ).toEqual([]);
   });
 
   it("② 红线(B8,用户裁决,无血线门):敌方全员满血(100%)→ 仍出候选,不因为血高就不报", () => {
@@ -3180,7 +3247,7 @@ describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,20
     };
   }
 
-  it("默认态(2026-08-19 missedSyncWindow 下架;2026-08-29 unsyncedBurst 降级为上下文事实,GH #50)→ 同一 fixture 两个类型都不产出", () => {
+  it("复活默认态(2026-09-02,GH #13 撤销):missedSyncWindow 默认开,但 fixture 无 bracket → 参照查不到,门整轮静音;unsyncedBurst 仍默认关(GH #50)→ 两个类型都不产出", () => {
     const evts = extractCandidateFindings(syncFixture(), "h");
     expect(evts.some((e) => e.type === "missed-sync-window")).toBe(false);
     expect(evts.some((e) => e.type === "unsynced-burst")).toBe(false);
@@ -3196,14 +3263,14 @@ describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,20
     }
   });
 
-  it("显式开 flag → missed-sync-window 仍可产出(纯函数与接线保留,只是默认关)", () => {
-    CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
-    try {
-      const evts = extractCandidateFindings(syncFixture(), "h");
-      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(true);
-    } finally {
-      CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
-    }
+  it("bracket=3v3(真实生成表——数据耦合同 behaviorPrior.test.ts 健康测试:赛季太年轻/3v3 对比塌了会红,红了要重新裁决而不是改测试)→ missed-sync-window 产出且 facts 引用 3v3 格", () => {
+    const c = syncFixture();
+    c.startInfo.bracket = "3v3";
+    const evts = extractCandidateFindings(c, "h");
+    const msw = evts.filter((e) => e.type === "missed-sync-window");
+    expect(msw).toHaveLength(1);
+    expect(msw[0]!.facts["cellKey"]).toBe("3v3");
+    expect(msw[0]!.facts["refN"]).toBeTruthy();
   });
 
   it("同一 fixture 直调纯函数(用真实 analyzeOutgoingCCChains/extractMajorCooldowns 数据,不是手搭 fixture)仍产出两条——证明数据条件本身没坏,菜单接线已按「退役到零件」摘除", () => {
@@ -3224,6 +3291,14 @@ describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,20
     expect(
       missedSyncWindowEvents(ccWindows, [awCd], {
         enemyMinHpPctAt: () => null,
+        enemyDeathS: [],
+        ref: {
+          cellKey: "3v3",
+          nEntered: 174,
+          killEnteredPct: 18,
+          nUnentered: 497,
+          killUnenteredPct: 8,
+        },
       }),
     ).toHaveLength(1);
 
@@ -3251,15 +3326,12 @@ describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,20
   // 变单例,和 DISPEL_FEATURE_FLAGS 一样)。
   // Both flags default to false since 2026-08-29; the independence check now
   // turns each ON alone and expects only that type to appear.
-  it("只开 missedSyncWindow → 只有 missed-sync-window 产出,unsynced-burst 不出现", () => {
-    CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
-    try {
-      const evts = extractCandidateFindings(syncFixture(), "h");
-      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(true);
-      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(false);
-    } finally {
-      CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
-    }
+  it("unsynced-burst 默认关:bracket=3v3 时只有 missed-sync-window 出现,unsynced-burst 不出现", () => {
+    const c = syncFixture();
+    c.startInfo.bracket = "3v3";
+    const evts = extractCandidateFindings(c, "h");
+    expect(evts.some((e) => e.type === "missed-sync-window")).toBe(true);
+    expect(evts.some((e) => e.type === "unsynced-burst")).toBe(false);
   });
 
   it("只开 unsyncedBurst → 只有 unsynced-burst 产出,missed-sync-window 不出现", () => {

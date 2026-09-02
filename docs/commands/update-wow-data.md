@@ -68,6 +68,22 @@ npx tsx packages/eval/scripts/behaviorPriorScan.ts emit-table --in $R/opportunit
   && cp $R/behaviorPriorGenerated.json packages/analysis/src/data/behaviorPriorGenerated.json
 #   (the scan itself already filters to startTime >= PATCH_121_GOLIVE_EPOCH_MS; when the next
 #   season ships, update that epoch first — it is the season gate.)
+# 6b-pre-4. Sync-window reference table (GH #13 resurrection, 2026-09-02): per bracket, the share of
+#   eligible enemy-healer hard-CC windows in which an enemy died within 15 s, split by whether a
+#   friendly canonical offensive CD entered the window. Corpus-driven, NOT DB2.
+#   Regenerate at season start and whenever the eligibility predicate in
+#   packages/analysis/src/analysis/candidates/cooldownTiming.ts (missedSyncWindowEvents) changes —
+#   missed-sync-window quotes these numbers and checkSyncWindowRefConsistency re-checks them plus the
+#   >=3pp min-contrast door, so a stale table is a red CI. ~2 h over the archive; <=3 nice shards.
+#   Write temp-then-cp — never `>` directly into the imported json.
+# R=$GLADLOG_EVAL_HOME/reports/sync-window-$(date +%F); mkdir -p $R
+# for i in 0 1 2; do nice -n 10 npx tsx packages/eval/scripts/syncWindowScan.ts scan \
+#   --manifest <newseason manifest> --ledger $GLADLOG_EVAL_HOME/archive/ledger \
+#   --out $R/shard$i.jsonl --offset $((i*N)) --limit N > $R/shard$i.log 2>&1 & done; wait
+# cat $R/shard*.jsonl > $R/windows.jsonl
+# npx tsx packages/eval/scripts/syncWindowScan.ts emit-table --in $R/windows.jsonl \
+#   --corpus "wowarenalogs archive $(date +%F)" > $R/table.json \
+#   && cp $R/table.json packages/analysis/src/data/syncWindowPriorGenerated.json
 # 6b-pre-3. Enemy-burst-window reference table (GH #60, wired to the product 2026-09-01): per (bracket, lead CD), the
 #   share of feasible burst windows in which a friendly died, split by whether the team answered
 #   within 8 s, plus the responders' most common answers. Corpus-driven, NOT DB2.

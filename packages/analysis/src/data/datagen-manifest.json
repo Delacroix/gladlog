@@ -121,6 +121,10 @@
       "bytes": 2546,
       "generator": "packages/eval/scripts/kickLockoutScan.ts",
       "consumer": "data/spellCategories.ts kickLockoutSeconds (GH #62)"
+    },
+    "syncWindowPriorGenerated.json": {
+      "entries": 3,
+      "producer": "packages/eval/scripts/syncWindowScan.ts emit-table"
     }
   }
 }

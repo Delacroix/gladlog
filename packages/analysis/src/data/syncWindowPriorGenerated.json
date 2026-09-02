@@ -1,0 +1,28 @@
+{
+  "meta": {
+    "corpus": "wowarenalogs archive 2026-08-28 newseason manifest (18134 matches), post-GH61 CD_INSTANT_SLACK_S",
+    "generatedAt": "2026-09-02",
+    "windows": 30020,
+    "predicate": "eligible window: enemyHealerCcWindows, rendered dur>=3s, rendered t>=30s, no enemy death in-window, >=1 canonical OFFENSIVE_CD_SPELL_IDS ready at window start; entered = canonical offensive CD cast in [from-2s, to]; kill15 = enemy death in (from, from+15s]"
+  },
+  "cells": {
+    "Rated Solo Shuffle": {
+      "nEntered": 5639,
+      "killEntered": 0.10622450789147012,
+      "nUnentered": 11094,
+      "killUnentered": 0.06183522624842257
+    },
+    "2v2": {
+      "nEntered": 1986,
+      "killEntered": 0.1339375629405841,
+      "nUnentered": 3333,
+      "killUnentered": 0.060006000600060005
+    },
+    "3v3": {
+      "nEntered": 3538,
+      "killEntered": 0.11616732617297909,
+      "nUnentered": 4430,
+      "killUnentered": 0.05756207674943566
+    }
+  }
+}

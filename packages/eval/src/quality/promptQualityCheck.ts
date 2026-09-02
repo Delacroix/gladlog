@@ -41,6 +41,12 @@ import {
 } from "@gladlog/analysis/src/data/burstWindowPrior";
 import { classMetadata } from "@gladlog/analysis/src/data/classSpells";
 import { ATTEMPT_INTO_TRINKET_OUTCOME_REF } from "@gladlog/analysis/src/data/outcomeRefs";
+import {
+  lookupSyncWindowPrior,
+  SYNC_REF_MIN_CONTRAST_PP,
+  syncRefClearsMinContrast,
+  syncRefContrastPp,
+} from "@gladlog/analysis/src/data/syncWindowPrior";
 import { canHelpAnotherUnit } from "@gladlog/analysis/src/utils/cooldowns";
 import { fmtTime } from "@gladlog/analysis/src/utils/renderGrid";
 import fs from "fs-extra";
@@ -753,6 +759,67 @@ export function checkBurstWindowRefConsistency(lines: string[]): string[] {
   return failures;
 }
 
+/** missed-sync-window (GH #13 resurrection, 2026-09-02): every rendered line
+ * must quote exactly the bracket cell syncWindowPrior.ts holds, and the
+ * quoted contrast must clear the same min-contrast door the producer used —
+ * a line citing numbers that argue against its own accusation is a
+ * hardFailure, not a style problem. */
+export function checkSyncWindowRefConsistency(lines: string[]): string[] {
+  const failures: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!line.includes("type=missed-sync-window ")) continue;
+    const m = line.match(/facts=\{(.*)\}\s*$/);
+    if (!m) {
+      failures.push(`line ${i + 1}: missed-sync-window 行无 facts`);
+      continue;
+    }
+    const f = parseFactsBlock(m[1]!);
+    const cellKey = f.cellKey ?? "";
+    if (!cellKey) {
+      failures.push(
+        `line ${i + 1}: missed-sync-window 缺 cellKey,无法核对语料参照`,
+      );
+      continue;
+    }
+    const ref = lookupSyncWindowPrior(cellKey);
+    if (!ref) {
+      failures.push(
+        `line ${i + 1}: missed-sync-window 引用了表里查不到/不够样本的单元格 ${cellKey}`,
+      );
+      continue;
+    }
+    const expect: Record<string, string> = {
+      cellKey: ref.cellKey,
+      refN: String(ref.nEntered + ref.nUnentered),
+      refKillEntered: String(ref.killEnteredPct),
+      refKillUnentered: String(ref.killUnenteredPct),
+    };
+    for (const [k, v] of Object.entries(expect))
+      if (f[k] !== v)
+        failures.push(
+          `line ${i + 1}: missed-sync-window ${k}=${f[k]} 与参照表 ${v} 不一致(${ref.cellKey})`,
+        );
+    const rendered = {
+      killEnteredPct: Number(f.refKillEntered),
+      killUnenteredPct: Number(f.refKillUnentered),
+    };
+    if (
+      !Number.isFinite(rendered.killEnteredPct) ||
+      !Number.isFinite(rendered.killUnenteredPct)
+    ) {
+      failures.push(
+        `line ${i + 1}: missed-sync-window 的 refKillEntered/refKillUnentered 不是数字,无法核对最小对比度门槛`,
+      );
+    } else if (!syncRefClearsMinContrast(rendered)) {
+      failures.push(
+        `line ${i + 1}: missed-sync-window 引用的对比度只有 ${syncRefContrastPp(rendered)} pp(${f.refKillEntered}% vs ${f.refKillUnentered}%),低于门槛 ${SYNC_REF_MIN_CONTRAST_PP} pp —— 被引用的数字在反驳这条指控(${ref.cellKey})`,
+      );
+    }
+  }
+  return failures;
+}
+
 /** The roster line that assigns every player the numeric id each [STATE]
  * token is keyed on: `<unit id="3" name="Supatease-Tichondrius-US" …>`. */
 const UNIT_ROSTER_LINE = /<unit\s+id="(\d+)"\s+name="([^"]+)"/;
@@ -1322,6 +1389,7 @@ export function checkMatch(
   hardFailures.push(...checkHealedThroughConsistency(lines));
   hardFailures.push(...checkBehaviorPriorConsistency(lines));
   hardFailures.push(...checkBurstWindowRefConsistency(lines));
+  hardFailures.push(...checkSyncWindowRefConsistency(lines));
   hardFailures.push(...checkCrisisHpStateConsistency(lines));
   hardFailures.push(...checkOutcomeRefConsistency(lines));
   hardFailures.push(...checkMenuTRenderGrid(lines));

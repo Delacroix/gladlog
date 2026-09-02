@@ -11,6 +11,10 @@
 import { costNormPhrase } from "../../data/curatedAbilityFacts";
 import { spellEffectData } from "../../data/spellEffectData";
 import { reachesAlly } from "../../data/spellTargeting";
+import {
+  syncRefClearsMinContrast,
+  type SyncWindowPriorRef,
+} from "../../data/syncWindowPrior";
 import { burstCastSpan } from "../../utils/burstLedger";
 import {
   canHelpAnotherUnit,
@@ -168,31 +172,51 @@ export function enemyMinHpPctInWindow(
 const MISSED_SYNC_WINDOW_CAP = 2; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>
 
 /**
- * missed-sync-window (P1 起爆-1, 2026-08-15, user-ruled definition): a window
- * where the enemy healer sat in hard CC (`enemyHealerCcWindows`) while >=1
- * friendly offensive major cooldown was ready (`cdAvailableAt`, checked at
- * the window's start — the instant the opportunity opened) AND no friendly
- * offensive major was cast anywhere inside the window (the team had the lock
- * and the tool, and did not press it).
+ * missed-sync-window (P1 起爆-1, 2026-08-15; REDESIGNED 2026-09-02 — the
+ * GH #13 resurrection, user-approved): a window where the enemy healer sat in
+ * hard CC (`enemyHealerCcWindows`) while >=1 friendly canonical offensive
+ * major cooldown was ready (`cdAvailableAt` at the window's start) AND no
+ * friendly canonical offensive major was cast in [start−2s, end] (the team
+ * had the lock and the tool, and did not press it).
+ *
+ * What the resurrection changed vs the 2026-08-15 predicate (each item is
+ * shared with syncWindowScan.ts — the reference table and the candidate are
+ * about the same population by construction, CLAUDE.md shared-predicate
+ * rule):
+ *   - CD table: caller now filters on `OFFENSIVE_CD_SPELL_IDS`
+ *     (spellDanger.ts, chg9 canonical 47) instead of `isThroughput`, which
+ *     had been listing Tiger's Lust / Berserker Shout / racials as "ready
+ *     offensive CDs".
+ *   - Eligibility: rendered duration >= SYNC_WINDOW_MIN_DUR_S; rendered
+ *     start >= SYNC_WINDOW_MIN_T_S (opener/setup windows excluded); windows
+ *     containing an enemy death are excluded (a kill already converting
+ *     without CDs is not a missed sync).
+ *   - entered: the press may lead the lock by up to SYNC_ENTER_LEAD_S — a CD
+ *     opened 1 s before the stun lands is sync, not a miss.
+ *   - Reference + door: the bracket's corpus cell (syncWindowPrior.ts) is
+ *     quoted in facts, and a bracket whose entered/unentered kill contrast
+ *     is under `SYNC_REF_MIN_CONTRAST_PP` (or whose cell misses the n floor)
+ *     produces NO candidates — this is what keeps the flood GH #13
+ *     documented (74% fire rate, mostly Solo Shuffle) from returning
+ *     without hand-coding a bracket list.
  *
  * B8 red line (user-ruled, non-negotiable, CI-pinned by a dedicated test):
- * NO HP gate. Enemy HP is carried in facts as an accelerator only — the B1
- * finale evidence was 93% HP burned dead in 4s once the sync actually
- * happened, so gating on a blood threshold would have suppressed the exact
- * case the whole P1 finding exists to catch. `minHp === null` (no advanced
- * logging) still emits; the fact is simply omitted, never treated as a
- * reason to withhold the candidate.
+ * NO HP gate — unchanged by the resurrection. Enemy HP is carried in facts
+ * as an accelerator only; `minHp === null` (no advanced logging) still
+ * emits. (The death-in-window exclusion above is an outcome-event gate, not
+ * a blood threshold: the 93%-to-dead B1 finale case B8 protects has no
+ * enemy death BEFORE the sync and still fires.)
  *
  * Fact/suggestion split (CLAUDE.md decision-point-card discipline): facts
- * carry only what happened (the window existed, the CC, the ready list, the
- * observed HP) — "you should have burst" lives in buildFindingsPrompt's
- * legend text, never phrased into a fact value here.
+ * carry only what happened plus the corpus reference numbers — "you should
+ * have burst" lives in buildFindingsPrompt's legend text.
  *
- * Severity/cap: sorted by rendered window length (CC_LOCKED-style — a longer
- * lock is a bigger missed opportunity, the same "how much time was on the
- * table" logic `cc-held` already sorts by), then capped (see the constant's
- * doc comment for the TEMPORARY-until-calibration cap value).
+ * Severity/cap: sorted by rendered window length (a longer lock is a bigger
+ * missed opportunity), then capped at MISSED_SYNC_WINDOW_CAP.
  */
+export const SYNC_WINDOW_MIN_T_S = 30;
+export const SYNC_WINDOW_MIN_DUR_S = 3;
+export const SYNC_ENTER_LEAD_S = 2;
 export function missedSyncWindowEvents(
   ccWindows: Pick<
     IEnemyHealerCcWindow,
@@ -200,31 +224,50 @@ export function missedSyncWindowEvents(
   >[],
   offensiveCds: Pick<
     IMajorCooldownInfo,
-    "spellId" | "spellName" | "casts" | "cooldownSeconds" | "neverUsed"
+    "spellId" | "spellName" | "casts" | "cooldownSeconds" | "neverUsed" | "charges"
   >[],
   probes: {
     /** Wired to enemyMinHpPctInWindow in production. Accelerator-only, see
      * the B8 doc comment above — must NEVER gate the candidate. */
     enemyMinHpPctAt: (fromSeconds: number, toSeconds: number) => number | null;
+    /** seconds (match-relative) of every enemy deathRecord. */
+    enemyDeathS: number[];
+    /** The bracket's reference cell, or null when the bracket has no cell,
+     * misses the n floor, or fails the min-contrast door — null silences
+     * the type for the whole round (the resurrection's bracket gate). */
+    ref: SyncWindowPriorRef | null;
   },
   // Calibration-only override, same rationale as cdHoardedEvents' — defaults
   // to the module constant, production call sites unaffected.
   overrides?: { cap?: number },
 ): CandidateEvent[] {
   const cap = overrides?.cap ?? MISSED_SYNC_WINDOW_CAP;
+  const ref = probes.ref;
+  if (ref === null || !syncRefClearsMinContrast(ref)) return [];
   const candidates: Array<{
     w: (typeof ccWindows)[number];
     ready: string[];
     minHp: number | null;
   }> = [];
   for (const w of ccWindows) {
+    const t = toRenderSecond(w.fromSeconds);
+    if (t < SYNC_WINDOW_MIN_T_S) continue;
+    if (toRenderSecond(w.toSeconds) - t < SYNC_WINDOW_MIN_DUR_S) continue;
+    if (
+      probes.enemyDeathS.some(
+        (d) => d >= w.fromSeconds && d <= w.toSeconds,
+      )
+    )
+      continue;
     const ready = offensiveCds
       .filter((cd) => cdAvailableAt(cd, w.fromSeconds))
       .map((cd) => cd.spellName);
     if (ready.length === 0) continue;
     const castDuring = offensiveCds.some((cd) =>
       cd.casts.some(
-        (c) => c.timeSeconds >= w.fromSeconds && c.timeSeconds <= w.toSeconds,
+        (c) =>
+          c.timeSeconds >= w.fromSeconds - SYNC_ENTER_LEAD_S &&
+          c.timeSeconds <= w.toSeconds,
       ),
     );
     if (castDuring) continue;
@@ -249,10 +292,8 @@ export function missedSyncWindowEvents(
       return {
         // spellId disambiguates two CC windows on the same healer that floor
         // to the same rendered second (review fix round 2, 2026-08-15) — the
-        // other three new candidate types (unsynced-burst/cd-hoarded/
-        // cd-spent-idle) all include a spellId in their id already; this was
-        // the one exception. The menu id is the eventIds reference key, so a
-        // collision here corrupts adoption attribution, not just cosmetics.
+        // menu id is the eventIds reference key, so a collision here corrupts
+        // adoption attribution, not just cosmetics.
         id: `missed-sync-window:${w.healerName}:${w.spellId}:${t}`,
         type: "missed-sync-window",
         t,
@@ -264,15 +305,18 @@ export function missedSyncWindowEvents(
           windowEndT: String(windowEndT),
           healer: w.healerName,
           cc: w.spellName,
-          // Render-grid anchoring (CLAUDE.md 门规谓词即规范, task-2 review fix
-          // round 1): must be derived from the ALREADY-floored t/windowEndT,
-          // not from the raw fractional w.fromSeconds/w.toSeconds — otherwise
-          // durationS can silently disagree with windowEndT - t by up to ~1s
-          // whenever the CC application's real timestamps aren't whole
-          // seconds (the common case on real matches).
+          // Render-grid anchoring (CLAUDE.md 门规谓词即规范): derived from the
+          // ALREADY-floored t/windowEndT, not the raw fractional seconds.
           durationS: String(windowEndT - t),
           readyCds: ready.join("、"),
           ...(minHp !== null ? { enemyMinHpPct: fmt(minHp) } : {}),
+          // Corpus reference (syncWindowPrior.ts) — the gate
+          // (checkSyncWindowRefConsistency) redoes the lookup from cellKey
+          // and re-checks every one of these numbers plus the door.
+          refN: String(ref.nEntered + ref.nUnentered),
+          refKillEntered: String(ref.killEnteredPct),
+          refKillUnentered: String(ref.killUnenteredPct),
+          cellKey: ref.cellKey,
         },
       };
     });

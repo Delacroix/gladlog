@@ -41,8 +41,8 @@ describe("data layer", () => {
   });
   it("candidateTypeFlags(Task 9,2026-08-15 四个 P1/P2 起爆开关全量上线;2026-08-19 missedSyncWindow、2026-08-29 unsyncedBurst/missedPurge/ccHeld、2026-08-30 killReview/cdSpentIdle 下架);manaPressure/manaEfficiency 两开关已随候选退役删除(2026-08-21 管线审查第 3 条,#26 结案、后继 #33)", () => {
     expect(CANDIDATE_TYPE_FLAGS).toEqual({
-      // 2026-08-19 下架(GH #13,用户裁定)—— 见 candidateTypeFlags.ts 注
-      missedSyncWindow: false,
+      // 2026-09-02 复活(GH #13 撤销,用户裁定,重设计版)—— 见 candidateTypeFlags.ts 注
+      missedSyncWindow: true,
       // 2026-08-29 降级为上下文事实(GH #50 (a),用户裁定)—— 见 candidateTypeFlags.ts 注
       unsyncedBurst: false,
       cdHoarded: true,
