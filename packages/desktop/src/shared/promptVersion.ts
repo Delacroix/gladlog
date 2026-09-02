@@ -338,4 +338,8 @@
 //  KW_MAJOR_DEFENSIVE_IDS (− Apotheosis, + Ancient of Lore) — [KILL WINDOW]/
 //  [VULNERABLE] spans shift slightly on affected comps; official-face
 //  replacement measured and reverted (negative result in abilityProfile.ts).
-export const PROMPT_VERSION = 50;
+//  v51 (2026-09-02, GH #31 ①③): kill-window killability facts — [KILL WINDOW]
+//  lines carry team-offensive-CD-ready / reachability / enemy-healer-state
+//  facts, [VULNERABLE] accusations pass an accountability gate (acquitted
+//  spans say why), and the DPS view gains the lean <kill_windows> block.
+export const PROMPT_VERSION = 51;

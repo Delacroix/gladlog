@@ -317,7 +317,8 @@ describe("computeWindowContributions", () => {
       [enemyDk, enemyHealer],
       [makeWindow(40, 50)],
       [], // owner never CC'd
-      [], // enemy healer has no incoming CC history → DR Full
+      [], // enemy healer has no incoming CC history → DR Full,
+      stubFactsComputer,
     );
     expect(result.length).toBe(1);
     expect(result[0].enemyHealerName).toBe("Rsham");
@@ -356,6 +357,7 @@ describe("computeWindowContributions", () => {
       [makeWindow(40, 50)],
       [],
       [],
+      stubFactsComputer,
     );
     expect(result[0].ownerCCReady).toEqual([]); // 8122 on CD (35+40 > 40)
     expect(result[0].ownerCastCCInWindow).toBe(false);
@@ -368,6 +370,7 @@ describe("computeWindowContributions", () => {
       [makeWindow(30, 40)],
       [],
       [],
+      stubFactsComputer,
     );
     expect(result2[0].ownerCastCCInWindow).toBe(true); // cast at 35s ∈ [30, 40)
   });
@@ -400,6 +403,7 @@ describe("computeWindowContributions", () => {
           drInfo: { category: "Disorient", level: "Full", sequenceIndex: 0 },
         },
       ],
+      stubFactsComputer,
     );
     expect(result[0].ownerFreeSeconds).toBe(6);
     expect(result[0].ownerCCReady[0].enemyHealerDR).toBe("50%");
@@ -418,6 +422,7 @@ describe("computeWindowContributions", () => {
         { atSeconds: 43, durationSeconds: 3 }, // 43–46, overlaps the above
       ],
       [],
+      stubFactsComputer,
     );
     // Union of CC'd seconds is still {42,43,44,45} = 4s, so ownerFreeSeconds is 6, not 10-(4+3)=3.
     expect(result[0].ownerFreeSeconds).toBe(6);
@@ -705,6 +710,19 @@ describe("buildHealerOffenseSummary + formatHealerOffenseForContext", () => {
 
 import { MAX_KILL_WINDOW_LINES } from "../../src/utils/healerOffenseAnalysis";
 
+// GH #31 ① test stub: an always-accountable facts computer so pre-existing
+// window tests keep exercising their own concern; gate behaviour has its own
+// dedicated cases below/in killWindowFacts tests.
+const stubFactsComputer = {
+  facts: () => ({
+    readyOffCds: ["Avenging Wrath"],
+    reachable: true as boolean | null,
+    healerLocked: false,
+    accountable: true,
+  }),
+};
+
+
 describe("burst sub-windows (2026-07-17 kill-window redesign)", () => {
   it("computeBurstSubWindows: splits on gaps, drops sub-threshold clusters, caps count, clamps to span", () => {
     const events = [
@@ -754,6 +772,7 @@ describe("burst sub-windows (2026-07-17 kill-window redesign)", () => {
       [withBursts],
       [],
       [],
+      stubFactsComputer,
     );
     expect(punished.length).toBe(2);
     expect(punished[0]).toMatchObject({
@@ -773,6 +792,7 @@ describe("burst sub-windows (2026-07-17 kill-window redesign)", () => {
       [makeWindow(40, 140, [])],
       [],
       [],
+      stubFactsComputer,
     );
     expect(unpunished.length).toBe(1);
     expect(unpunished[0]).toMatchObject({
@@ -806,6 +826,7 @@ describe("burst sub-windows (2026-07-17 kill-window redesign)", () => {
           vulnToSeconds: 140,
           unpunished: false,
           teamDamageInVulnSpan: 90_000,
+          gateFacts: stubFactsComputer.facts(),
         },
         {
           ...base,
@@ -815,6 +836,7 @@ describe("burst sub-windows (2026-07-17 kill-window redesign)", () => {
           vulnToSeconds: 260,
           unpunished: true,
           teamDamageInVulnSpan: 8_000,
+          gateFacts: stubFactsComputer.facts(),
         },
       ],
       windowCreationFacts: [],
@@ -849,6 +871,7 @@ describe("formatHealerOffenseForContext KILL WINDOW cap", () => {
       ownerDamageInWindow: 1000 * i,
       ownerFreeSeconds: freeSeconds,
       teamMinHpPct: 95,
+      gateFacts: stubFactsComputer.facts(),
     };
   }
 
@@ -1192,6 +1215,7 @@ describe("F193 V2 — contested trade facts", () => {
           event: LogEvent.SPELL_DAMAGE,
           timestamp: T0 + 15_000,
           parameters: [],
+          gateFacts: stubFactsComputer.facts(),
         },
         timestamp: T0 + 15_000,
         effectiveAmount: 10_000,

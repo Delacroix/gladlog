@@ -1,5 +1,9 @@
 import { AtomicArenaCombat, ICombatUnit } from "@gladlog/parser-compat";
 
+import {
+  type BurstWindowDecisionPoint,
+  burstWindowDecisionPoints,
+} from "../analysis/burstWindowDecisionPoints";
 import { zoneMetadata } from "../data/zoneMetadata";
 import { buildArchetypeInjectionHeader } from "../utils/archetypeInjection";
 import {
@@ -7,8 +11,8 @@ import {
   auditWindowTargeting,
   formatBurstLedgerForContext,
 } from "../utils/burstLedger";
-import { analyzePlayerCCAndTrinket } from "../utils/ccTrinketAnalysis";
 import { analyzeCcBreaks } from "../utils/ccBreakAnalysis";
+import { analyzePlayerCCAndTrinket } from "../utils/ccTrinketAnalysis";
 import { extractStasisEvents } from "../utils/combatStates";
 import {
   annotateDefensiveTimings,
@@ -52,6 +56,10 @@ import {
   extractKillAttempts,
   formatKillAttemptsForContext,
 } from "../utils/killAttempts";
+import {
+  buildDpsKillWindowLines,
+  createKillWindowFactsComputer,
+} from "../utils/killWindowFacts";
 import { matchMinHpPct } from "../utils/killWindowTargetSelection";
 import { computeMatchArchetype } from "../utils/matchArchetype";
 import {
@@ -64,6 +72,10 @@ import {
   formatPositionEventsForContext,
 } from "../utils/positionAnalysis";
 import { fmtTime, toRenderSecond } from "../utils/renderGrid";
+import {
+  computeRootReachability,
+  formatRootReachabilityEntries,
+} from "../utils/rootReachability";
 import {
   benchmarks,
   formatDTPSBaselines,
@@ -82,14 +94,6 @@ import {
   BuildMatchTimelineParams,
   buildPlayerLoadout,
 } from "./utils";
-import {
-  computeRootReachability,
-  formatRootReachabilityEntries,
-} from "../utils/rootReachability";
-import {
-  burstWindowDecisionPoints,
-  type BurstWindowDecisionPoint,
-} from "../analysis/burstWindowDecisionPoints";
 
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -523,6 +527,28 @@ export function buildMatchContext(
       tLines.push("<burst_ledger>");
       ledgerLines.forEach((l) => tLines.push(l));
       tLines.push("</burst_ledger>");
+    }
+    // GH #31 ③ (2026-09-02, user-ruled): the DPS view gets the kill-window
+    // facts too — a lean block sharing the healer view's span set and the
+    // SAME gate-facts computer (killWindowFacts.ts), without the healer-only
+    // owner-CC/slack fields. Same [VULNERABLE] accountability gate.
+    const kwLines = buildDpsKillWindowLines(
+      offensiveWindows,
+      enemies as ICombatUnit[],
+      createKillWindowFactsComputer(
+        combat,
+        friends as ICombatUnit[],
+        enemies as ICombatUnit[],
+      ),
+    );
+    if (kwLines.length > 0) {
+      tLines.push("");
+      tLines.push("<kill_windows>");
+      tLines.push(
+        "KILL WINDOWS (enemy vulnerability spans — team facts, not verdicts):",
+      );
+      kwLines.forEach((l) => tLines.push(l));
+      tLines.push("</kill_windows>");
     }
   }
 

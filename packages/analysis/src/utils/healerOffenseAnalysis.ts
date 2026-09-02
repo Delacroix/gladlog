@@ -1,10 +1,9 @@
 import { ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 
-import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import { SPELL_CATEGORIES as spellsData } from "../data/spellCategories";
+import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import { ccSpellIds } from "../data/spellTags";
 import { isHealerSpec, specToString } from "./cooldowns";
-import { fmtTime, renderedWindowSeconds } from "./renderGrid";
 import {
   DRLevel,
   getDRCategory,
@@ -14,10 +13,18 @@ import {
 import { IEnemyCDTimeline } from "./enemyCDs";
 import { computeEnemyInterruptAvailability } from "./enemyInterrupts";
 import {
+  createKillWindowFactsComputer,
+  type IKillWindowFactsComputer,
+  type IKillWindowGateFacts,
+  killWindowAcquittal,
+  killWindowFactsSuffix,
+} from "./killWindowFacts";
+import {
   getHpPercentAtTime,
   getTrinketStateAtTime,
 } from "./killWindowTargetSelection";
 import { IOffensiveWindow } from "./offensiveWindows";
+import { fmtTime, renderedWindowSeconds } from "./renderGrid";
 
 type SpellEntry = { type: string };
 const SPELLS = spellsData as Record<string, SpellEntry>;
@@ -446,6 +453,8 @@ export interface IWindowContribution {
   ownerFreeSeconds: number;
   /** Lowest friendly HP% during the window; null without advanced logging. */
   teamMinHpPct: number | null;
+  /** GH #31 ① killability gate-facts (shared computer, killWindowFacts.ts). */
+  gateFacts: IKillWindowGateFacts;
 }
 
 interface IOwnerCCSpell {
@@ -505,6 +514,7 @@ export function computeWindowContributions(
   offensiveWindows: IOffensiveWindow[],
   ownerCCInstances: CCInterval,
   enemyHealerCCInstances: CCWithDR,
+  factsComputer: IKillWindowFactsComputer,
 ): IWindowContribution[] {
   const matchStartMs = combat.startTime;
   const enemyHealer = enemies.find((e) => isHealerSpec(e.spec)) ?? null;
@@ -578,6 +588,17 @@ export function computeWindowContributions(
       }
     }
 
+    const targetUnit = enemies.find((e) => e.id === w.targetUnitId) ?? null;
+    const gateFacts: IKillWindowGateFacts = targetUnit
+      ? factsComputer.facts(targetUnit, fromSeconds, toSeconds)
+      : // No unit record for the span target: fail toward acquittal — an
+        // accusation must never rest on facts we could not compute.
+        {
+          readyOffCds: [],
+          reachable: null,
+          healerLocked: false,
+          accountable: false,
+        };
     return {
       fromSeconds,
       toSeconds,
@@ -594,6 +615,7 @@ export function computeWindowContributions(
       ownerDamageInWindow,
       ownerFreeSeconds,
       teamMinHpPct,
+      gateFacts,
     };
   };
 
@@ -708,7 +730,11 @@ export interface IHealerOffenseSummary {
 }
 
 export function buildHealerOffenseSummary(
-  combat: { startTime: number; endTime: number },
+  combat: {
+    startTime: number;
+    endTime: number;
+    startInfo?: { zoneId?: string };
+  },
   owner: ICombatUnit,
   friends: ICombatUnit[],
   enemies: ICombatUnit[],
@@ -767,6 +793,7 @@ export function buildHealerOffenseSummary(
       offensiveWindows,
       ownerCCInstances,
       enemyHealerCCInstances,
+      createKillWindowFactsComputer(combat, friends, enemies),
     ),
     windowCreationFacts: computeWindowCreationFacts(
       combat,
@@ -887,9 +914,16 @@ export function formatHealerOffenseForContext(
         : "";
     if (w.unpunished) {
       // No qualifying team damage burst in the whole vulnerability span — the
-      // missed-opportunity case. Rendered as a state, not a kill attempt.
+      // missed-opportunity case. GH #31 ① (2026-09-02): the accusation
+      // ("never punished") now passes through the killability gate — a span
+      // with no ready offensive CD or a provably unreachable target renders
+      // as an acquitted state, never a reproach (the value-gate smoke showed
+      // teams killing WITHOUT ready CDs, so the gate binds only this side).
+      const verdict = w.gateFacts.accountable
+        ? "never punished"
+        : `not punished — not accountable (${killWindowAcquittal(w.gateFacts)})`;
       lines.push(
-        `  [VULNERABLE] ${fmtTime(w.fromSeconds)}–${fmtTime(w.toSeconds)} (${renderedWindowSeconds(w.fromSeconds, w.toSeconds)}s) on ${w.targetSpec} (${w.targetName}): no major defensives, never punished (team damage ${(w.teamDamageInVulnSpan / 1000).toFixed(0)}k total); ${ready}; ${cast}; ${dmg}; ${free}${teamHp}.`,
+        `  [VULNERABLE] ${fmtTime(w.fromSeconds)}–${fmtTime(w.toSeconds)} (${renderedWindowSeconds(w.fromSeconds, w.toSeconds)}s) on ${w.targetSpec} (${w.targetName}): no major defensives, ${verdict} (team damage ${(w.teamDamageInVulnSpan / 1000).toFixed(0)}k total); ${killWindowFactsSuffix(w.gateFacts)}; ${ready}; ${cast}; ${dmg}; ${free}${teamHp}.`,
       );
     } else {
       // Kill windows are team-damage bursts inside the vulnerability span; the
@@ -899,7 +933,7 @@ export function formatHealerOffenseForContext(
           ? `; target defenseless ${fmtTime(w.vulnFromSeconds)}–${fmtTime(w.vulnToSeconds)}`
           : "";
       lines.push(
-        `  [KILL WINDOW] ${fmtTime(w.fromSeconds)}–${fmtTime(w.toSeconds)} on ${w.targetSpec} (${w.targetName}): ${ready}; ${cast}; ${dmg}; ${free}${teamHp}${spanNote}.`,
+        `  [KILL WINDOW] ${fmtTime(w.fromSeconds)}–${fmtTime(w.toSeconds)} on ${w.targetSpec} (${w.targetName}): ${killWindowFactsSuffix(w.gateFacts)}; ${ready}; ${cast}; ${dmg}; ${free}${teamHp}${spanNote}.`,
       );
     }
   }

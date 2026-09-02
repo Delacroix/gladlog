@@ -70,6 +70,7 @@ import * as drAnalysis from "@gladlog/analysis/src/utils/drAnalysis";
 import * as enemyCDs from "@gladlog/analysis/src/utils/enemyCDs";
 import { HEALER_OFFENSE_FLAGS } from "@gladlog/analysis/src/utils/healerOffenseAnalysis";
 import * as incomingPressure from "@gladlog/analysis/src/utils/incomingPressure";
+import * as killWindowFactsMod from "@gladlog/analysis/src/utils/killWindowFacts";
 import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWindowTargetSelection";
 import * as losAnalysis from "@gladlog/analysis/src/utils/losAnalysis";
 import * as positionAnalysis from "@gladlog/analysis/src/utils/positionAnalysis";
@@ -670,6 +671,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/data/abilityProfile.ts`,
     symbol: "isKillWindowMajorDefensive",
     mod: abilityProfileMod,
+  },
+  {
+    file: `${A}/utils/killWindowFacts.ts`,
+    symbol: "createKillWindowFactsComputer",
+    mod: killWindowFactsMod,
   },
   {
     file: `${A}/data/outcomeRefs.ts`,
