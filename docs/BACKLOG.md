@@ -898,8 +898,9 @@ Classified by suspected root cause; work begins after completing the currently r
    (2026-08-18) had already mined the same −30 for 473909 but that table has zero consumers — product arithmetic reads
    `MITIGATION_TABLE` only.
    **Acceptance (same criterion before/after, 12 S2 files with the aura / 32 rounds / 92 owner views, healer + every
-   DPS owner)**: per-type candidate counts identical (burst-into-mitigation 5 → 5 — verdict `unresolved` never
-   surfaces), findings-prompt SHA256 identical; match-context changed in exactly one mechanism — the kill-attempt
+   DPS owner)**: per-type candidate counts identical (burst-into-mitigation 5 → 5; that candidate reads `MITIGATION_TABLE`
+   directly and does not consult the verdict — the verdict gates the OFFENSIVE-WASTE context lines instead, and
+   `unresolved` renders none of them), findings-prompt SHA256 identical; match-context changed in exactly one mechanism — the kill-attempt
    ledger (`killAttempts.ts` reads `MITIGATION_TABLE` for "popped a real defensive"): 13 of 609 `FAILED:` lines
    (6 distinct attempt windows, rendered per owner view) moved from `not enough damage` ×9 / `popped Barkskin` ×2 /
    `popped Ironbark` ×2 to `popped Ancient of Lore` / `Barkskin/Ancient of Lore` / `Ironbark/Ancient of Lore`.
