@@ -8,8 +8,17 @@
  *
  * Regenerate (spec §3; REQUIRED after any change to crisisDecisionPoints.ts):
  *   npx tsx packages/eval/scripts/behaviorPriorScan.ts scan … && emit-table …
- *   > packages/analysis/src/data/behaviorPriorGenerated.json
+ *   into a TEMP file, then cp over packages/analysis/src/data/
+ *   behaviorPriorGenerated.json — never `>` straight into the imported json
+ *   (a crash mid-write would truncate what the product imports).
  * Runbook: docs/commands/update-wow-data.md step 6b-pre-2.
+ *
+ * Current table: eval-private/reports/behavior-prior-2026-09-02/ —
+ * regenerated 2026-09-02 over the same 18,134-match 12.1 archive after
+ * GH #34 chg2b anchored crisisDecisionPoints onto the render grid (16,040 →
+ * 13,364 decision points; crossings no whole rendered second can see are
+ * dropped). Same 9 cells, no death-contrast sign flip, max contrast move
+ * 3 pp vs the 2026-08-28 v8 basis (reports/behavior-prior-2026-08-28/).
  */
 import raw from "./behaviorPriorGenerated.json";
 

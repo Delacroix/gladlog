@@ -317,4 +317,16 @@
 //     slow-defensive-response line's refN/refDeathResp/refDeathNoResp/refTop
 //     comes from the new table, and a v46 cached line's reference numbers
 //     are hardFailures under the v47 `checkBurstWindowRefConsistency` gate.
-export const PROMPT_VERSION = 47;
+//  v48 (2026-09-02, GH #34 chg10): behaviorPriorGenerated.json regenerated on
+//  the render-grid-anchored decision-point population — v43 item 2's
+//  anchorToRenderGrid changed which crossings exist (16,040 → 13,364 decision
+//  points over the same 18,134-match archive; a dip no whole rendered second
+//  can see no longer produces a point), so the shipped table had drifted from
+//  the predicate that now feeds it. Same 9 cells, no death-contrast sign flip
+//  (max move 3 pp), but every cell's nNoResp/nResp changed and refTop's
+//  composition changed in 3 of 9 cells — every crisis-no-response line's
+//  refNNoResp/refDeathNoResp/refNResp/refDeathResp/refTop now comes from the
+//  new table, and a v47 cached line's reference numbers are hardFailures
+//  under checkBehaviorPriorConsistency. Scan artifacts:
+//  eval-private/reports/behavior-prior-2026-09-02/.
+export const PROMPT_VERSION = 48;
