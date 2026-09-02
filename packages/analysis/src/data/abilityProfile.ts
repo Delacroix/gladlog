@@ -71,6 +71,8 @@ export interface AbilityProfile {
 /** 用户签字的产出强化册(kind `throughput_role`),经 cooldowns 派生。
  *  这里用文件路径直接读签字册,避免 data → utils 的反向依赖。 */
 import { CURATED_ABILITY_FACTS } from "./curatedAbilityFacts";
+import { spellEffectData } from "./spellEffectData";
+import spellIdListsData from "./spellIdLists";
 const THROUGHPUT_ROLE_IDS = new Set<string>(
   CURATED_ABILITY_FACTS.filter((f) => f.kind === "throughput_role").map(
     (f) => f.id,
@@ -121,5 +123,57 @@ export function isSurvivalWall(spellId: string): boolean {
     p.absorbs ||
     p.immuneSchools !== undefined ||
     (p.immuneMechanics?.length ?? 0) > 0
+  );
+}
+
+// ── GH #31 ② (2026-09-02, user-ruled): kill-window major-defensive predicate ──
+
+/**
+ * The curated kill-window major-defensive roster — the old
+ * `spellIdLists.externalOrBigDefensiveSpellIds` hand list, single-sourced
+ * here, MINUS Apotheosis 200183 (user sign-off 2026-09-02: throughput CD,
+ * wrong table) PLUS Ancient of Lore 473909 (audit find: user-ruled 30%
+ * mitigation in GH #44, genuinely missing from the hand list).
+ *
+ * NEGATIVE RESULT recorded (2026-09-02, kwDefDiagScan on 200 archive files):
+ * replacing this roster with the official DB2 face was tried and REVERTED —
+ * `absorbs` is a boolean (DB2 stores no size), so the face admits every 30s
+ * spam barrier (Ice/Prismatic/Blazing Barrier, 700 casts in 200 files) and
+ * `immuneSchools` carries target-side semantics (Imprison, Time Stop), which
+ * fragmented spans +12% and dropped span-kill −5pp. The face lives on as the
+ * season AUDIT (kwDefAdmitScan-style: it found Ancient of Lore), never the
+ * runtime predicate. Same lesson as official-data-over-heuristics: official
+ * fields must be measured before trusted.
+ */
+export const KW_MAJOR_DEFENSIVE_IDS: ReadonlySet<string> = new Set([
+  ...((spellIdListsData as { externalOrBigDefensiveSpellIds?: string[] })
+    .externalOrBigDefensiveSpellIds ?? []),
+  "473909", // Ancient of Lore (GH #44: official 30%)
+].filter((id) => id !== "200183")); // Apotheosis dropped
+
+/** Same floor the kill-window state machine has always applied — hoisted from
+ * offensiveWindows.ts's literal so scan/product/gate share one number. */
+export const KW_MAJOR_DEF_MIN_CD_S = 30;
+
+/** Cooldown seconds the kill-window family reasons with — spellEffectData's
+ * official field, single-sourced here so the predicate and the span state
+ * machine can never disagree on it. */
+export function kwCooldownSeconds(spellId: string): number {
+  const eff = (spellEffectData as Record<string, any>)[spellId];
+  return eff?.cooldownSeconds ?? eff?.charges?.chargeCooldownSeconds ?? 0;
+}
+
+/**
+ * Is this spell a MAJOR defensive for KILL-WINDOW purposes — i.e., while its
+ * buff runs (or while it is available), the enemy is NOT "defenseless"?
+ * Curated roster + >=30s cooldown (see the roster's doc comment for why the
+ * official face was reverted). Deliberately NOT the same predicate as
+ * cooldowns.ts's `MAJOR_DEFENSIVE_IDS` (rendering priority / self-only-claim
+ * family) — documented in docs/predicate-index.md.
+ */
+export function isKillWindowMajorDefensive(spellId: string): boolean {
+  return (
+    KW_MAJOR_DEFENSIVE_IDS.has(spellId) &&
+    kwCooldownSeconds(spellId) >= KW_MAJOR_DEF_MIN_CD_S
   );
 }

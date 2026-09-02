@@ -4,9 +4,13 @@ import {
   LogEvent,
 } from "@gladlog/parser-compat";
 
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+// GH #31 ② (2026-09-02): shared official-face predicate replaces the hand set.
+import { isKillWindowMajorDefensive } from "../data/abilityProfile";
 import { MITIGATION_TABLE } from "../data/mitigationData";
 import { spellEffectData } from "../data/spellEffectData";
-import spellIdListsData from "../data/spellIdLists";
 import {
   applyCdTalentModifiers,
   cdAvailableAt,
@@ -18,18 +22,9 @@ import {
   specToString,
   USABLE_WHILE_CC_SPELL_IDS,
 } from "./cooldowns";
-import { fmtTime } from "./renderGrid";
 import { IOffensiveWindow } from "./offensiveWindows";
+import { fmtTime } from "./renderGrid";
 import { DPS_TRINKET_CD_S, HEALER_TRINKET_CD_S } from "./trinketCooldown";
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const MAJOR_DEF_IDS = new Set<string>(
-  (spellIdListsData as unknown as { externalOrBigDefensiveSpellIds?: string[] })
-    .externalOrBigDefensiveSpellIds ?? [],
-);
 
 /** PvP trinket spell IDs that break CC / grant freedom. Exported 2026-08-18:
  * killAttempts.ts detects "target trinketed OUT of the stun" from the same id
@@ -206,7 +201,7 @@ function getDefensiveStateAtTime(
   for (const cast of enemy.spellCastEvents) {
     if (cast.logLine.event !== LogEvent.SPELL_CAST_SUCCESS) continue;
     const { spellId } = cast;
-    if (!spellId || !MAJOR_DEF_IDS.has(spellId)) continue;
+    if (!spellId || !isKillWindowMajorDefensive(spellId)) continue;
 
     const castSeconds = (cast.logLine.timestamp - matchStartMs) / 1000;
     if (castSeconds >= windowStartSeconds) continue; // after our snapshot time

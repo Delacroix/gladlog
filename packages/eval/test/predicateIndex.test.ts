@@ -42,6 +42,7 @@ import * as timelineHelpers from "@gladlog/analysis/src/context/timelineHelpers"
 import * as arenaGeometry from "@gladlog/analysis/src/data/arenaGeometry";
 import * as behaviorPrior from "@gladlog/analysis/src/data/behaviorPrior";
 import * as syncWindowPrior from "@gladlog/analysis/src/data/syncWindowPrior";
+import * as abilityProfileMod from "@gladlog/analysis/src/data/abilityProfile";
 import * as burstWindowPrior from "@gladlog/analysis/src/data/burstWindowPrior";
 import * as candidateTypeFlags from "@gladlog/analysis/src/data/candidateTypeFlags";
 import { CANDIDATE_TYPE_FLAGS } from "@gladlog/analysis/src/data/candidateTypeFlags";
@@ -658,6 +659,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/data/syncWindowPrior.ts`,
     symbol: "lookupSyncWindowPrior",
     mod: syncWindowPrior,
+  },
+  {
+    file: `${A}/data/abilityProfile.ts`,
+    symbol: "isKillWindowMajorDefensive",
+    mod: abilityProfileMod,
   },
   {
     file: `${A}/data/outcomeRefs.ts`,

@@ -334,4 +334,8 @@
 //  enemy-death-in-window exclusion, per-bracket corpus reference facts
 //  (refN/refKillEntered/refKillUnentered/cellKey) with a >=3pp min-contrast
 //  door; its legend rewritten to explain the reference.
-export const PROMPT_VERSION = 49;
+//  v50 (2026-09-02, GH #31 ②): kill-window defensive roster single-sourced as
+//  KW_MAJOR_DEFENSIVE_IDS (− Apotheosis, + Ancient of Lore) — [KILL WINDOW]/
+//  [VULNERABLE] spans shift slightly on affected comps; official-face
+//  replacement measured and reverted (negative result in abilityProfile.ts).
+export const PROMPT_VERSION = 50;

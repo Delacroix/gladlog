@@ -2,9 +2,7 @@ import { AtomicArenaCombat, ICombatUnit } from "@gladlog/parser-compat";
 
 import { SPELL_CATEGORIES as spellsData } from "../data/spellCategories";
 import { getEnglishSpellName } from "../data/spellEffectData";
-import spellIdListsData from "../data/spellIdLists";
 import { getUnitHpAtTimestamp, HP_SAMPLE_RADIUS_MS } from "./cooldowns";
-import { fmtTime } from "./renderGrid";
 import {
   BURST_CLUSTER_SECONDS,
   IEnemyCDCast,
@@ -13,6 +11,7 @@ import {
 import type { IKickAuditEntry } from "./kickAudit";
 import { MIN_WINDOW_SECONDS } from "./killWindowTargetSelection";
 import { IOffensiveWindow } from "./offensiveWindows";
+import { fmtTime } from "./renderGrid";
 import { buildFilteredAuraIntervals } from "./utils";
 
 type SpellEntry = { type: string };
@@ -20,12 +19,15 @@ const SPELLS = spellsData as Record<string, SpellEntry>;
 
 /** Immunity + major-defensive ids a burst can be wasted into (same list the kill-window
  * target snapshot uses for "defensives spent"). */
+// GH #31 ② (2026-09-02): shared official-face predicate replaces the hand set
+// (immunities stay — immuneSchools covers most, the category term keeps parity
+// for entries the face lacks).
+import { isKillWindowMajorDefensive } from "../data/abilityProfile";
+import { spellEffectData } from "../data/spellEffectData";
 const DEF_OR_IMMUNE_IDS = new Set<string>([
-  ...((
-    spellIdListsData as unknown as {
-      externalOrBigDefensiveSpellIds?: string[];
-    }
-  ).externalOrBigDefensiveSpellIds ?? []),
+  // Enumerate the official universe through the shared predicate — the same
+  // ids the span state machine reasons with, so the two can never disagree.
+  ...Object.keys(spellEffectData).filter(isKillWindowMajorDefensive),
   ...Object.keys(SPELLS).filter((id) => SPELLS[id]?.type === "immunities"),
 ]);
 

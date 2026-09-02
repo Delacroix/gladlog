@@ -4,17 +4,18 @@ import {
   LogEvent,
 } from "@gladlog/parser-compat";
 
-import { SpellTag } from "../data/spellTypes";
-
-import { spellEffectData } from "../data/spellEffectData";
-import spellIdListsData from "../data/spellIdLists";
+// GH #31 ② (2026-09-02): the hand list is replaced by the shared official-face
+// predicate; the curated remainder lives as its registered fallback floor.
+import {
+  isKillWindowMajorDefensive,
+  KW_MAJOR_DEF_MIN_CD_S,
+  kwCooldownSeconds,
+} from "../data/abilityProfile";
 import { SPELL_CATEGORIES as spellsData } from "../data/spellCategories";
+import { spellEffectData } from "../data/spellEffectData";
+import { SpellTag } from "../data/spellTypes";
 import { extractMajorCooldowns, specToString } from "./cooldowns";
 import { fmtTime, renderedWindowSeconds } from "./renderGrid";
-
-const EXTERNAL_BIG_DEF_IDS = new Set<string>(
-  spellIdListsData.externalOrBigDefensiveSpellIds as string[],
-);
 
 type SpellEntry = { type: string };
 const SPELLS = spellsData as Record<string, SpellEntry>;
@@ -285,15 +286,14 @@ export function computeOffensiveWindows(
     for (const cast of enemy.spellCastEvents) {
       if (cast.logLine.event !== LogEvent.SPELL_CAST_SUCCESS) continue;
       const { spellId } = cast;
-      if (!spellId || !EXTERNAL_BIG_DEF_IDS.has(spellId)) continue;
+      if (!spellId || !isKillWindowMajorDefensive(spellId)) continue;
 
       const effectData = spellEffectData[spellId];
       if (!effectData) continue;
-      const cooldownSeconds =
-        effectData.cooldownSeconds ??
-        effectData.charges?.chargeCooldownSeconds ??
-        0;
-      if (cooldownSeconds < 30) continue;
+      // Same official source the predicate itself reads (kwCooldownSeconds) —
+      // the predicate already enforced >= KW_MAJOR_DEF_MIN_CD_S.
+      const cooldownSeconds = kwCooldownSeconds(spellId);
+      if (cooldownSeconds < KW_MAJOR_DEF_MIN_CD_S) continue;
 
       const castTimeSeconds = (cast.logLine.timestamp - matchStartMs) / 1000;
       const buffDuration =

@@ -68,6 +68,13 @@ npx tsx packages/eval/scripts/behaviorPriorScan.ts emit-table --in $R/opportunit
   && cp $R/behaviorPriorGenerated.json packages/analysis/src/data/behaviorPriorGenerated.json
 #   (the scan itself already filters to startTime >= PATCH_121_GOLIVE_EPOCH_MS; when the next
 #   season ships, update that epoch first — it is the season gate.)
+# 6b-pre-3b. Kill-window defensive-roster audit (GH #31 ②, 2026-09-02): the runtime predicate is the
+#   curated KW_MAJOR_DEFENSIVE_IDS roster (abilityProfile.ts) — the official DB2 face was tried as the
+#   runtime predicate and REVERTED (boolean absorbs admits 30s spam barriers; immuneSchools is
+#   target-side; measured spans +12% / span-kill −5pp). The face's job is this AUDIT: each season run
+#   packages/eval/scripts/kwDefAdmitScan.ts (face admissions beyond the roster, intersect with live
+#   enemy casts via kwDefDiagScan.ts) and judge each hit by hand — 2026-09-02 run found Ancient of
+#   Lore 473909 genuinely missing (added) while correctly rejecting Ice Barrier-class minors.
 # 6b-pre-4. Sync-window reference table (GH #13 resurrection, 2026-09-02): per bracket, the share of
 #   eligible enemy-healer hard-CC windows in which an enemy died within 15 s, split by whether a
 #   friendly canonical offensive CD entered the window. Corpus-driven, NOT DB2.

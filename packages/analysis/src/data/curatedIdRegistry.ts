@@ -85,6 +85,7 @@ import {
   OFFENSIVE_PURGE_TALENT_IDS,
   TALENT_BEHAVIORS,
 } from "../utils/talentBehaviors";
+import { KW_MAJOR_DEFENSIVE_IDS } from "./abilityProfile";
 import { classMetadata } from "./classSpells";
 import { CURATED_ABILITY_FACTS } from "./curatedAbilityFacts";
 import { DISPEL_VERDICTS } from "./dispelVerdicts";
@@ -184,6 +185,15 @@ export const CURATED_ID_TABLES: readonly CuratedIdTable[] = [
     "data/spellIdLists.ts",
     "cast",
     () => spellIdLists.externalOrBigDefensiveSpellIds,
+  ),
+  // GH #31 ②(2026-09-02):kill-window 家族的单源花名册(旧 externalOrBig
+  // 手工表 − Apotheosis + Ancient of Lore;官方面方案实测被否,降级为审计,
+  // 见 abilityProfile.ts 该常量的 doc comment)。
+  t(
+    "abilityProfile.KW_MAJOR_DEFENSIVE_IDS",
+    "data/abilityProfile.ts",
+    "cast",
+    () => [...KW_MAJOR_DEFENSIVE_IDS],
   ),
   t("RACIAL_ABILITIES", "data/racialAbilities.ts", "cast", () =>
     keys(RACIAL_ABILITIES),
