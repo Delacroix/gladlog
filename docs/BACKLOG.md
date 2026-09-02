@@ -867,6 +867,16 @@ Classified by suspected root cause; work begins after completing the currently r
    > `/eval-baseline` (batched sonnet responder/judge cost — say the word and it runs); (b) the #22 cap review — the
    > 2026-08-11 dry run ruled "do not remove" pending batch 2 (DEATH-002 / OFFENSIVE-001), and batch 2 has not landed,
    > so the removal condition is still unmet; nothing to re-decide until it does.
+   > **2026-09-02: `/eval-baseline` run (user approved).** Run `2026-09-02-baseline` on `manifest-ab-newseason.txt`
+   > (309 prompts; judged the every-8th subset n=39 across 6 healer specs — the first-50 rule would have covered 5 with
+   > no Resto Druid / Pres Evoker); sonnet responder + sonnet judge, checkProvenance 39/39. Prompt dimensions at ceiling
+   > (sufficiency 5.00, noise 4.85, labelBias 4.95, scaffolding 5.00); accuracy 3.74 ± 1.06 — flat against the 2026-07-22
+   > 12.0 baseline (3.85 ± 1.03), inside the SD≈1 noise floor. 597 audited claims: 91.8% verified, 34 refuted (numeric /
+   > timestamp precision), 15 unsupported (causal hardening, 2× F193 CONTESTED), 1 fabricated. The one actionable
+   > prompt bug is deterministic, not judged: 3/309 prompts fail the cooldown-ledger consistency class (death line says an
+   > external was `available`, same-second `[RES]` lists it on `cd:`) → filed as its own GH issue. Report:
+   > `eval-private/runs/2026-09-02-baseline/eval-report.md`, ledger row added. With this, #24-6's only open item is the
+   > #22 cap review, still gated on batch 2.
 7. ~~observedSpellIds +7 new ids into icons/offGcd universe~~ **Done 2026-08-11**
    (pipeline fix ac3a6a2f same-day opportunistic: observed 3346→3353, icons 41729→41734,
    offGcd 295→296, validateCatalogs green) — didn't actually depend on S2 corpus, was incorrectly categorized in this batch.
