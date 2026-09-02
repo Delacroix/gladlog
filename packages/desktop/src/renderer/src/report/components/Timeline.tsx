@@ -481,29 +481,29 @@ export function Timeline({
         )}
         {/* Dampening lane (#10 T2): its own thin strip directly above the
             pressure lane, more opaque as pct rises; runs merged by RLE, with
-            the percentage in the hover title. A pct===0 run would have
-            opacity=0 — completely invisible and non-interactive — so it is
-            skipped and no rect is drawn. */}
-        {dampBands
-          .filter((b) => b.pct > 0)
-          .map((b, i) => {
-            const x1 = x(data.start + b.fromS * 1000);
-            const x2 = x(data.start + b.toS * 1000);
-            return (
-              <rect
-                key={`dp${i}`}
-                data-testid="rpt-damp-lane"
-                className="rpt-dampening-lane"
-                x={x1}
-                width={Math.max(1, x2 - x1)}
-                y={H - PAD.b - LANE_H * 2 - LANE_GAP}
-                height={LANE_H}
-                opacity={b.pct / 100}
-              >
-                <title>{`Dampening ${b.pct}%`}</title>
-              </rect>
-            );
-          })}
+            the percentage in the hover title. pct===0 runs ARE drawn (at
+            opacity 0): SVG hit-testing ignores opacity, so the invisible rect
+            still carries its "Dampening 0%" title — the #10 residual "hover
+            dead zone" was exactly the pre-dampening stretch where no rect
+            existed and hovering the lane showed nothing (fixed 2026-09-02). */}
+        {dampBands.map((b, i) => {
+          const x1 = x(data.start + b.fromS * 1000);
+          const x2 = x(data.start + b.toS * 1000);
+          return (
+            <rect
+              key={`dp${i}`}
+              data-testid="rpt-damp-lane"
+              className="rpt-dampening-lane"
+              x={x1}
+              width={Math.max(1, x2 - x1)}
+              y={H - PAD.b - LANE_H * 2 - LANE_GAP}
+              height={LANE_H}
+              opacity={b.pct / 100}
+            >
+              <title>{`Dampening ${b.pct}%`}</title>
+            </rect>
+          );
+        })}
         {/* Pressure lane (#4): spikes as a thin strip at the bottom (click to
             set the time window) plus exposure diamond markers. Drawn after the
             bands and before the curves — being overlapped by a curve is fine,

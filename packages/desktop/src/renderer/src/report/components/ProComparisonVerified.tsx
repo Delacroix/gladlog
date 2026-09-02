@@ -15,10 +15,10 @@ import {
   isHealerSpec,
   enemyCompArchetype,
 } from "@gladlog/analysis";
-import { CombatUnitReaction } from "@gladlog/parser-compat";
 import datagenManifest from "@gladlog/analysis/src/data/datagen-manifest.json";
 import { SPEC_NAMES_ZH } from "../data/specNames";
 import { toLegacySafe } from "../derive/legacySource";
+import { resolveOwner } from "../derive/analysisInput";
 import { makeRichText } from "../derive/inlineRich";
 import { backendModelLabel } from "../derive/slotLabel";
 import { cliWaitHint, fmtElapsed } from "../derive/aiRunStatus";
@@ -228,20 +228,12 @@ export function ProComparisonVerified({
       // the trimmed test fixture usable — not a behavior change.
       const legacy = toLegacySafe(source);
       const players = Object.values(legacy.units).filter((u) => u.info);
-      // owner = the player who recorded the log (same semantics as the AI
-      // panel); a DPS recorder uses the DPS metric set (pro-comparison P1),
-      // and when none is found we fall back to the friendly healer (old
-      // behavior).
-      const owner =
-        players.find(
-          (u) =>
-            u.id === legacy.playerId &&
-            u.reaction === CombatUnitReaction.Friendly,
-        ) ??
-        players.find(
-          (u) =>
-            isHealerSpec(u.spec) && u.reaction === CombatUnitReaction.Friendly,
-        );
+      // owner = the player who recorded the log — the SAME predicate as the
+      // AI panel (`resolveOwner`: playerId matched against a Friendly unit,
+      // falling back to the friendly healer). Used to be an inline copy of
+      // that chain (#10 residual, consolidated 2026-09-02); a DPS recorder
+      // uses the DPS metric set (pro-comparison P1).
+      const owner = resolveOwner(legacy);
       if (!owner) return null;
       const enemies = players.filter((u) => u.reaction !== owner.reaction);
       const metrics = isHealerSpec(owner.spec)

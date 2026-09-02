@@ -19,6 +19,7 @@ import {
 } from "@gladlog/analysis";
 import { CombatUnitReaction } from "@gladlog/parser-compat";
 
+import { resolveOwner } from "./analysisInput";
 import { toLegacySafe } from "./legacySource";
 import type { ReportSource } from "./types";
 
@@ -105,9 +106,17 @@ export function deriveKeyMoments(
   };
   const friendlyPets = petsOf(friends);
   const enemyPets = petsOf(enemies);
+  // Owner: the explicit POV override first, then the SAME predicate the AI
+  // panel and the pro comparison use (`resolveOwner`: playerId matched
+  // against a Friendly unit, falling back to the friendly healer), then the
+  // first friendly as the last resort. Used to be an inline chain (#10
+  // residual, consolidated 2026-09-02; S2 605-file parity probe: the two
+  // chains picked the same unit on all 1,270 rounds — every archive round
+  // resolves its playerId to a Friendly unit with COMBATANT_INFO, so the
+  // healer fallback and friends[0] never had to decide).
   const owner =
     (ownerId ? players.find((u) => u.id === ownerId) : undefined) ??
-    players.find((u) => u.id === legacy.playerId) ??
+    resolveOwner(legacy) ??
     friends[0];
   // The positioning block (below) reuses these three — the same
   // "capture opportunistically, do not recompute" pattern as deepDive.ts:411.

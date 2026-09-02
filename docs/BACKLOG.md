@@ -81,7 +81,7 @@ a death / finding / burst window and jump to that moment in the video.
   Fine for the app-private store now; revisit if the store ever lives in a synced
   folder.
 
-- **Residual items from archived entries (details in the corresponding sections of BACKLOG-archive.md)**: #10 three non-blocking minors (dampening swim-lane dead zone / panic predicate typo / resolveOwner convergence), #16 real-model filler smoke pending real machine, multi-model comparison stale slot placeholder state row and Export tearing.
+- **Residual items from archived entries (details in the corresponding sections of BACKLOG-archive.md)**: ~~#10 three non-blocking minors (dampening swim-lane dead zone / panic predicate typo / resolveOwner convergence)~~ **all three closed 2026-09-02 (GH #38)**: the dampening lane now draws pct=0 runs as opacity-0 rects so the pre-dampening stretch hovers "Dampening 0%" (SVG hit-testing ignores opacity; pinned by a Timeline test); `deathRecap.ts`'s `panicsHostile` renamed `panicsEnemy` to match the predicate's `friends`/`enemies` vocabulary; `keyMoments.ts` and `ProComparisonVerified.tsx` now call `resolveOwner` instead of their inline chains (`keyMoments` keeps the explicit POV `ownerId` override in front and `friends[0]` behind; S2 605-file parity probe in the commit message; index row "Who the report is about" lists both). Still open: #16 real-model filler smoke pending real machine, multi-model comparison stale slot placeholder state row and Export tearing.
 
 ## 17. Mitigation numerical counterfactual trio (logged 2026-07-27, same thread as Bilibili user feedback)
 

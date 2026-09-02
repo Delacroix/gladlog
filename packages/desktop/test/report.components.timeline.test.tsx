@@ -93,6 +93,24 @@ describe("Timeline", () => {
     expect(rects[1]!.getAttribute("opacity")).toBe("0.25");
     expect(rects[1]!.textContent).toContain("25%");
   });
+
+  it("dampening 泳道:pct=0 的段也画(透明)并带「Dampening 0%」悬浮 —— 消灭开局的悬浮死区(#10 残留,2026-09-02)", () => {
+    const data = deriveTimeline(m);
+    const dampening = [
+      { tS: 0, pct: 0 },
+      { tS: 1, pct: 0 },
+      { tS: 2, pct: 10 },
+    ];
+    const { container } = render(
+      <Timeline data={data} dampening={dampening} />,
+    );
+    const rects = container.querySelectorAll("[data-testid='rpt-damp-lane']");
+    // 0/0/10 -> two runs; the zero run is a real (hoverable) rect at opacity 0
+    expect(rects).toHaveLength(2);
+    expect(rects[0]!.getAttribute("opacity")).toBe("0");
+    expect(rects[0]!.textContent).toContain("Dampening 0%");
+    expect(rects[1]!.textContent).toContain("10%");
+  });
 });
 
 describe("Timeline 指标下拉(每秒堆叠柱)", () => {

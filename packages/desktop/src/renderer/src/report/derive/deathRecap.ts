@@ -236,13 +236,13 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
       hostilePlayers,
       combatLike,
     );
-    const panicsHostile = detectPanicDefensives(
+    const panicsEnemy = detectPanicDefensives(
       hostilePlayers,
       friendlyPlayers,
       combatLike,
     );
     const panicsFor = (reaction: CombatUnitReaction) =>
-      reaction === CombatUnitReaction.Friendly ? panicsFriendly : panicsHostile;
+      reaction === CombatUnitReaction.Friendly ? panicsFriendly : panicsEnemy;
 
     // Dispels touching a victim inside a death window (issue #11): consume the
     // same reconstructDispelSummary predicate the prompt's [CLEANSE]/[MISSED
