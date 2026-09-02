@@ -80,6 +80,20 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "118": cc(8), // Polymorph
   "28271": cc(8), // Polymorph (Turtle)
   "28272": cc(8), // Polymorph (Pig)
+  // Polymorph glyph variants: 8 further ids of the same spell that the 12.1 archive logs as their own aura ids — all in the observed
+  // universe, all seen dispelled (dispelObservedGenerated: 161354 ×238, 460392 ×137, …), all in the official DR table
+  // (drGapScan 2026-08-21 listed them among the 63 CC ids SPELL_CATEGORIES lacked). User ruling 2026-09-02 (GH #44):
+  // "变形变体和变形一模一样" — registered exactly like 118 / 28271 / 28272 above. Note for a separate ruling: the whole
+  // family carries cc(8) here while DB2 (spellEffectGenerated, PvP duration) says 6 s for 118 and every variant;
+  // the number only feeds ccBreakAnalysis's "remaining duration" estimate, kept identical rather than half-fixed.
+  "61305": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "61721": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "161353": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "161354": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "277787": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "277792": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "391622": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "460392": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
   "51514": cc(8), // Hex
   "5782": cc(6), // Fear
   "5484": cc(6), // Howl of Terror

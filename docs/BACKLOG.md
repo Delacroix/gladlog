@@ -17,16 +17,16 @@ data is already gladlog-native).
 >    overlap and mean different things: BACKLOG #24 vs GH #24, BACKLOG #25 vs GH #25,
 >    BACKLOG #26 vs GH #26 are three unrelated pairs. Write `BACKLOG #N` or `GH #N`
 >    — never a bare `#N` — in commit messages, code comments and reports.
-> **2026-08-26:全部未完条目已镜像到 GitHub issues(#37–#54)。** 本文件保留为
-> 详细背景的单源,**新增待办请直接开 GH issue**;镜像映射:
-> #1→GH37 · Session follow-ups→GH38 · #17残→GH39 · #18→GH40 · #19→GH41 ·
-> #21→GH42 · #14→GH43 · #24(12.1批)残→GH44 · #25残→GH45 · #30残→GH46 ·
-> #29→GH47 · #31→GH48 · #33→GH49 · #34→GH50 · #35→GH51 · #36→GH52 ·
-> #37→GH53 · #38→GH54。
-> 巡检时判定**已完成、待迁档**的条目(未建 issue):#22(2026-08-20 用户裁定长期保留,
-> 终结 TEMPORARY 身份)· #23(GH #8/#9/#11 均结)· #24(dr reverse,2026-08-14 修)·
-> #26(rawStreams 落地,#40 5/5)· #27(2026-08-14 挂账批修)· #28(auraIntervals
-> 权威构建器收口)· #32(FIXED 2026-08-16)· #39 · #40。
+>    **2026-08-26:全部未完条目已镜像到 GitHub issues(#37–#54)。** 本文件保留为
+>    详细背景的单源,**新增待办请直接开 GH issue**;镜像映射:
+>    #1→GH37 · Session follow-ups→GH38 · #17残→GH39 · #18→GH40 · #19→GH41 ·
+>    #21→GH42 · #14→GH43 · #24(12.1批)残→GH44 · #25残→GH45 · #30残→GH46 ·
+>    #29→GH47 · #31→GH48 · #33→GH49 · #34→GH50 · #35→GH51 · #36→GH52 ·
+>    #37→GH53 · #38→GH54。
+>    巡检时判定**已完成、待迁档**的条目(未建 issue):#22(2026-08-20 用户裁定长期保留,
+>    终结 TEMPORARY 身份)· #23(GH #8/#9/#11 均结)· #24(dr reverse,2026-08-14 修)·
+>    #26(rawStreams 落地,#40 5/5)· #27(2026-08-14 挂账批修)· #28(auraIntervals
+>    权威构建器收口)· #32(FIXED 2026-08-16)· #39 · #40。
 >
 > 2. **`## 24.` appears twice below** (the 12.1/S2 data wrap-up batch, and the `dr`
 >    reverse-query fix). Both are already cited from source: bare `#24` in
@@ -799,6 +799,7 @@ Classified by suspected root cause; work begins after completing the currently r
    none-tracked rate + `[DR: spell:<id>` fallback scan; ~20 reworked specs are worst hit,
    expected gaps (Retribution Radiant Glory / Enhancement Doom Winds) — don't false-alarm. #23's deferred
    Netherwalk removal also confirmed in this batch.
+
    > 2026-08-12 launch day initial scan (`noneTrackedScan.mts`, 30 matches): 22 specs 179
    > cooldowns blocks none-tracked **all 0%**, DR fallback 0 — no 2026-07 style full-spec
    > collapse. But 18 specs absent on day one (Subtlety/Outlaw Rogue, Balance/Guardian Druid, Arcane/Fire Mage,
@@ -812,27 +813,28 @@ Classified by suspected root cause; work begins after completing the currently r
    (talent ids / passives). The forward pass (`drGapScan`) found 63 CC ids the DR table has but `SPELL_CATEGORIES`
    lacks — tracked separately (S2 README §"CC 一个事实两套谓词"), not part of this item. Runbook §7b is the
    standing procedure. Bookkept here 2026-09-01 (GH #44).
+
 4. **benchmarks.json rebuild**: current baseline from 2026-07-20 based on 12.0 corpus (2100+),
    healing/damage numbers significantly retuned and now stale; rerun after S2 corpus reaches volume, note
    [[metric-scale-vs-agreement]] — compare scale-independent counts before drawing conclusions.
    ~~Rerun after S2 corpus reaches volume~~ **Rebuilt 2026-09-01 (GH #44)**: `collectBenchmarks.ts` taught to read the
    `.txt.gz` archive, then run over `manifest-archive-2026-08-28-newseason.txt` — 18,134 12.1 files, 0 parse failures,
    minRating 2100 / minN 30 / perStratumCap 40 exactly as the 2026-07-20 run (single nice'd process, ≈1.3 s/file pass 1
-   + 1,288 selected logs re-parsed in pass 2, ~2.6 h). Old → new, scale-independent counts first: pool 18,864 samples
-   ≥2100 (old corpus was 12.0 local + public-dps), stratified selection Σn 4,215 → 7,041; bySpec 34 → 34 specs but a
-   different set — **gained** Arcane Mage / Fire Mage / Havoc DH / Balance Druid / Demonology Warlock / Outlaw Rogue /
-   Protection Paladin (absent from the 12.0 corpus), **lost** Augmentation Evoker (6 samples ≥2100 in the whole 12.1
-   archive, below minN; old table had it at n=16 — Aug owners no longer get a SPEC BASELINES block, recorded, not
-   worked around). Shape identical (same 9 bySpec keys; every spec has defensiveTiming / cdUsage / pressureWindows; *Pct
-   fields sum to 100; pressureWindows p50 ≤ p75 ≤ p90 ≤ p95 for all 34 — the percentile-monotonicity gate cannot go
-   red on this data). Scale-free rates moved by season-retune amounts, not pathologically: e.g. Pain Suppression used
-   96% → 93% of matches (median first use 27 s → 34 s), Aura Mastery 76% → 86%, Resto Druid Barkskin 47% → 52%; the one
-   0% → 78% (Preservation Renewing Blaze) is the 2026-08-23 aura-only-activation ruling now being applied by the
-   collector, not a data artifact. Acceptance on the 12-file S2 sample (32 rounds / 92 owner views): findings-prompt
-   SHA256 identical (benchmarks feed no candidate), match context changes only in the SPEC BASELINES / INCOMING DAMAGE
-   BASELINES blocks (n= headers e.g. Resto Druid n=75 → 197, Fury Warrior n=9 → 69; one new block — Balance Druid).
-   `packages/analysis/benchmarks/benchmark_data.json` (the collector's default output, which `specBaselines.ts` names as the source — its
-   comment and `cooldowns.ts`'s pointed at a non-existent `packages/tools/…` path, both corrected) refreshed in step.
+   - 1,288 selected logs re-parsed in pass 2, ~2.6 h). Old → new, scale-independent counts first: pool 18,864 samples
+     ≥2100 (old corpus was 12.0 local + public-dps), stratified selection Σn 4,215 → 7,041; bySpec 34 → 34 specs but a
+     different set — **gained** Arcane Mage / Fire Mage / Havoc DH / Balance Druid / Demonology Warlock / Outlaw Rogue /
+     Protection Paladin (absent from the 12.0 corpus), **lost** Augmentation Evoker (6 samples ≥2100 in the whole 12.1
+     archive, below minN; old table had it at n=16 — Aug owners no longer get a SPEC BASELINES block, recorded, not
+     worked around). Shape identical (same 9 bySpec keys; every spec has defensiveTiming / cdUsage / pressureWindows; *Pct
+     fields sum to 100; pressureWindows p50 ≤ p75 ≤ p90 ≤ p95 for all 34 — the percentile-monotonicity gate cannot go
+     red on this data). Scale-free rates moved by season-retune amounts, not pathologically: e.g. Pain Suppression used
+     96% → 93% of matches (median first use 27 s → 34 s), Aura Mastery 76% → 86%, Resto Druid Barkskin 47% → 52%; the one
+     0% → 78% (Preservation Renewing Blaze) is the 2026-08-23 aura-only-activation ruling now being applied by the
+     collector, not a data artifact. Acceptance on the 12-file S2 sample (32 rounds / 92 owner views): findings-prompt
+     SHA256 identical (benchmarks feed no candidate), match context changes only in the SPEC BASELINES / INCOMING DAMAGE
+     BASELINES blocks (n= headers e.g. Resto Druid n=75 → 197, Fury Warrior n=9 → 69; one new block — Balance Druid).
+     `packages/analysis/benchmarks/benchmark_data.json` (the collector's default output, which `specBaselines.ts` names as the source — its
+     comment and `cooldowns.ts`'s pointed at a non-existent `packages/tools/…` path, both corrected) refreshed in step.
 5. **dispelObservedGenerated backfill**: `confidenceAudit --emit-table`,
    observational table "hasn't happened ≠ can't happen", feed new corpus entries back one by one.
    ~~Feed new corpus entries back~~ **Regenerated 2026-09-01 (GH #44)**: `confidenceAudit.ts` taught to read `.txt.gz` and to skip
@@ -850,14 +852,40 @@ Classified by suspected root cause; work begins after completing the currently r
    12 S2 files / 32 rounds / 92 owner views — identical; 605-file S2 sample (every 30th archive file) — identical too (1,270 rounds / 3,520 owner views, healer + every DPS
    owner: findings-prompt and match-context SHA256 unchanged, all 26 per-type counts unchanged, missed-cleanse 231 dps /
    276 healer both sides). **Why zero, and it is not a measurement problem**: `CORPUS_OBSERVED_DISPEL_IDS` filters
-   `ds.missedCleanseWindows` *after* `dispelAnalysis.getPriority` has already decided which debuffs are worth a
+   `ds.missedCleanseWindows` _after_ `dispelAnalysis.getPriority` has already decided which debuffs are worth a
    candidate, and that priority is the hand registry (`spellCategories` + the mitigation allow-list — see the
    2026-08-13 entry under the Curated-List rule): **0 of the 116 newly attested ids are in `spellCategories`**, so every
    one of them is `Low` and never reaches the observed-set gate at all. The regeneration removes the observed-set
    gate as a reason those ids are invisible; the priority registry remains the binding one. Which of the 23 ids with
    ≥100 observations (Stellar Flare, the 12.1 Frostbolts, Denounce, Hamstring, Storm of Destruction, Chrono Shift,
    Time Warp, Creeping Venom, …) deserve a tier is a **user ruling** (tier criteria: [[gladlog-dispel-priority-registry]]),
-   not something to fill in from counts — parked in GH #44's comment..
+   not something to fill in from counts — parked in GH #44's comment.
+   **User rulings 2026-09-02 (GH #44, after the co-removal study — S2 every-10th sample, 1,814 files, one dispel =
+   same caster / target / spell within 50 ms; only Denounce and the Polymorph variants are dispelled _deliberately_
+   by healers, solo 56% / 73%)**: (i) Denounce 2812 — "不是特别重要", not registered; (ii) the Balance DoT class
+   (Stellar Flare 202347 / Moonfire / Sunfire / Astral Smolder, cleansed as one stack, Stellar Flare solo 3%) — "不是很重要",
+   the class stays unregistered; (iii) the 8 Polymorph glyph variants (61305, 61721, 161353, 161354, 277787, 277792,
+   391622, 460392) — "变形变体和变形一模一样", registered as `cc(8)` exactly like 118 / 28271 / 28272. The remaining
+   ids among the 23 with ≥100 observations (12.1 Frostbolts, Hamstring, Storm of Destruction, Chrono Shift, Time Warp,
+   Creeping Venom, …) were never tier candidates: proc / rider removals, or purge targets whose consumer (missed-purge)
+   is retired.
+   **Acceptance for (iii), same code path before/after**: 605-file S2 sample (1,270 rounds / 3,520 owner views, healer
+   - every DPS owner): per-type deltas dps:missed-cleanse 231 → 238, healer:missed-cleanse 276 → 280,
+     healer:healing-gap 62 → 61, the other 23 types unchanged; match-context lines containing "Polymorph" 13,083 → 13,350
+     (267 new lines + 1 relabelled, across 23 files / 187 distinct events). Local library (`acceptanceHash 300`, 1,127
+     rounds, healer owner): missed-cleanse 220 → 252, healing-gap 27 → 24, 24 other types unchanged. Every delta traces
+     to one of four `SPELL_CATEGORIES` consumers now recognising the variant: `ccBreakAnalysis` (+105 `[CC BROKEN]`
+     own-team-break lines), dispel rendering priority Low → Critical (+78 `[ENEMY CLEANSE]`, +69 `[CLEANSE]`),
+     `missedCleanseWindows` (+15 `[UNCLEANSED DEBUFF]`, 9 of them self-annotated ON CD / CC'd / no LoS "not actionable"
+     by the GH #20 gates), and the healer-CC coverage predicates (`healingGaps.getCCCoveredMs` drops gaps where the
+     healer was sheeped → healing-gap −1 / −3; the `enemyCDs` healer-CC multiplier lifts one `[HEALER EXPOSURE]` burst
+     label High → Critical). `[CC ON ENEMY]` lines are unchanged — that path reads the official DR table and already
+     knew the variants.
+     **Parked for a separate ruling — Polymorph family duration**: the whole family carries `cc(8)` while DB2
+     `spellEffectGenerated` (PvP duration) says 6 s for 118 and every variant; the number only feeds `ccBreakAnalysis`'s
+     remaining-duration estimate, and the mismatch is already visible on one prompt: `[CC BROKEN] … Shadeburst broke own
+team's Polymorph on 4(WMonk) — 7.1s of CC wasted` next to `[CC ON ENEMY] … Polymorph … (6s)` from the official
+     table. Kept identical to the base entry per the ruling rather than half-fixed on the variants.
 6. **eval baseline / candidate incidence rates full recalibration**: 63.6/14.1/15.6 and other old numbers considered
    expired after 12.1; rerun `/eval-baseline`, rate-limiting type (#22 temporary gate) thresholds reviewed alongside incidence rates.
    > **2026-09-01 status (GH #44)**: the deterministic half already exists — the 2026-08-22 skill-gradient study
@@ -915,14 +943,15 @@ Classified by suspected root cause; work begins after completing the currently r
    (6 distinct attempt windows, rendered per owner view) moved from `not enough damage` ×9 / `popped Barkskin` ×2 /
    `popped Ironbark` ×2 to `popped Ancient of Lore` / `Barkskin/Ancient of Lore` / `Ironbark/Ancient of Lore`.
    **Side finding fixed in the same commit**: the first pass rendered `popped Ancient of Lore/Ancient of Lore/Ancient
-   of Lore` — the shapeshift aura re-applies on every form refresh (match ad329f4a: 3 casts, 23 `SPELL_AURA_APPLIED`,
+of Lore` — the shapeshift aura re-applies on every form refresh (match ad329f4a: 3 casts, 23 `SPELL_AURA_APPLIED`,
    same-millisecond REMOVED+APPLIED pairs) and `defensivePopped` pushed one name per APPLIED; it now dedupes by
    spellId (a wall whose CD exceeds the span cannot be popped twice in one attempt), pinned by a flicker fixture in
-   `killAttempts.test.ts`. Not fixed, recorded: an in-span *re-application* of an aura that was already up before the
+   `killAttempts.test.ts`. Not fixed, recorded: an in-span _re-application_ of an aura that was already up before the
    attempt started still counts as "popped during the attempt" — the ledger keys on APPLIED events, not aura
    intervals; a proper fix routes through `buildAuraIntervals` (#28) and is a semantics call, so it is parked here.
    **User ruling 2026-09-02: keep the current behaviour** ("popped" = an APPLIED inside the span + slack); no interval
-   rewrite, no new label. Closed as ruled.
+   rewrite, no new label. Closed as ruled. Verdict tier: the user's 2026-09-02 reply to the entry as recorded was
+   "没问题" — it stays `unresolved` (no OFFENSIVE-WASTE lines rendered for it); re-open only when a tier is named.
    Also caught: `writeManifest.ts` did not know `spellReachGenerated.json` (hand-registered with GH #34 ② on
    2026-08-29) and silently dropped it on the next run — the script now emits that entry.
 
@@ -1822,7 +1851,7 @@ And then twin flame also goes as well." —— 直接解释了 `1265980` 为什�
 - **(e) 已落地**(注意上方更正):`analyzeCcBreaks(...).friendlySquander` 接进
   prompt 为 `[CC BROKEN]` 行(≥2s 剩余预滤)。真实例:
   `2:08 [CC BROKEN] 1(RShaman)'s Flame Shock broke own team's Intimidating
-  Shout on 5(RDruid) — 3.7s of CC wasted`。
+Shout on 5(RDruid) — 3.7s of CC wasted`。
 - **(f) 部分推进**:rotations 进 cell 见 #37 的 2026-08-25 记录。
 - **(g)** 流程项,保持(每赛季初攻略文字稿过一遍当回归集)。
 - **(h) 未动**(原语在、消费者仍缺 —— 三条断言型判据待立项)。
@@ -2184,16 +2213,16 @@ apply+POST_CC_PRESSURE_WINDOW_S)]。注意 postCcDamage 沿用 damageIn 口径
 / `packages/analysis` 核完之后,8 条里 **2 条落空、1 条部分已有、5 条坐实**。核对结论记在
 这里,免得下一个 session 照着那份清单直接动工。
 
-| # | 研究侧的说法 | 产品侧实况 | 结论 |
-|---|---|---|---|
-| 1 | 控制真实时长做不出来 | `drAnalysis.ts:508` 就是 apply/remove 配对算 `durationSeconds`;`auraIntervals.ts` 是配对单源 | **落空**(handoff 已于当晚自行更正) |
-| 6 | `SPELL_AURA_BROKEN_SPELL` 打断者 GUID 不在事件里,要靠同刻伤害反推 | **在事件里**,就是 src。实测行:`SPELL_AURA_BROKEN_SPELL,<打断者>,...,<被控者>,...,115191,"Stealth",0x1,20271,"Judgment"`。`ccBreakAnalysis.ts` 早就按 src=打断者 在用 | **落空** |
-| 8 | 假读条(`SPELL_CAST_START` 无配对 SUCCESS) | `l3/collect.ts:176` 收 castStarts,`kickAudit.ts` 已经用"读条被取消"做骗踢判定 | **部分已有**;缺的是"被踢掉 / 自己取消"的分类 |
-| 2 | 资源(法力/能量/精华)读不到 | `decodeAdvanced` 只取 actorGuid/ownerGuid/hp/maxHp/x/y/facing/mapId,**powerType/currentPower/maxPower 一个都没解** | **坐实**(与 #26 同族) |
-| 3 | `SPELL_MISSED` 的 missType | 事件进了 `LogEvent` 枚举,`parseLine` 走通用 `SPELL_` 分支只解 base+spell,**missType(params[11])丢弃**,analysis 侧零消费者 | **坐实**。⚠️ 实测 `missType=ABSORB` 与 `SPELL_ABSORBED` 是**同一发伤害的两条记录**(同刻、同数字),只有 IMMUNE / REFLECT 是新信息,ABSORB 那 174k 次不能再加一遍 |
-| 4 | `DAMAGE_SPLIT`(牺牲祝福/灵魂链接) | 只在枚举里有名字;`parseLine` 既不 `endsWith("_DAMAGE")` 也不 `startsWith("SPELL_")` → `isKnown=false`,**整条丢弃** | **坐实** |
-| 5 | `SPELL_EMPOWER_END` 的充能等级 | **枚举里根本没有这个事件**;走通用 `SPELL_` 分支解出 base+spell,最后一个字段(等级)丢弃 | **坐实**。同时 `SPELL_EMPOWER_START` 也在,dest 是裸 `nil`(产品的 token 拆分器不受影响) |
-| 7 | `SPELL_HEAL_ABSORBED` | **枚举里没有**;`parseLine` 的 `_ABSORBED` 排除分支把它判 `isKnown=false`,**整条丢弃**。单场实测 263 条 | **坐实** |
+| #   | 研究侧的说法                                                      | 产品侧实况                                                                                                                                                           | 结论                                                                                                                                                          |
+| --- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 控制真实时长做不出来                                              | `drAnalysis.ts:508` 就是 apply/remove 配对算 `durationSeconds`;`auraIntervals.ts` 是配对单源                                                                         | **落空**(handoff 已于当晚自行更正)                                                                                                                            |
+| 6   | `SPELL_AURA_BROKEN_SPELL` 打断者 GUID 不在事件里,要靠同刻伤害反推 | **在事件里**,就是 src。实测行:`SPELL_AURA_BROKEN_SPELL,<打断者>,...,<被控者>,...,115191,"Stealth",0x1,20271,"Judgment"`。`ccBreakAnalysis.ts` 早就按 src=打断者 在用 | **落空**                                                                                                                                                      |
+| 8   | 假读条(`SPELL_CAST_START` 无配对 SUCCESS)                         | `l3/collect.ts:176` 收 castStarts,`kickAudit.ts` 已经用"读条被取消"做骗踢判定                                                                                        | **部分已有**;缺的是"被踢掉 / 自己取消"的分类                                                                                                                  |
+| 2   | 资源(法力/能量/精华)读不到                                        | `decodeAdvanced` 只取 actorGuid/ownerGuid/hp/maxHp/x/y/facing/mapId,**powerType/currentPower/maxPower 一个都没解**                                                   | **坐实**(与 #26 同族)                                                                                                                                         |
+| 3   | `SPELL_MISSED` 的 missType                                        | 事件进了 `LogEvent` 枚举,`parseLine` 走通用 `SPELL_` 分支只解 base+spell,**missType(params[11])丢弃**,analysis 侧零消费者                                            | **坐实**。⚠️ 实测 `missType=ABSORB` 与 `SPELL_ABSORBED` 是**同一发伤害的两条记录**(同刻、同数字),只有 IMMUNE / REFLECT 是新信息,ABSORB 那 174k 次不能再加一遍 |
+| 4   | `DAMAGE_SPLIT`(牺牲祝福/灵魂链接)                                 | 只在枚举里有名字;`parseLine` 既不 `endsWith("_DAMAGE")` 也不 `startsWith("SPELL_")` → `isKnown=false`,**整条丢弃**                                                   | **坐实**                                                                                                                                                      |
+| 5   | `SPELL_EMPOWER_END` 的充能等级                                    | **枚举里根本没有这个事件**;走通用 `SPELL_` 分支解出 base+spell,最后一个字段(等级)丢弃                                                                                | **坐实**。同时 `SPELL_EMPOWER_START` 也在,dest 是裸 `nil`(产品的 token 拆分器不受影响)                                                                        |
+| 7   | `SPELL_HEAL_ABSORBED`                                             | **枚举里没有**;`parseLine` 的 `_ABSORBED` 排除分支把它判 `isKnown=false`,**整条丢弃**。单场实测 263 条                                                               | **坐实**                                                                                                                                                      |
 
 ### 已在本轮修掉的(不在上面八条里,来自同一份 handoff §四)
 
@@ -2205,13 +2234,13 @@ apply+POST_CC_PRESSURE_WINDOW_S)]。注意 postCcDamage 沿用 damageIn 口径
 
 ### 五条坐实的缺口:解析层已全部接入(2026-08-23)
 
-| # | 事件 | 改法 | 关键判据(都是实测定的,不是照文档写的) |
-|---|---|---|---|
-| 2 | advanced 的 `powerType/current/max` | `decodeAdvanced` 增 `powers`,锚在自动探测到的 x/y 对之前(`xIdx-4..xIdx-2`) | 一个单位可能同时报多种资源,管道分隔(`13|0`),占施法行 **2.7%**,必须按列表解 |
-| 3 | `SPELL_MISSED` 的 `missType` | 新增 `decodeMissed`,L3 存 `missesOut`/`missesIn` | ⚠️ `missType=ABSORB` 与同刻的 `SPELL_ABSORBED` 是**同一发伤害的两条记录**,再加一遍就是重复计;只有 IMMUNE / REFLECT 是独有信息 |
-| 4 | `DAMAGE_SPLIT` | 按伤害事件解析,**只进 `dest.damageIn`** | src 与 dest **同队 7,354 例 / 敌对 0 例** —— src 是被转移伤害的人(牺牲祝福的受保护者),不是攻击者。进 `src.damageOut` 会凭空造出伤害输出 |
-| 5 | `SPELL_EMPOWER_END` 的充能等级 | 末位字段解成 `empowerLevel`,L3 存 `empowerEnds`(**不并进 `casts`**) | 并进 casts 会让每次充能施法重复计数 —— 它本来就另有一条 `SPELL_CAST_SUCCESS` |
-| 7 | `SPELL_HEAL_ABSORBED` | 新增 `decodeHealAbsorbed`,按受害者键存 `healAbsorbsIn` | **前缀描述的是吸收不是治疗**(实测 13,809 : 0 —— 拿同刻 `SPELL_HEAL` 对账):p0=施加治疗吸收的人、p4=被吸收者、spell@8=吸收 debuff,extra 才是治疗者+治疗技能。也**不是 HPS 漏算**:D8 已证 `SPELL_HEAL.amount` 本来就是净值 |
+| #   | 事件                                | 改法                                                                       | 关键判据(都是实测定的,不是照文档写的)                                                                                                                                                                                   |
+| --- | ----------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2   | advanced 的 `powerType/current/max` | `decodeAdvanced` 增 `powers`,锚在自动探测到的 x/y 对之前(`xIdx-4..xIdx-2`) | 一个单位可能同时报多种资源,管道分隔(`13                                                                                                                                                                                 | 0`),占施法行 **2.7%**,必须按列表解 |
+| 3   | `SPELL_MISSED` 的 `missType`        | 新增 `decodeMissed`,L3 存 `missesOut`/`missesIn`                           | ⚠️ `missType=ABSORB` 与同刻的 `SPELL_ABSORBED` 是**同一发伤害的两条记录**,再加一遍就是重复计;只有 IMMUNE / REFLECT 是独有信息                                                                                           |
+| 4   | `DAMAGE_SPLIT`                      | 按伤害事件解析,**只进 `dest.damageIn`**                                    | src 与 dest **同队 7,354 例 / 敌对 0 例** —— src 是被转移伤害的人(牺牲祝福的受保护者),不是攻击者。进 `src.damageOut` 会凭空造出伤害输出                                                                                 |
+| 5   | `SPELL_EMPOWER_END` 的充能等级      | 末位字段解成 `empowerLevel`,L3 存 `empowerEnds`(**不并进 `casts`**)        | 并进 casts 会让每次充能施法重复计数 —— 它本来就另有一条 `SPELL_CAST_SUCCESS`                                                                                                                                            |
+| 7   | `SPELL_HEAL_ABSORBED`               | 新增 `decodeHealAbsorbed`,按受害者键存 `healAbsorbsIn`                     | **前缀描述的是吸收不是治疗**(实测 13,809 : 0 —— 拿同刻 `SPELL_HEAL` 对账):p0=施加治疗吸收的人、p4=被吸收者、spell@8=吸收 debuff,extra 才是治疗者+治疗技能。也**不是 HPS 漏算**:D8 已证 `SPELL_HEAL.amount` 本来就是净值 |
 
 `slim.ts` / `invariants.ts` 白名单同步登记(新数组带 params 的要裁剪,`healAbsorbsIn` 只存解好的字段所以不用)。
 `mirrorDecodeAdvanced` 同步加 `powers`,`extractManaFromAdvanced` 改成消费它 —— 否则两处各拆一遍管道分隔的资源块,正是共享谓词规则要防的形状;`predicateIndex.test.ts` 的深度相等断言就是靠这个抓到的。
@@ -2225,13 +2254,13 @@ apply+POST_CC_PRESSURE_WINDOW_S)]。注意 postCcDamage 沿用 damageIn 口径
 解析层保留(它是将来任何「治疗为什么没落地」问题的诚实分母),但**不进 prompt**。
 判据链条(1200 回合 / 1,322 次死亡):
 
-| 问题 | 实测 |
-|---|---|
-| 是 HPS 漏算吗? | 否 —— 台账 D8 已证 `SPELL_HEAL.amount` 本来就是扣过治疗吸收的净值 |
-| 「那口救命的治疗被吃了」成立吗? | 死亡前 10s 有任何被吃的 **56/1,322(4.2%)**;被吃量单独 ≥ 受害者 20% 血量的只有 **6 次(0.5%)** |
-| 死亡窗口里的量级 | 落地 3.71 亿 vs 被吃 405 万(**1.1%**) |
-| 是敌方压力吗? | 死亡窗口前三名有两个是**自伤**:天灾契约(DK 自己的代价)、殉道之光(骑士机制)。只有死疽伤口是敌方施加 |
-| 那它可执行吗? | **不可驱散**。120 个归档文件:死疽伤口上身 361 次,全部 6,372 次 `SPELL_DISPEL` 里驱散它 **0 次** |
+| 问题                            | 实测                                                                                               |
+| ------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 是 HPS 漏算吗?                  | 否 —— 台账 D8 已证 `SPELL_HEAL.amount` 本来就是扣过治疗吸收的净值                                  |
+| 「那口救命的治疗被吃了」成立吗? | 死亡前 10s 有任何被吃的 **56/1,322(4.2%)**;被吃量单独 ≥ 受害者 20% 血量的只有 **6 次(0.5%)**       |
+| 死亡窗口里的量级                | 落地 3.71 亿 vs 被吃 405 万(**1.1%**)                                                              |
+| 是敌方压力吗?                   | 死亡窗口前三名有两个是**自伤**:天灾契约(DK 自己的代价)、殉道之光(骑士机制)。只有死疽伤口是敌方施加 |
+| 那它可执行吗?                   | **不可驱散**。120 个归档文件:死疽伤口上身 361 次,全部 6,372 次 `SPELL_DISPEL` 里驱散它 **0 次**    |
 
 结论:玩家看到这条**没有任何可以做得不一样的事**。按价值门第 1/3 条(先看真实输出、
 「当时做得到吗」),它同时挂在「量级不够」和「无可行动作」两条上。⚠️ 注意
@@ -2257,7 +2286,7 @@ apply+POST_CC_PRESSURE_WINDOW_S)]。注意 postCcDamage 沿用 damageIn 口径
 2. **`[YOU] [CC]` 行加 `[IMMUNE — X was up]` 标记**。此前控制打进圣盾和落地的
    控制在 prompt 里**长得一模一样**(施法行照出,只是后面没有 DR 标记)。
    真实对局例:`2:51 [YOU] [CC] Dragon's Breath [DR: Disorient Full]
-   [IMMUNE — Divine Shield was up]`。免疫名只在表里有对应光环覆盖击中瞬间时
+[IMMUNE — Divine Shield was up]`。免疫名只在表里有对应光环覆盖击中瞬间时
    给出,查不到就裸 `[IMMUNE]`,不猜。两个发射点(台账 + 通用施法循环的 CC
    分支)都接了 —— 激活那次的教训;每条 miss 只消费一次,连按不会重复标。
 
@@ -2292,14 +2321,14 @@ prompt 例子先行,两条(#7 的死亡挂钩、#3 的朴素判别器)被例子/
 首轮验证多按回合计且部分不足 1000 场,串行补跑(一次一个扫描)后逐项对账,
 **六项全过、无一翻车**:
 
-| 验证 | 首轮 | 补跑(≥1000 场) | 判据 |
-|---|---|---|---|
-| 激活回蓝机制 | 200 场 / 58 窗 | **1,000 场 / 190 窗**:上升 181 / 下降 0,中位 +9.5→**+12.3pp**,窗口内施法仍耗蓝 16% 不变 | 过,更硬 |
-| 承压漏吸收 | 600 回合 | **1,100 场 / 2,920 回合**:漏 22.2→**20.8%**,覆盖 100%(0/8,025),注记 0→**48.3%**(6,972/14,435),产品对齐 **98.0%** 分毫不动 | 过 |
-| D7(absorbsIn 键) | 300 回合 | **2,920 回合 / 16,044 单位**:compat 层 **0/2,920 选错、0/16,044 不一致**;L3 层选错 23.8%(反证旧键法之错);图腾分支 1,985/2,466 可输出 | 过 |
-| 免疫表第一批 | 1,200 回合 | **3,300 回合 / 11,827 次免疫**:446035 剑刃风暴 **94.7% (n=209)**、444741 AMS **66.8% (n=392)**;The Beast Within 大样本跌破 50%(51.2% n=41 是噪声)→ **明确排除** | 过 |
-| #7 负结果 | 1,322 死亡 | **3,706 死亡**:任何被吃 3.9%、够救命 0.5%、窗口占比 1.0%,头名换成天灾契约(自伤) | 裁定坐实 |
-| 五类量级 | 389 场 | **1,260 场 / 3,300 回合**:资源 2,028 万采样、IMMUNE 185k(控制 6.4%)、伤害转移 0.4%/个体 11.6%、梦境吐息 L1 **86.1%**、治疗被吃 22.3% —— 全部同量级 | 过 |
+| 验证             | 首轮           | 补跑(≥1000 场)                                                                                                                                                  | 判据     |
+| ---------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| 激活回蓝机制     | 200 场 / 58 窗 | **1,000 场 / 190 窗**:上升 181 / 下降 0,中位 +9.5→**+12.3pp**,窗口内施法仍耗蓝 16% 不变                                                                         | 过,更硬  |
+| 承压漏吸收       | 600 回合       | **1,100 场 / 2,920 回合**:漏 22.2→**20.8%**,覆盖 100%(0/8,025),注记 0→**48.3%**(6,972/14,435),产品对齐 **98.0%** 分毫不动                                       | 过       |
+| D7(absorbsIn 键) | 300 回合       | **2,920 回合 / 16,044 单位**:compat 层 **0/2,920 选错、0/16,044 不一致**;L3 层选错 23.8%(反证旧键法之错);图腾分支 1,985/2,466 可输出                            | 过       |
+| 免疫表第一批     | 1,200 回合     | **3,300 回合 / 11,827 次免疫**:446035 剑刃风暴 **94.7% (n=209)**、444741 AMS **66.8% (n=392)**;The Beast Within 大样本跌破 50%(51.2% n=41 是噪声)→ **明确排除** | 过       |
+| #7 负结果        | 1,322 死亡     | **3,706 死亡**:任何被吃 3.9%、够救命 0.5%、窗口占比 1.0%,头名换成天灾契约(自伤)                                                                                 | 裁定坐实 |
+| 五类量级         | 389 场         | **1,260 场 / 3,300 回合**:资源 2,028 万采样、IMMUNE 185k(控制 6.4%)、伤害转移 0.4%/个体 11.6%、梦境吐息 L1 **86.1%**、治疗被吃 22.3% —— 全部同量级              | 过       |
 
 ### 免疫表第二批(3,300 回合扫描才过 n≥25 门槛的 7 个 id,2026-08-24)
 
@@ -2328,4 +2357,3 @@ Stream 97.8% 的教训:光环在免控图腾自己身上,是目标类型混杂�
 经原始行核查是**同显示秒两次真实按键**(774 单 id、40 文件零同刻对)——
 不是 bug,是测量键的显示秒粒度;圣化之地类同 id 复记归 #36(a) 的折叠管。
 测量脚本 `packages/eval/scripts/dupLineScan.ts`(前后同判据)。
-
