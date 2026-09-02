@@ -1353,7 +1353,7 @@ not touch that name-collision registration and left the predicate index unchange
    variants of the first three but missed Lay on Hands (`633`) — traced to `633` simply not being in
    `classSpells.ts`/`spellIdLists.ts`'s `trackedSpellIds` at all, a gap one layer earlier in the generation
    pipeline (spell-coverage scope), not an aura-107/108-classification issue from this round — not fixed this
-   round, left for the next time `classSpells.ts`'s Paladin spell table is touched.
+   round, left for the next time `classSpells.ts`'s Paladin spell table is touched. **Re-checked 2026-09-02: closed** — `talentModifiers.json` now carries `633` with the 114154 Unbreakable Spirit −30 % row (plus 378425 / 414720), i.e. Lay on Hands entered `trackedSpellIds` through another source (`cooldowns.ts`'s list that includes 633); nothing left to do here. Corpus note: Lay on Hands is cast 17× in 605 12.1 archive files (6 casters), so the modifier matters rarely.
 2. ~~**`unsyncedBurstEvents`'s `healer` fact always takes the first enemy healer, while the CC-overlap check spans
    all enemy healers**~~ ✅ Fixed (`8c4ea6f9`, Task 9 commit 1, "unsynced-burst healer fact covers all enemy
    healers — double-healer mis-attribution fix"): in `packages/analysis/src/analysis/candidateFindings.ts`, the
@@ -1907,6 +1907,11 @@ And then twin flame also goes as well." —— 直接解释了 `1265980` 为什�
   「近 2 倍」—— 那是 2100+/套装盛行样本的数字,全分段混合下偏低是诚实差异,
   不硬凑。顺带解释了 #40 双行修复后的残余:回春术类是**同显示秒两次真实按键**
   (高急速 GCD≈1s;774 单 id、40 文件零同刻对),不是重复记录。
+  **2026-09-02 复核形态 3 在冷却台账的影响**:台账只滤复制 id、不折叠同刻双记。S2 605 场
+  995,281 条 SPELL_CAST_SUCCESS 里同刻双记只落在 34 个 id 上,几乎全是宠物/触发技能
+  (Zap 1,874 对、Soul Fragment 1,720、Stomp 1,007、Throw Glaive 890/658、Dire Beast 529……);
+  跟踪的大 CD 里只有能量灌注 10060(99 对,单充能,同刻两条对 cdAvailableAt 的"最近一次施放"
+  无影响),没有任何多充能大 CD 出现同刻双记 —— 台账不需要再加折叠,记录不改码。
 - **(b) 已落地**:`postKick` 谓词(switched/acted/idle,窗口 5s=研究判据)进
   `IInterruptInstance`,`kick-eaten` 改按 idle 最前排序 + facts 带行为。
   3,300 回合 / 3,494 次被踢验收:**排序完整复现研究锚**(戒律 86%/奶龙 87%
@@ -2204,6 +2209,16 @@ difference-in-differences(同一回合里,落在「已交出去的 CD 阴影内�
 **不能换的会被系统性冤枉** —— 神圣骑士被踢后 36% 的情况整整 5 秒没动作,
 这些秒目前全部计入"自由时间"。修法:`SPELL_INTERRUPT` 的 index 13 直接给被锁学派,
 把锁定窗口并进 `getCCCoveredMs` 的合并区间即可。
+**已落地 2026-09-02(GH #54 镜像项)**:不是往 `getCCCoveredMs` 里再抄一份,而是把 dispelAnalysis
+「驱散者被锁」门原有的 `buildCannotCastIntervals`(施法阻断光环 ∪ 踢技锁定,锁定时长走 GH #62 的
+语料实测表)抽到 `utils/cannotCastIntervals.ts`,两边同一谓词(索引已加行);healingGaps 的
+`getCCCoveredMs` 只剩「裁剪 + 合并」。顺带把光环区间的边界统一成 `>=`(同刻 apply/remove 的闪烁
+光环此前会把覆盖延伸到下一次移除)。验收(S2 605 场 / 1,270 回合 / 3,520 视角):候选逐类只有
+healer:healing-gap 61 → 62 动(+1 来自边界修正:一条被闪烁光环误覆盖的空档重新出现),其余全同;
+逐空档探针(1,257 治疗回合、254 个空档):**6 个空档扣掉了踢锁定,合计 11.2 秒**(如 5.1s 空档
+free 5.1 → 2.1),7 个空档的光环覆盖因边界修正而变。踢锁定的影响面比 (b) 的百分比暗示的小 ——
+被踢后的沉默大多不满足「≥3s 空档 + 队友承压」的立项门,真正被冤枉的是少数几条;单测钉住
+反震 6s 锁定吃掉空档 / 3s 近战踢只扣 3s 两种形态。
 
 ### (f) 英雄天赋分层影响**所有** spec 级阈值表
 

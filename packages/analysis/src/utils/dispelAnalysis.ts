@@ -2,12 +2,11 @@ import { CombatUnitSpec, ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 
 import { dispelVerdictOf } from "../data/dispelVerdicts";
 import {
-  isCastBlockingAuraType,
-  kickLockoutSeconds,
   SPELL_CATEGORIES as spellsData,
 } from "../data/spellCategories";
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
+import { buildCannotCastIntervals } from "./cannotCastIntervals";
 import {
   getPressureThreshold,
   isHealerSpec,
@@ -845,71 +844,9 @@ function isWindowFullyCovered(
   return covered >= end;
 }
 
-/**
- * The unit's "cannot cast" intervals (single source for feasibility gate b+c,
- * 2026-08-02):
- *  - cast-blocking auras applied by enemies (hard CC + silence; single source
- *    is isCastBlockingAuraType);
- *  - school lockouts from enemy kicks (SPELL_INTERRUPT emits no aura event, so
- *    the duration comes from kickLockoutSeconds; the first version is
- *    deliberately lenient and does not check the school — the locked school is
- *    usually the healing one anyway, and a wrong exemption costs far less than
- *    a wrong accusation).
- */
-function buildCannotCastIntervals(
-  unit: ICombatUnit,
-  enemyIds: Set<string>,
-): Array<{ from: number; to: number }> {
-  const appliedTimes = new Map<string, number[]>();
-  const removedTimes = new Map<string, number[]>();
-
-  for (const aura of unit.auraEvents) {
-    const spellId = aura.spellId;
-    if (!spellId) continue;
-    if (!enemyIds.has(aura.srcUnitId)) continue;
-    const spell = SPELLS[spellId];
-    // Single-source cast-blocking predicate (hard CC + silence auras) — this
-    // used to accept only "cc", so a silenced dispeller was still charged with
-    // a missed cleanse.
-    if (!spell || !isCastBlockingAuraType(spell.type)) continue;
-
-    if (aura.logLine.event === LogEvent.SPELL_AURA_APPLIED) {
-      const bucket = appliedTimes.get(spellId) ?? [];
-      appliedTimes.set(spellId, [...bucket, aura.timestamp]);
-    } else if (
-      aura.logLine.event === LogEvent.SPELL_AURA_REMOVED ||
-      aura.logLine.event === LogEvent.SPELL_AURA_BROKEN ||
-      aura.logLine.event === LogEvent.SPELL_AURA_BROKEN_SPELL
-    ) {
-      const bucket = removedTimes.get(spellId) ?? [];
-      removedTimes.set(spellId, [...bucket, aura.timestamp]);
-    }
-  }
-
-  const intervals: Array<{ from: number; to: number }> = [];
-  for (const [spellId, applications] of appliedTimes) {
-    const removals = removedTimes.get(spellId) ?? [];
-    for (const applyTs of applications) {
-      const removalTs = removals.find((r) => r >= applyTs);
-      intervals.push({ from: applyTs, to: removalTs ?? Infinity });
-    }
-  }
-
-  // Kick lockout: in SPELL_INTERRUPT, spellId IS the kick (same source as
-  // matchTimeline's [KICK] — lesson from gate-predicate divergence case 13:
-  // do NOT read extraSpellId here).
-  for (const action of unit.actionIn) {
-    if (action.logLine.event !== LogEvent.SPELL_INTERRUPT) continue;
-    if (!enemyIds.has(action.srcUnitId)) continue;
-    const kickSpellId = action.spellId ?? "";
-    intervals.push({
-      from: action.timestamp,
-      to: action.timestamp + kickLockoutSeconds(kickSpellId) * 1000,
-    });
-  }
-
-  return intervals;
-}
+// `buildCannotCastIntervals` (cast-blocking auras ∪ kick lockouts) moved to
+// utils/cannotCastIntervals.ts on 2026-09-02 so healingGaps.ts consumes the
+// same predicate (BACKLOG #38 (e)); the gate b+c semantics are unchanged.
 
 export interface IHardCastOccupancy {
   /** ms of [windowStart, windowEnd] spent inside the unit's own hard casts */

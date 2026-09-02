@@ -1,9 +1,9 @@
 import { ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 
 import {
-  isCastBlockingAuraType,
-  SPELL_CATEGORIES as spellsData,
-} from "../data/spellCategories";
+  buildCannotCastIntervals,
+  coveredMsWithin,
+} from "./cannotCastIntervals";
 import { isHealerSpec, specToString } from "./cooldowns";
 import { fmtTime } from "./renderGrid";
 
@@ -28,14 +28,12 @@ const GAP_PRESSURE_PCT = 0.1;
 const GAP_PRESSURE_FALLBACK_DPS = 40_000;
 const GAP_PRESSURE_FALLBACK_HEALER = 25_000;
 
-// Cast-blocking is decided uniformly by isCastBlockingAuraType (a single-source
-// predicate covering hard CC + silence).
-// The previous local set was ["cc", "immunities_spells"]: silences were missed,
-// and "immunities_spells" is not even in ISpellCategoryEntry's type union -- a
-// dead value that could never match.
-
-type SpellEntry = { type: string };
-const SPELLS = spellsData as Record<string, SpellEntry>;
+// "Could not cast" (hard CC + silence auras ∪ kick lockouts) is decided by
+// utils/cannotCastIntervals.ts — the same predicate dispelAnalysis's
+// "dispeller was locked out" gate reads (BACKLOG #38 (e), 2026-09-02). The
+// aura half already went through isCastBlockingAuraType (single source, hard
+// CC + silence; the earlier local set ["cc", "immunities_spells"] missed
+// silences and carried a dead value); the kick half is new here.
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -86,70 +84,20 @@ function getGapPressureThreshold(unit: ICombatUnit): number {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns the total milliseconds within [fromMs, toMs] during which the unit
- * was in a cast-preventing effect (hard CC or silence) sourced from an enemy.
- * Uses merged-interval math to avoid double-counting overlapping CC.
+ * Milliseconds within [fromMs, toMs] during which the healer could not cast —
+ * enemy hard CC + silence auras ∪ enemy kick school-lockouts, one predicate
+ * shared with dispelAnalysis's "dispeller was locked out" gate
+ * (`utils/cannotCastIntervals.ts`, BACKLOG #38 (e), 2026-09-02). Before that
+ * this file subtracted auras only: a pure interrupt logs no aura event, so the
+ * 3–6 s after a Pummel / Counterspell counted as free-cast time and the
+ * healer was charged with a gap he was locked out of.
  */
 function getCCCoveredMs(
-  unit: ICombatUnit,
+  cannotCast: ReadonlyArray<{ from: number; to: number }>,
   fromMs: number,
   toMs: number,
-  enemyIds: Set<string>,
 ): number {
-  const applied = new Map<string, number[]>();
-  const removed = new Map<string, number[]>();
-
-  for (const aura of unit.auraEvents) {
-    const spellId = aura.spellId;
-    if (!spellId) continue;
-    if (!enemyIds.has(aura.srcUnitId)) continue;
-    const spell = SPELLS[spellId];
-    if (!spell || !isCastBlockingAuraType(spell.type)) continue;
-
-    if (aura.logLine.event === LogEvent.SPELL_AURA_APPLIED) {
-      const b = applied.get(spellId) ?? [];
-      applied.set(spellId, [...b, aura.timestamp]);
-    } else if (
-      aura.logLine.event === LogEvent.SPELL_AURA_REMOVED ||
-      aura.logLine.event === LogEvent.SPELL_AURA_BROKEN ||
-      aura.logLine.event === LogEvent.SPELL_AURA_BROKEN_SPELL
-    ) {
-      const b = removed.get(spellId) ?? [];
-      removed.set(spellId, [...b, aura.timestamp]);
-    }
-  }
-
-  // Build clipped CC windows
-  const windows: Array<{ from: number; to: number }> = [];
-  for (const [spellId, applications] of applied) {
-    const removals = removed.get(spellId) ?? [];
-    for (const applyTs of applications) {
-      const removeTs = removals.find((r) => r > applyTs) ?? Infinity;
-      const clippedFrom = Math.max(applyTs, fromMs);
-      const clippedTo = Math.min(removeTs, toMs);
-      if (clippedTo > clippedFrom) {
-        windows.push({ from: clippedFrom, to: clippedTo });
-      }
-    }
-  }
-
-  if (windows.length === 0) return 0;
-
-  // Merge overlapping windows and sum
-  windows.sort((a, b) => a.from - b.from);
-  let covered = 0;
-  let cur = windows[0];
-  for (let i = 1; i < windows.length; i++) {
-    const w = windows[i];
-    if (w.from <= cur.to) {
-      cur = { from: cur.from, to: Math.max(cur.to, w.to) };
-    } else {
-      covered += cur.to - cur.from;
-      cur = w;
-    }
-  }
-  covered += cur.to - cur.from;
-  return covered;
+  return coveredMsWithin(cannotCast, fromMs, toMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +148,9 @@ export function detectHealingGaps(
   combat: { startTime: number; endTime: number },
 ): IHealingGap[] {
   const enemyIds = new Set(enemies.map((u) => u.id));
+  // One predicate for "could not cast" (auras ∪ kick lockouts), built once
+  // per healer and clipped per gap below.
+  const cannotCast = buildCannotCastIntervals(healer, enemyIds);
   const teammates = friends.filter((u) => u.id !== healer.id);
   const matchStartMs = combat.startTime;
   const matchEndMs = combat.endTime;
@@ -261,7 +212,7 @@ export function detectHealingGaps(
     const effectiveToMs = firstDeathMs < toMs ? firstDeathMs : toMs;
 
     // CC check: how much of the gap was the healer unable to cast?
-    const ccMs = getCCCoveredMs(healer, fromMs, effectiveToMs, enemyIds);
+    const ccMs = getCCCoveredMs(cannotCast, fromMs, effectiveToMs);
     const freeCastMs = effectiveToMs - fromMs - ccMs;
     if (freeCastMs < MIN_FREE_CAST_MS) continue;
 

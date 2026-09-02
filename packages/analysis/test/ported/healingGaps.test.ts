@@ -108,6 +108,72 @@ describe("healingGaps — main detection", () => {
     expect(res).toHaveLength(0);
   });
 
+  it("踢造成的学派锁定也从自由时间里扣(BACKLOG #38 (e)):反震 6s 锁定吃掉空档 → 不报;3s 近战踢 → 自由时间只剩 7s 仍报", () => {
+    // A pure interrupt logs no SPELL_AURA_APPLIED — only SPELL_INTERRUPT in the
+    // victim's actionIn — so the old aura-only coverage counted the lockout as
+    // "free" time. The lockout length is kickLockoutSeconds (corpus table).
+    const kicked = (kickSpellId: string, atMs: number) =>
+      makeUnit("h", {
+        spellCastEvents: [
+          makeSpellCastEvent("2061", MATCH_START + 10_000, "f1"),
+          makeSpellCastEvent("2061", MATCH_START + 20_000, "f1"),
+        ],
+        actionIn: [
+          {
+            logLine: {
+              event: LogEvent.SPELL_INTERRUPT,
+              timestamp: atMs,
+              parameters: [],
+            },
+            timestamp: atMs,
+            spellId: kickSpellId,
+            spellName: "kick",
+            srcUnitId: "e1",
+            srcUnitName: "e1",
+            destUnitId: "h",
+            destUnitName: "h",
+            effectiveAmount: 0,
+          },
+        ] as any,
+      });
+    const friend = makeUnit("f1", {
+      damageIn: [
+        {
+          logLine: { timestamp: MATCH_START + 15_000 },
+          effectiveAmount: -100_000,
+        },
+      ] as any,
+    });
+    const enemy = makeUnit("e1");
+    (enemy as any).id = "e1";
+    const run = (h: ReturnType<typeof makeUnit>) =>
+      detectHealingGaps(
+        h as any,
+        [h, friend] as any,
+        [enemy] as any,
+        makeCombat(),
+      );
+    // Counterspell (2139, 6 s lockout) at 10.0 s: locked 10–16 s, then 4 s free
+    // of a 10 s gap → still a gap? free 4 s ≥ MIN_FREE_CAST_MS — so use two
+    // kicks to cover it: a second Counterspell at 15.5 s locks 15.5–21.5 s.
+    const doubleKicked = kicked("2139", MATCH_START + 10_000);
+    (doubleKicked as any).actionIn.push({
+      ...(doubleKicked as any).actionIn[0],
+      logLine: {
+        event: LogEvent.SPELL_INTERRUPT,
+        timestamp: MATCH_START + 15_500,
+        parameters: [],
+      },
+      timestamp: MATCH_START + 15_500,
+    });
+    expect(run(doubleKicked)).toHaveLength(0);
+    // A single 3 s melee kick (Pummel 6552) at 10.0 s leaves 7 s free → the gap
+    // is still reported, with the lockout subtracted from freeCastSeconds.
+    const res = run(kicked("6552", MATCH_START + 10_000));
+    expect(res).toHaveLength(1);
+    expect(res[0]!.freeCastSeconds).toBeCloseTo(7, 1);
+  });
+
   it("skips gaps where the healer is fully silenced — silence prevents casting like hard CC", () => {
     const healer = makeUnit("h", {
       spellCastEvents: [

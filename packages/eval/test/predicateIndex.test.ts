@@ -57,8 +57,10 @@ import * as spellEffectData from "@gladlog/analysis/src/data/spellEffectData";
 import * as spellSchools from "@gladlog/analysis/src/data/spellSchools";
 import * as spellTags from "@gladlog/analysis/src/data/spellTags";
 import * as spellTargeting from "@gladlog/analysis/src/data/spellTargeting";
+import * as syncWindowPrior from "@gladlog/analysis/src/data/syncWindowPrior";
 import * as auraIntervals from "@gladlog/analysis/src/utils/auraIntervals";
 import * as bracketKey from "@gladlog/analysis/src/utils/bracketKey";
+import * as cannotCastIntervals from "@gladlog/analysis/src/utils/cannotCastIntervals";
 import * as cooldowns from "@gladlog/analysis/src/utils/cooldowns";
 import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
 import * as deathOutcomeAnalysis from "@gladlog/analysis/src/utils/deathOutcomeAnalysis";
@@ -619,6 +621,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/data/spellCategories.ts`,
     symbol: "isCastBlockingAuraType",
     mod: spellCategories,
+  },
+  {
+    file: `${A}/utils/cannotCastIntervals.ts`,
+    symbol: "buildCannotCastIntervals",
+    mod: cannotCastIntervals,
   },
   {
     file: `${A}/analysis/findingCategories.ts`,
