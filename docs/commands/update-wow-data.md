@@ -62,8 +62,10 @@ for i in 0 1 2; do nice -n 10 npx tsx packages/eval/scripts/behaviorPriorScan.ts
   --manifest $R/manifest.txt --ledger $E/archive/ledger --out $R/shard$i.jsonl \
   --offset $((i*7000)) --limit 7000 > $R/shard$i.log 2>&1 & done; wait
 cat $R/shard*.jsonl > $R/opportunities.jsonl
+#   Write temp-then-cp — never `>` directly into the imported json (a script failure truncates it first).
 npx tsx packages/eval/scripts/behaviorPriorScan.ts emit-table --in $R/opportunities.jsonl \
-  --corpus "wowarenalogs archive $(date +%F)" > packages/analysis/src/data/behaviorPriorGenerated.json
+  --corpus "wowarenalogs archive $(date +%F)" > $R/behaviorPriorGenerated.json \
+  && cp $R/behaviorPriorGenerated.json packages/analysis/src/data/behaviorPriorGenerated.json
 #   (the scan itself already filters to startTime >= PATCH_121_GOLIVE_EPOCH_MS; when the next
 #   season ships, update that epoch first — it is the season gate.)
 # 6b-pre-3. Enemy-burst-window reference table (GH #60, wired to the product 2026-09-01): per (bracket, lead CD), the
