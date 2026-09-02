@@ -17,18 +17,13 @@
  * Run scans in a few shards at most: a 2026-08-18 incident froze this machine
  * with 74 concurrent corpus-scanning node processes (~150GB).
  */
-import { existsSync, readFileSync, appendFileSync, readdirSync } from "fs";
-import { basename, join } from "path";
-import { gunzipSync } from "zlib";
-
 import {
   ccSpellIds,
-  classMetadata,
   ensureAnalysisData,
   extractCandidateFindings,
   isHealerSpec,
-  spellIdLists,
   specToString,
+  spellIdLists,
 } from "@gladlog/analysis";
 import { burstWindowDecisionPoints } from "@gladlog/analysis/src/analysis/burstWindowDecisionPoints";
 import { BURST_WINDOW_MIN_JUDGED_S } from "@gladlog/analysis/src/analysis/candidates/burstWindowResponse";
@@ -41,19 +36,22 @@ import {
   cdAvailableAt,
   extractMajorCooldowns,
 } from "@gladlog/analysis/src/utils/cooldowns";
-import { reconstructEnemyCDTimeline } from "@gladlog/analysis/src/utils/enemyCDs";
 import {
   getDispelType,
   PURGE_BLOCKLIST,
   purgePriorityForTest,
 } from "@gladlog/analysis/src/utils/dispelAnalysis";
-import { SpellTag } from "@gladlog/analysis/src/data/spellTypes";
+import { reconstructEnemyCDTimeline } from "@gladlog/analysis/src/utils/enemyCDs";
+import { OFFENSIVE_CD_SPELL_IDS } from "@gladlog/analysis/src/utils/spellDanger";
 import { GladLogParser } from "@gladlog/parser";
 import {
   CombatUnitReaction,
   toLegacyMatch,
   toLegacyShuffle,
 } from "@gladlog/parser-compat";
+import { appendFileSync, existsSync, readdirSync,readFileSync } from "fs";
+import { basename, join } from "path";
+import { gunzipSync } from "zlib";
 
 import {
   bucketOf,
@@ -96,13 +94,10 @@ function loadLedger(dir: string): Map<string, any> {
  * Field names follow parser-compat's legacy shape (auraEvents carry
  * `logLine.event` + `auraType`, damage amounts are NEGATIVE, casts live in
  * `castStartEvents`, max HP only exists on `advancedActions` samples). */
-const OFFENSIVE_CD_IDS = new Set<string>(
-  classMetadata.flatMap((c: any) =>
-    (c.abilities ?? [])
-      .filter((a: any) => (a.tags ?? []).includes(SpellTag.Offensive))
-      .map((a: any) => String(a.spellId)),
-  ),
-);
+// Canonical offensive-cooldown table (unified 2026-09-02, GH #60 tail) — was
+// a private classMetadata-only copy, one of the three consumers the
+// unification pointed at the shared export.
+const OFFENSIVE_CD_IDS = OFFENSIVE_CD_SPELL_IDS;
 const EXTERNAL_IDS = new Set<string>(
   (spellIdLists as any).externalDefensiveSpellIds.map(String),
 );

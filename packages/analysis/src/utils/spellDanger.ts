@@ -1,4 +1,6 @@
+import { classMetadata } from '../data/classSpells';
 import { spells } from '../data/spellTags';
+import { SpellTag } from '../data/spellTypes';
 
 export enum SpellEffectType {
   DamageAmp = 'DamageAmp',
@@ -40,12 +42,74 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, SpellEffectType[]> = {
 };
 
 /**
- * Returns true if spells.json classifies this spell as offensive.
- * This is the authoritative check — covers all 120 tagged offensive spells.
+ * Corpus-dead offensive-cooldown ids EXCLUDED from the canonical table below
+ * (GH #60 tail, unification 2026-09-02). All nine came from the classMetadata
+ * side of the former split and have **zero occurrences in the 10,682-match
+ * 12.1 S2 archive** (`eval-private/corpus/observedSpellIds-S2-archive-
+ * 2026-08-21.json`) — for one-button major cooldowns that would be pressed
+ * every round by anyone who had them, zero occurrences over a whole season
+ * is deadness, not rarity. Note DB2 still carries rows for all nine (a
+ * `spellEffectGenerated` hit is NOT liveness — DB2 keeps rows for
+ * unobtainable spells), so the corpus is the deciding evidence; 323764 is
+ * additionally corroborated by `SPELL_EFFECT_OVERRIDES` above, which already
+ * replaced it with the live 322109 in the 2026-08-21 S2 sweep. The
+ * "when in doubt keep it" rule was applied — none of the nine was in doubt.
+ */
+export const OFFENSIVE_CD_DEAD_IDS: ReadonlySet<string> = new Set([
+  '113860', // Dark Soul: Misery — gone in 12.x
+  '137639', // Storm, Earth, and Fire — gone in 12.x
+  '207289', // Unholy Assault
+  '231895', // Crusade (Avenging Wrath, Retribution variant)
+  '266779', // Coordinated Assault
+  '275699', // Apocalypse
+  '323764', // Convoke the Spirits — renumbered to 322109 (S2 sweep 2026-08-21)
+  '359844', // Call of the Wild
+  '391109', // Dark Ascension
+]);
+
+/**
+ * **The ONE canonical "is this an offensive cooldown" table** (GH #60 coarse
+ * spot 4, closed 2026-09-02 — this was `docs/predicate-index.md`'s open
+ * "Not yet unified" divergence). Union of the two tables the repo used to
+ * carry — the `SPELL_CATEGORIES` offensive types (41 ids, via `spellTags`,
+ * mostly aura/buff ids) and `classMetadata`'s `SpellTag.Offensive` abilities
+ * (34 ids, cast ids) — minus `OFFENSIVE_CD_DEAD_IDS`: 41 ∪ 34 = 56 (overlap
+ * 19) − 9 dead = 47.
+ *
+ * Both former consumers now read THIS set: `isOffensiveSpell` (the enemy-CD
+ * window builder `reconstructEnemyCDTimeline` and everything downstream of
+ * it, including the burst-window engine's `isBurstWindowOffensiveCd`) and
+ * `cooldowns.ts`'s `OFFENSIVE_SPELL_IDS` (aura evidence:
+ * `hasOffensiveSpellActive` → `threatActiveAt` / panic-press), plus
+ * `signalSkillGradientScan.ts`'s exposure counts. Registered in
+ * `data/curatedIdRegistry.ts` (Curated-List Completeness Rule — registering
+ * is part of adding the table; the union is derived from two tables that are
+ * themselves registered, but the DEAD exclusion above is new hand curation
+ * and the union is what consumers actually key on).
+ */
+export const OFFENSIVE_CD_SPELL_IDS: ReadonlySet<string> = new Set(
+  [
+    ...Object.keys(spells).filter(
+      (id) =>
+        spells[id].type === 'buffs_offensive' ||
+        spells[id].type === 'debuffs_offensive',
+    ),
+    ...classMetadata.flatMap((cls) =>
+      cls.abilities
+        .filter((a) => a.tags.includes(SpellTag.Offensive))
+        .map((a) => String(a.spellId)),
+    ),
+  ].filter((id) => !OFFENSIVE_CD_DEAD_IDS.has(id)),
+);
+
+/**
+ * Returns true if the canonical offensive-cooldown table holds this spell.
+ * (The pre-2026-09-02 comment claimed "covers all 120 tagged offensive
+ * spells" — that was wrong on both counts; the real membership is
+ * `OFFENSIVE_CD_SPELL_IDS`, 47 ids.)
  */
 export function isOffensiveSpell(spellId: string): boolean {
-  const entry = spells[spellId];
-  return entry?.type === 'buffs_offensive' || entry?.type === 'debuffs_offensive';
+  return OFFENSIVE_CD_SPELL_IDS.has(spellId);
 }
 
 /**

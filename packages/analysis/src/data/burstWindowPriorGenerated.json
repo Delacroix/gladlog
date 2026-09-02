@@ -1,16 +1,16 @@
 {
   "meta": {
-    "generatedAt": "2026-09-01",
-    "corpus": "wowarenalogs archive 2026-09-01",
+    "generatedAt": "2026-09-02",
+    "corpus": "18134 archived 12.1 matches (2026-09-02 rescan)",
     "command": "npx tsx packages/eval/scripts/burstWindowScan.ts emit-table --in <scan.jsonl> --out <file.json>",
     "predicateVersion": 1
   },
   "cells": {
     "*|*": {
-      "nResp": 46046,
+      "nResp": 46655,
       "deathResp": 0.04,
-      "nNoResp": 16252,
-      "deathNoResp": 0.08,
+      "nNoResp": 16698,
+      "deathNoResp": 0.07,
       "topResponses": [
         [
           "control",
@@ -27,9 +27,9 @@
       ]
     },
     "2v2|*": {
-      "nResp": 6534,
+      "nResp": 6645,
       "deathResp": 0.04,
-      "nNoResp": 2475,
+      "nNoResp": 2568,
       "deathNoResp": 0.08,
       "topResponses": [
         [
@@ -42,15 +42,15 @@
         ],
         [
           "external",
-          0.3
+          0.29
         ]
       ]
     },
     "2v2|102543": {
-      "nResp": 305,
+      "nResp": 298,
       "deathResp": 0.02,
-      "nNoResp": 146,
-      "deathNoResp": 0.05,
+      "nNoResp": 142,
+      "deathNoResp": 0.06,
       "topResponses": [
         [
           "control",
@@ -67,18 +67,18 @@
       ]
     },
     "2v2|102560": {
-      "nResp": 254,
-      "deathResp": 0.05,
-      "nNoResp": 55,
-      "deathNoResp": 0.16,
+      "nResp": 247,
+      "deathResp": 0.04,
+      "nNoResp": 53,
+      "deathNoResp": 0.15,
       "topResponses": [
         [
           "control",
-          0.5
+          0.49
         ],
         [
           "wall",
-          0.4
+          0.41
         ],
         [
           "external",
@@ -87,49 +87,49 @@
       ]
     },
     "2v2|106951": {
-      "nResp": 12,
+      "nResp": 11,
       "deathResp": 0,
       "nNoResp": 4,
       "deathNoResp": 0,
       "topResponses": [
         [
           "control",
-          0.75
+          0.73
         ],
         [
           "kite",
-          0.75
+          0.73
         ],
         [
           "wall",
-          0.25
+          0.27
         ]
       ]
     },
     "2v2|107574": {
-      "nResp": 259,
+      "nResp": 258,
       "deathResp": 0.02,
-      "nNoResp": 107,
-      "deathNoResp": 0.07,
+      "nNoResp": 114,
+      "deathNoResp": 0.06,
       "topResponses": [
         [
           "control",
-          0.58
-        ],
-        [
-          "external",
-          0.29
+          0.57
         ],
         [
           "wall",
+          0.29
+        ],
+        [
+          "external",
           0.29
         ]
       ]
     },
     "2v2|1122": {
-      "nResp": 181,
+      "nResp": 176,
       "deathResp": 0.01,
-      "nNoResp": 77,
+      "nNoResp": 75,
       "deathNoResp": 0.05,
       "topResponses": [
         [
@@ -138,23 +138,43 @@
         ],
         [
           "kite",
-          0.38
+          0.39
         ],
         [
           "wall",
-          0.22
+          0.23
+        ]
+      ]
+    },
+    "2v2|114050": {
+      "nResp": 37,
+      "deathResp": 0.03,
+      "nNoResp": 17,
+      "deathNoResp": 0,
+      "topResponses": [
+        [
+          "control",
+          0.65
+        ],
+        [
+          "wall",
+          0.43
+        ],
+        [
+          "external",
+          0.19
         ]
       ]
     },
     "2v2|114051": {
-      "nResp": 95,
+      "nResp": 93,
       "deathResp": 0.04,
-      "nNoResp": 14,
+      "nNoResp": 13,
       "deathNoResp": 0,
       "topResponses": [
         [
           "external",
-          0.51
+          0.52
         ],
         [
           "control",
@@ -162,7 +182,7 @@
         ],
         [
           "wall",
-          0.44
+          0.45
         ]
       ]
     },
@@ -189,7 +209,7 @@
     "2v2|1233448": {
       "nResp": 76,
       "deathResp": 0.01,
-      "nNoResp": 53,
+      "nNoResp": 51,
       "deathNoResp": 0.06,
       "topResponses": [
         [
@@ -203,6 +223,26 @@
         [
           "external",
           0.21
+        ]
+      ]
+    },
+    "2v2|123904": {
+      "nResp": 3,
+      "deathResp": 0,
+      "nNoResp": 3,
+      "deathNoResp": 0,
+      "topResponses": [
+        [
+          "control",
+          0.67
+        ],
+        [
+          "wall",
+          0.33
+        ],
+        [
+          "external",
+          0.33
         ]
       ]
     },
@@ -229,7 +269,7 @@
     "2v2|1246167": {
       "nResp": 34,
       "deathResp": 0.03,
-      "nNoResp": 25,
+      "nNoResp": 24,
       "deathNoResp": 0,
       "topResponses": [
         [
@@ -247,18 +287,18 @@
       ]
     },
     "2v2|1250646": {
-      "nResp": 212,
-      "deathResp": 0.06,
-      "nNoResp": 42,
-      "deathNoResp": 0.19,
+      "nResp": 205,
+      "deathResp": 0.05,
+      "nNoResp": 41,
+      "deathNoResp": 0.2,
       "topResponses": [
         [
           "external",
-          0.4
+          0.39
         ],
         [
           "wall",
-          0.37
+          0.38
         ],
         [
           "control",
@@ -287,9 +327,9 @@
       ]
     },
     "2v2|13750": {
-      "nResp": 79,
+      "nResp": 76,
       "deathResp": 0.01,
-      "nNoResp": 37,
+      "nNoResp": 35,
       "deathNoResp": 0.03,
       "topResponses": [
         [
@@ -298,18 +338,18 @@
         ],
         [
           "kite",
-          0.34
+          0.32
         ],
         [
           "wall",
-          0.3
+          0.29
         ]
       ]
     },
     "2v2|1719": {
-      "nResp": 211,
+      "nResp": 204,
       "deathResp": 0.02,
-      "nNoResp": 127,
+      "nNoResp": 123,
       "deathNoResp": 0.05,
       "topResponses": [
         [
@@ -318,98 +358,98 @@
         ],
         [
           "wall",
-          0.34
+          0.35
         ],
         [
-          "kite",
+          "external",
           0.24
         ]
       ]
     },
     "2v2|190319": {
-      "nResp": 606,
+      "nResp": 594,
       "deathResp": 0.04,
-      "nNoResp": 154,
-      "deathNoResp": 0.06,
+      "nNoResp": 151,
+      "deathNoResp": 0.07,
       "topResponses": [
         [
           "external",
           0.41
         ],
         [
-          "control",
+          "wall",
           0.39
         ],
         [
-          "wall",
+          "control",
           0.39
         ]
       ]
     },
     "2v2|191634": {
-      "nResp": 27,
-      "deathResp": 0.04,
-      "nNoResp": 13,
-      "deathNoResp": 0.31,
+      "nResp": 35,
+      "deathResp": 0,
+      "nNoResp": 14,
+      "deathNoResp": 0.21,
       "topResponses": [
         [
           "control",
-          0.59
+          0.54
         ],
         [
           "wall",
-          0.44
+          0.34
         ],
         [
           "external",
-          0.22
+          0.2
         ]
       ]
     },
     "2v2|194223": {
-      "nResp": 12,
+      "nResp": 10,
       "deathResp": 0,
       "nNoResp": 4,
       "deathNoResp": 0,
       "topResponses": [
         [
           "control",
-          0.83
+          0.8
         ],
         [
           "kite",
-          0.33
+          0.4
         ],
         [
           "wall",
-          0.17
+          0.2
         ]
       ]
     },
     "2v2|19574": {
-      "nResp": 274,
+      "nResp": 265,
       "deathResp": 0.04,
       "nNoResp": 79,
       "deathNoResp": 0.06,
       "topResponses": [
         [
           "control",
-          0.67
+          0.68
         ],
         [
           "external",
-          0.27
+          0.26
         ],
         [
           "wall",
-          0.21
+          0.22
         ]
       ]
     },
     "2v2|204361": {
-      "nResp": 22,
+      "nResp": 19,
       "deathResp": 0.05,
-      "nNoResp": 6,
+      "nNoResp": 8,
       "deathNoResp": 0,
       "topResponses": [
         [
@@ -418,23 +458,23 @@
         ],
         [
           "wall",
-          0.36
+          0.42
         ],
         [
           "external",
-          0.27
+          0.32
         ]
       ]
     },
     "2v2|205021": {
-      "nResp": 179,
+      "nResp": 177,
       "deathResp": 0.02,
       "nNoResp": 64,
       "deathNoResp": 0.06,
       "topResponses": [
         [
           "control",
-          0.61
+          0.62
         ],
         [
           "external",
@@ -447,9 +487,9 @@
       ]
     },
     "2v2|205180": {
-      "nResp": 474,
+      "nResp": 463,
       "deathResp": 0.02,
-      "nNoResp": 218,
+      "nNoResp": 214,
       "deathNoResp": 0.04,
       "topResponses": [
         [
@@ -462,14 +502,54 @@
         ],
         [
           "wall",
-          0.22
+          0.23
+        ]
+      ]
+    },
+    "2v2|227847": {
+      "nResp": 10,
+      "deathResp": 0,
+      "nNoResp": 2,
+      "deathNoResp": 0,
+      "topResponses": [
+        [
+          "control",
+          0.9
+        ],
+        [
+          "external",
+          0.1
+        ],
+        [
+          "kite",
+          0.1
+        ]
+      ]
+    },
+    "2v2|265187": {
+      "nResp": 7,
+      "deathResp": 0,
+      "nNoResp": 4,
+      "deathNoResp": 0,
+      "topResponses": [
+        [
+          "control",
+          0.43
+        ],
+        [
+          "external",
+          0.29
+        ],
+        [
+          "wall",
+          0.14
         ]
       ]
     },
     "2v2|274837": {
-      "nResp": 116,
+      "nResp": 115,
       "deathResp": 0,
-      "nNoResp": 38,
+      "nNoResp": 35,
       "deathNoResp": 0.11,
       "topResponses": [
         [
@@ -478,7 +558,7 @@
         ],
         [
           "external",
-          0.31
+          0.3
         ],
         [
           "kite",
@@ -487,9 +567,9 @@
       ]
     },
     "2v2|288613": {
-      "nResp": 223,
+      "nResp": 213,
       "deathResp": 0.05,
-      "nNoResp": 109,
+      "nNoResp": 106,
       "deathNoResp": 0.05,
       "topResponses": [
         [
@@ -498,7 +578,7 @@
         ],
         [
           "wall",
-          0.35
+          0.36
         ],
         [
           "external",
@@ -507,9 +587,9 @@
       ]
     },
     "2v2|31884": {
-      "nResp": 421,
+      "nResp": 411,
       "deathResp": 0.01,
-      "nNoResp": 253,
+      "nNoResp": 248,
       "deathNoResp": 0.04,
       "topResponses": [
         [
@@ -522,15 +602,15 @@
         ],
         [
           "wall",
-          0.23
+          0.24
         ]
       ]
     },
     "2v2|360194": {
-      "nResp": 1314,
+      "nResp": 1306,
       "deathResp": 0.09,
-      "nNoResp": 324,
-      "deathNoResp": 0.21,
+      "nNoResp": 317,
+      "deathNoResp": 0.2,
       "topResponses": [
         [
           "wall",
@@ -538,7 +618,7 @@
         ],
         [
           "external",
-          0.39
+          0.4
         ],
         [
           "control",
@@ -567,9 +647,9 @@
       ]
     },
     "2v2|370965": {
-      "nResp": 105,
+      "nResp": 102,
       "deathResp": 0.03,
-      "nNoResp": 43,
+      "nNoResp": 42,
       "deathNoResp": 0.05,
       "topResponses": [
         [
@@ -578,18 +658,18 @@
         ],
         [
           "wall",
-          0.3
+          0.29
         ],
         [
           "external",
-          0.21
+          0.19
         ]
       ]
     },
     "2v2|375087": {
       "nResp": 93,
       "deathResp": 0.05,
-      "nNoResp": 28,
+      "nNoResp": 27,
       "deathNoResp": 0.07,
       "topResponses": [
         [
@@ -607,7 +687,7 @@
       ]
     },
     "2v2|392983": {
-      "nResp": 142,
+      "nResp": 141,
       "deathResp": 0.04,
       "nNoResp": 24,
       "deathNoResp": 0,
@@ -622,19 +702,19 @@
         ],
         [
           "wall",
-          0.25
+          0.26
         ]
       ]
     },
     "2v2|42650": {
-      "nResp": 284,
+      "nResp": 279,
       "deathResp": 0.07,
-      "nNoResp": 177,
+      "nNoResp": 174,
       "deathNoResp": 0.1,
       "topResponses": [
         [
           "control",
-          0.46
+          0.47
         ],
         [
           "wall",
@@ -642,43 +722,23 @@
         ],
         [
           "external",
-          0.23
+          0.22
         ]
       ]
     },
     "2v2|442726": {
-      "nResp": 106,
+      "nResp": 102,
       "deathResp": 0.03,
-      "nNoResp": 56,
+      "nNoResp": 55,
       "deathNoResp": 0.02,
       "topResponses": [
         [
           "control",
-          0.62
+          0.61
         ],
         [
           "wall",
-          0.23
-        ],
-        [
-          "external",
-          0.19
-        ]
-      ]
-    },
-    "2v2|51271": {
-      "nResp": 15,
-      "deathResp": 0,
-      "nNoResp": 2,
-      "deathNoResp": 1,
-      "topResponses": [
-        [
-          "control",
-          0.73
-        ],
-        [
-          "healCd",
-          0.27
+          0.24
         ],
         [
           "external",
@@ -686,19 +746,39 @@
         ]
       ]
     },
-    "2v2|6353": {
-      "nResp": 47,
-      "deathResp": 0.09,
-      "nNoResp": 21,
-      "deathNoResp": 0.05,
+    "2v2|47568": {
+      "nResp": 130,
+      "deathResp": 0.02,
+      "nNoResp": 89,
+      "deathNoResp": 0.02,
       "topResponses": [
         [
+          "kite",
+          0.43
+        ],
+        [
           "control",
-          0.53
+          0.4
         ],
         [
           "wall",
-          0.28
+          0.34
+        ]
+      ]
+    },
+    "2v2|51271": {
+      "nResp": 54,
+      "deathResp": 0.06,
+      "nNoResp": 21,
+      "deathNoResp": 0.19,
+      "topResponses": [
+        [
+          "wall",
+          0.5
+        ],
+        [
+          "control",
+          0.43
         ],
         [
           "external",
@@ -706,15 +786,35 @@
         ]
       ]
     },
+    "2v2|6353": {
+      "nResp": 46,
+      "deathResp": 0.07,
+      "nNoResp": 21,
+      "deathNoResp": 0.05,
+      "topResponses": [
+        [
+          "control",
+          0.54
+        ],
+        [
+          "wall",
+          0.26
+        ],
+        [
+          "external",
+          0.26
+        ]
+      ]
+    },
     "2v2|84714": {
-      "nResp": 166,
+      "nResp": 165,
       "deathResp": 0.01,
-      "nNoResp": 82,
+      "nNoResp": 81,
       "deathNoResp": 0.09,
       "topResponses": [
         [
           "control",
-          0.49
+          0.48
         ],
         [
           "kite",
@@ -727,9 +827,9 @@
       ]
     },
     "3v3|*": {
-      "nResp": 11048,
+      "nResp": 11051,
       "deathResp": 0.06,
-      "nNoResp": 3773,
+      "nNoResp": 3801,
       "deathNoResp": 0.11,
       "topResponses": [
         [
@@ -747,10 +847,10 @@
       ]
     },
     "3v3|102543": {
-      "nResp": 306,
+      "nResp": 300,
       "deathResp": 0.05,
-      "nNoResp": 142,
-      "deathNoResp": 0.1,
+      "nNoResp": 135,
+      "deathNoResp": 0.09,
       "topResponses": [
         [
           "control",
@@ -767,10 +867,10 @@
       ]
     },
     "3v3|102560": {
-      "nResp": 693,
+      "nResp": 675,
       "deathResp": 0.09,
-      "nNoResp": 151,
-      "deathNoResp": 0.15,
+      "nNoResp": 146,
+      "deathNoResp": 0.14,
       "topResponses": [
         [
           "control",
@@ -807,9 +907,9 @@
       ]
     },
     "3v3|107574": {
-      "nResp": 863,
+      "nResp": 857,
       "deathResp": 0.06,
-      "nNoResp": 355,
+      "nNoResp": 357,
       "deathNoResp": 0.1,
       "topResponses": [
         [
@@ -827,9 +927,9 @@
       ]
     },
     "3v3|1122": {
-      "nResp": 225,
+      "nResp": 221,
       "deathResp": 0.03,
-      "nNoResp": 110,
+      "nNoResp": 104,
       "deathNoResp": 0.05,
       "topResponses": [
         [
@@ -846,8 +946,28 @@
         ]
       ]
     },
+    "3v3|114050": {
+      "nResp": 117,
+      "deathResp": 0.08,
+      "nNoResp": 29,
+      "deathNoResp": 0.07,
+      "topResponses": [
+        [
+          "control",
+          0.5
+        ],
+        [
+          "external",
+          0.28
+        ],
+        [
+          "wall",
+          0.26
+        ]
+      ]
+    },
     "3v3|114051": {
-      "nResp": 226,
+      "nResp": 223,
       "deathResp": 0.06,
       "nNoResp": 35,
       "deathNoResp": 0.14,
@@ -867,10 +987,10 @@
       ]
     },
     "3v3|121471": {
-      "nResp": 206,
+      "nResp": 201,
       "deathResp": 0.04,
-      "nNoResp": 31,
-      "deathNoResp": 0.23,
+      "nNoResp": 30,
+      "deathNoResp": 0.2,
       "topResponses": [
         [
           "control",
@@ -878,7 +998,7 @@
         ],
         [
           "wall",
-          0.36
+          0.37
         ],
         [
           "external",
@@ -887,29 +1007,49 @@
       ]
     },
     "3v3|1233448": {
-      "nResp": 189,
-      "deathResp": 0.06,
-      "nNoResp": 92,
+      "nResp": 187,
+      "deathResp": 0.05,
+      "nNoResp": 91,
       "deathNoResp": 0.13,
       "topResponses": [
         [
           "control",
-          0.61
+          0.6
         ],
         [
           "wall",
-          0.23
+          0.24
         ],
         [
           "external",
-          0.23
+          0.22
+        ]
+      ]
+    },
+    "3v3|123904": {
+      "nResp": 5,
+      "deathResp": 0,
+      "nNoResp": 5,
+      "deathNoResp": 0.2,
+      "topResponses": [
+        [
+          "healCd",
+          0.6
+        ],
+        [
+          "control",
+          0.6
+        ],
+        [
+          "external",
+          0.2
         ]
       ]
     },
     "3v3|1241937": {
-      "nResp": 110,
-      "deathResp": 0.05,
-      "nNoResp": 87,
+      "nResp": 109,
+      "deathResp": 0.06,
+      "nNoResp": 86,
       "deathNoResp": 0.03,
       "topResponses": [
         [
@@ -922,15 +1062,15 @@
         ],
         [
           "healCd",
-          0.15
+          0.14
         ]
       ]
     },
     "3v3|1246167": {
       "nResp": 42,
       "deathResp": 0,
-      "nNoResp": 25,
-      "deathNoResp": 0.12,
+      "nNoResp": 23,
+      "deathNoResp": 0.13,
       "topResponses": [
         [
           "control",
@@ -947,22 +1087,22 @@
       ]
     },
     "3v3|1250646": {
-      "nResp": 205,
-      "deathResp": 0.07,
-      "nNoResp": 66,
+      "nResp": 199,
+      "deathResp": 0.06,
+      "nNoResp": 64,
       "deathNoResp": 0.11,
       "topResponses": [
         [
           "wall",
-          0.41
+          0.42
         ],
         [
           "external",
-          0.39
+          0.38
         ],
         [
           "control",
-          0.36
+          0.35
         ]
       ]
     },
@@ -987,49 +1127,49 @@
       ]
     },
     "3v3|13750": {
-      "nResp": 49,
+      "nResp": 48,
       "deathResp": 0.04,
       "nNoResp": 19,
       "deathNoResp": 0,
       "topResponses": [
         [
           "control",
-          0.53
+          0.52
         ],
         [
           "external",
-          0.43
+          0.44
         ],
         [
           "healCd",
-          0.18
+          0.19
         ]
       ]
     },
     "3v3|1719": {
-      "nResp": 248,
+      "nResp": 241,
       "deathResp": 0.07,
       "nNoResp": 133,
       "deathNoResp": 0.08,
       "topResponses": [
         [
           "control",
-          0.59
+          0.61
         ],
         [
           "wall",
-          0.25
+          0.24
         ],
         [
           "external",
-          0.25
+          0.24
         ]
       ]
     },
     "3v3|190319": {
-      "nResp": 1475,
+      "nResp": 1439,
       "deathResp": 0.07,
-      "nNoResp": 353,
+      "nNoResp": 342,
       "deathNoResp": 0.14,
       "topResponses": [
         [
@@ -1047,14 +1187,14 @@
       ]
     },
     "3v3|191634": {
-      "nResp": 229,
+      "nResp": 227,
       "deathResp": 0.03,
-      "nNoResp": 80,
-      "deathNoResp": 0.05,
+      "nNoResp": 93,
+      "deathNoResp": 0.06,
       "topResponses": [
         [
           "control",
-          0.56
+          0.58
         ],
         [
           "wall",
@@ -1062,7 +1202,7 @@
         ],
         [
           "kite",
-          0.24
+          0.25
         ]
       ]
     },
@@ -1087,18 +1227,18 @@
       ]
     },
     "3v3|19574": {
-      "nResp": 686,
+      "nResp": 666,
       "deathResp": 0.05,
-      "nNoResp": 262,
+      "nNoResp": 261,
       "deathNoResp": 0.12,
       "topResponses": [
         [
           "control",
-          0.63
+          0.64
         ],
         [
           "external",
-          0.3
+          0.29
         ],
         [
           "kite",
@@ -1107,29 +1247,29 @@
       ]
     },
     "3v3|204361": {
-      "nResp": 155,
+      "nResp": 147,
       "deathResp": 0.05,
-      "nNoResp": 46,
-      "deathNoResp": 0.2,
+      "nNoResp": 44,
+      "deathNoResp": 0.18,
       "topResponses": [
         [
           "control",
-          0.47
+          0.46
         ],
         [
           "external",
-          0.41
+          0.44
         ],
         [
           "wall",
-          0.31
+          0.3
         ]
       ]
     },
     "3v3|205021": {
-      "nResp": 348,
+      "nResp": 345,
       "deathResp": 0.03,
-      "nNoResp": 85,
+      "nNoResp": 81,
       "deathNoResp": 0.07,
       "topResponses": [
         [
@@ -1147,10 +1287,10 @@
       ]
     },
     "3v3|205180": {
-      "nResp": 670,
+      "nResp": 649,
       "deathResp": 0.06,
-      "nNoResp": 206,
-      "deathNoResp": 0.06,
+      "nNoResp": 203,
+      "deathNoResp": 0.05,
       "topResponses": [
         [
           "control",
@@ -1161,20 +1301,60 @@
           0.24
         ],
         [
-          "external",
+          "wall",
           0.18
         ]
       ]
     },
+    "3v3|227847": {
+      "nResp": 11,
+      "deathResp": 0.27,
+      "nNoResp": 4,
+      "deathNoResp": 0,
+      "topResponses": [
+        [
+          "wall",
+          0.73
+        ],
+        [
+          "control",
+          0.55
+        ],
+        [
+          "kite",
+          0.27
+        ]
+      ]
+    },
+    "3v3|265187": {
+      "nResp": 54,
+      "deathResp": 0,
+      "nNoResp": 14,
+      "deathNoResp": 0.07,
+      "topResponses": [
+        [
+          "control",
+          0.72
+        ],
+        [
+          "wall",
+          0.24
+        ],
+        [
+          "healCd",
+          0.24
+        ]
+      ]
+    },
     "3v3|274837": {
-      "nResp": 227,
+      "nResp": 225,
       "deathResp": 0.07,
-      "nNoResp": 107,
+      "nNoResp": 105,
       "deathNoResp": 0.06,
       "topResponses": [
         [
           "control",
-          0.53
+          0.52
         ],
         [
           "external",
@@ -1182,14 +1362,14 @@
         ],
         [
           "kite",
-          0.26
+          0.27
         ]
       ]
     },
     "3v3|288613": {
-      "nResp": 224,
+      "nResp": 219,
       "deathResp": 0.08,
-      "nNoResp": 89,
+      "nNoResp": 87,
       "deathNoResp": 0.06,
       "topResponses": [
         [
@@ -1207,34 +1387,34 @@
       ]
     },
     "3v3|31884": {
-      "nResp": 636,
+      "nResp": 617,
       "deathResp": 0.05,
-      "nNoResp": 345,
-      "deathNoResp": 0.08,
+      "nNoResp": 337,
+      "deathNoResp": 0.07,
       "topResponses": [
         [
           "control",
-          0.53
-        ],
-        [
-          "external",
-          0.26
+          0.55
         ],
         [
           "kite",
+          0.25
+        ],
+        [
+          "external",
           0.25
         ]
       ]
     },
     "3v3|360194": {
-      "nResp": 878,
+      "nResp": 849,
       "deathResp": 0.09,
-      "nNoResp": 212,
-      "deathNoResp": 0.24,
+      "nNoResp": 204,
+      "deathNoResp": 0.25,
       "topResponses": [
         [
           "control",
-          0.45
+          0.46
         ],
         [
           "external",
@@ -1247,18 +1427,18 @@
       ]
     },
     "3v3|365350": {
-      "nResp": 57,
-      "deathResp": 0.05,
-      "nNoResp": 12,
-      "deathNoResp": 0.17,
+      "nResp": 58,
+      "deathResp": 0.07,
+      "nNoResp": 11,
+      "deathNoResp": 0.18,
       "topResponses": [
         [
           "control",
-          0.61
+          0.62
         ],
         [
           "wall",
-          0.46
+          0.47
         ],
         [
           "external",
@@ -1267,14 +1447,14 @@
       ]
     },
     "3v3|370965": {
-      "nResp": 275,
+      "nResp": 273,
       "deathResp": 0.04,
-      "nNoResp": 90,
+      "nNoResp": 89,
       "deathNoResp": 0.09,
       "topResponses": [
         [
           "control",
-          0.66
+          0.67
         ],
         [
           "wall",
@@ -1287,30 +1467,30 @@
       ]
     },
     "3v3|375087": {
-      "nResp": 165,
-      "deathResp": 0.02,
-      "nNoResp": 42,
-      "deathNoResp": 0.17,
+      "nResp": 157,
+      "deathResp": 0,
+      "nNoResp": 41,
+      "deathNoResp": 0.15,
       "topResponses": [
         [
           "control",
-          0.61
+          0.62
         ],
         [
           "wall",
-          0.26
+          0.25
         ],
         [
           "external",
-          0.23
+          0.22
         ]
       ]
     },
     "3v3|392983": {
-      "nResp": 264,
-      "deathResp": 0.06,
-      "nNoResp": 62,
-      "deathNoResp": 0.13,
+      "nResp": 261,
+      "deathResp": 0.07,
+      "nNoResp": 58,
+      "deathNoResp": 0.1,
       "topResponses": [
         [
           "control",
@@ -1327,9 +1507,9 @@
       ]
     },
     "3v3|42650": {
-      "nResp": 460,
+      "nResp": 456,
       "deathResp": 0.08,
-      "nNoResp": 192,
+      "nNoResp": 191,
       "deathNoResp": 0.11,
       "topResponses": [
         [
@@ -1347,9 +1527,9 @@
       ]
     },
     "3v3|442726": {
-      "nResp": 352,
+      "nResp": 337,
       "deathResp": 0.04,
-      "nNoResp": 104,
+      "nNoResp": 101,
       "deathNoResp": 0.13,
       "topResponses": [
         [
@@ -1358,7 +1538,7 @@
         ],
         [
           "kite",
-          0.25
+          0.26
         ],
         [
           "wall",
@@ -1366,35 +1546,55 @@
         ]
       ]
     },
-    "3v3|51271": {
-      "nResp": 49,
-      "deathResp": 0.16,
-      "nNoResp": 5,
-      "deathNoResp": 0.6,
+    "3v3|47568": {
+      "nResp": 78,
+      "deathResp": 0.18,
+      "nNoResp": 42,
+      "deathNoResp": 0.12,
       "topResponses": [
         [
           "wall",
-          0.53
+          0.45
         ],
         [
           "control",
-          0.47
+          0.45
+        ],
+        [
+          "kite",
+          0.29
+        ]
+      ]
+    },
+    "3v3|51271": {
+      "nResp": 25,
+      "deathResp": 0.12,
+      "nNoResp": 9,
+      "deathNoResp": 0.33,
+      "topResponses": [
+        [
+          "wall",
+          0.48
         ],
         [
           "external",
-          0.37
+          0.44
+        ],
+        [
+          "control",
+          0.4
         ]
       ]
     },
     "3v3|6353": {
-      "nResp": 125,
+      "nResp": 122,
       "deathResp": 0.06,
-      "nNoResp": 31,
-      "deathNoResp": 0.1,
+      "nNoResp": 28,
+      "deathNoResp": 0.11,
       "topResponses": [
         [
           "control",
-          0.66
+          0.67
         ],
         [
           "external",
@@ -1402,34 +1602,34 @@
         ],
         [
           "wall",
-          0.24
+          0.25
         ]
       ]
     },
     "3v3|84714": {
       "nResp": 347,
-      "deathResp": 0.03,
-      "nNoResp": 179,
+      "deathResp": 0.04,
+      "nNoResp": 174,
       "deathNoResp": 0.07,
       "topResponses": [
         [
           "control",
-          0.68
+          0.67
         ],
         [
           "kite",
-          0.26
+          0.25
         ],
         [
           "external",
-          0.18
+          0.19
         ]
       ]
     },
     "Rated Solo Shuffle|*": {
-      "nResp": 28464,
+      "nResp": 28959,
       "deathResp": 0.03,
-      "nNoResp": 10004,
+      "nNoResp": 10329,
       "deathNoResp": 0.06,
       "topResponses": [
         [
@@ -1447,9 +1647,9 @@
       ]
     },
     "Rated Solo Shuffle|102543": {
-      "nResp": 583,
+      "nResp": 572,
       "deathResp": 0.02,
-      "nNoResp": 230,
+      "nNoResp": 227,
       "deathNoResp": 0.05,
       "topResponses": [
         [
@@ -1462,14 +1662,14 @@
         ],
         [
           "external",
-          0.29
+          0.28
         ]
       ]
     },
     "Rated Solo Shuffle|102560": {
-      "nResp": 1507,
-      "deathResp": 0.05,
-      "nNoResp": 389,
+      "nResp": 1468,
+      "deathResp": 0.04,
+      "nNoResp": 374,
       "deathNoResp": 0.1,
       "topResponses": [
         [
@@ -1507,9 +1707,9 @@
       ]
     },
     "Rated Solo Shuffle|107574": {
-      "nResp": 2498,
+      "nResp": 2509,
       "deathResp": 0.02,
-      "nNoResp": 997,
+      "nNoResp": 1027,
       "deathNoResp": 0.05,
       "topResponses": [
         [
@@ -1527,9 +1727,9 @@
       ]
     },
     "Rated Solo Shuffle|1122": {
-      "nResp": 651,
+      "nResp": 628,
       "deathResp": 0.01,
-      "nNoResp": 280,
+      "nNoResp": 266,
       "deathNoResp": 0.04,
       "topResponses": [
         [
@@ -1542,23 +1742,43 @@
         ],
         [
           "external",
-          0.22
+          0.23
         ]
       ]
     },
-    "Rated Solo Shuffle|114051": {
-      "nResp": 595,
-      "deathResp": 0.04,
-      "nNoResp": 135,
+    "Rated Solo Shuffle|114050": {
+      "nResp": 368,
+      "deathResp": 0.05,
+      "nNoResp": 94,
       "deathNoResp": 0.07,
       "topResponses": [
         [
           "control",
-          0.5
+          0.53
+        ],
+        [
+          "wall",
+          0.32
         ],
         [
           "external",
-          0.4
+          0.3
+        ]
+      ]
+    },
+    "Rated Solo Shuffle|114051": {
+      "nResp": 586,
+      "deathResp": 0.04,
+      "nNoResp": 132,
+      "deathNoResp": 0.08,
+      "topResponses": [
+        [
+          "control",
+          0.51
+        ],
+        [
+          "external",
+          0.41
         ],
         [
           "wall",
@@ -1567,18 +1787,18 @@
       ]
     },
     "Rated Solo Shuffle|121471": {
-      "nResp": 446,
+      "nResp": 434,
       "deathResp": 0.03,
-      "nNoResp": 85,
+      "nNoResp": 87,
       "deathNoResp": 0.06,
       "topResponses": [
         [
           "control",
-          0.54
+          0.55
         ],
         [
           "external",
-          0.37
+          0.36
         ],
         [
           "wall",
@@ -1587,7 +1807,7 @@
       ]
     },
     "Rated Solo Shuffle|1233448": {
-      "nResp": 615,
+      "nResp": 601,
       "deathResp": 0.03,
       "nNoResp": 300,
       "deathNoResp": 0.04,
@@ -1606,10 +1826,30 @@
         ]
       ]
     },
+    "Rated Solo Shuffle|123904": {
+      "nResp": 39,
+      "deathResp": 0,
+      "nNoResp": 12,
+      "deathNoResp": 0,
+      "topResponses": [
+        [
+          "control",
+          0.54
+        ],
+        [
+          "kite",
+          0.33
+        ],
+        [
+          "external",
+          0.31
+        ]
+      ]
+    },
     "Rated Solo Shuffle|1241937": {
-      "nResp": 501,
+      "nResp": 488,
       "deathResp": 0.01,
-      "nNoResp": 354,
+      "nNoResp": 347,
       "deathNoResp": 0,
       "topResponses": [
         [
@@ -1622,35 +1862,35 @@
         ],
         [
           "external",
-          0.22
+          0.23
         ]
       ]
     },
     "Rated Solo Shuffle|1246167": {
-      "nResp": 285,
+      "nResp": 283,
       "deathResp": 0.01,
-      "nNoResp": 107,
+      "nNoResp": 106,
       "deathNoResp": 0.03,
       "topResponses": [
         [
           "control",
-          0.57
+          0.58
         ],
         [
           "external",
-          0.3
+          0.29
         ],
         [
           "wall",
-          0.21
+          0.22
         ]
       ]
     },
     "Rated Solo Shuffle|1250646": {
-      "nResp": 522,
+      "nResp": 515,
       "deathResp": 0.05,
-      "nNoResp": 128,
-      "deathNoResp": 0.13,
+      "nNoResp": 121,
+      "deathNoResp": 0.12,
       "topResponses": [
         [
           "control",
@@ -1667,14 +1907,14 @@
       ]
     },
     "Rated Solo Shuffle|1261193": {
-      "nResp": 124,
-      "deathResp": 0.02,
-      "nNoResp": 52,
-      "deathNoResp": 0.08,
+      "nResp": 122,
+      "deathResp": 0.01,
+      "nNoResp": 50,
+      "deathNoResp": 0.06,
       "topResponses": [
         [
           "control",
-          0.6
+          0.61
         ],
         [
           "external",
@@ -1687,9 +1927,9 @@
       ]
     },
     "Rated Solo Shuffle|13750": {
-      "nResp": 235,
+      "nResp": 231,
       "deathResp": 0.02,
-      "nNoResp": 120,
+      "nNoResp": 116,
       "deathNoResp": 0.04,
       "topResponses": [
         [
@@ -1702,14 +1942,14 @@
         ],
         [
           "kite",
-          0.26
+          0.25
         ]
       ]
     },
     "Rated Solo Shuffle|1719": {
-      "nResp": 726,
+      "nResp": 718,
       "deathResp": 0.02,
-      "nNoResp": 385,
+      "nNoResp": 376,
       "deathNoResp": 0.05,
       "topResponses": [
         [
@@ -1727,9 +1967,9 @@
       ]
     },
     "Rated Solo Shuffle|190319": {
-      "nResp": 2244,
+      "nResp": 2172,
       "deathResp": 0.04,
-      "nNoResp": 559,
+      "nNoResp": 532,
       "deathNoResp": 0.11,
       "topResponses": [
         [
@@ -1747,22 +1987,22 @@
       ]
     },
     "Rated Solo Shuffle|191634": {
-      "nResp": 550,
+      "nResp": 519,
       "deathResp": 0.03,
-      "nNoResp": 249,
-      "deathNoResp": 0.06,
+      "nNoResp": 253,
+      "deathNoResp": 0.04,
       "topResponses": [
         [
           "control",
-          0.62
+          0.59
         ],
         [
           "external",
-          0.31
+          0.29
         ],
         [
           "wall",
-          0.29
+          0.28
         ]
       ]
     },
@@ -1787,9 +2027,9 @@
       ]
     },
     "Rated Solo Shuffle|19574": {
-      "nResp": 2060,
+      "nResp": 2038,
       "deathResp": 0.02,
-      "nNoResp": 578,
+      "nNoResp": 562,
       "deathNoResp": 0.07,
       "topResponses": [
         [
@@ -1807,10 +2047,10 @@
       ]
     },
     "Rated Solo Shuffle|204361": {
-      "nResp": 382,
+      "nResp": 335,
       "deathResp": 0.03,
-      "nNoResp": 132,
-      "deathNoResp": 0.06,
+      "nNoResp": 118,
+      "deathNoResp": 0.05,
       "topResponses": [
         [
           "control",
@@ -1818,18 +2058,18 @@
         ],
         [
           "external",
-          0.35
+          0.36
         ],
         [
           "wall",
-          0.32
+          0.33
         ]
       ]
     },
     "Rated Solo Shuffle|205021": {
-      "nResp": 1034,
+      "nResp": 1012,
       "deathResp": 0.02,
-      "nNoResp": 261,
+      "nNoResp": 256,
       "deathNoResp": 0.04,
       "topResponses": [
         [
@@ -1847,9 +2087,9 @@
       ]
     },
     "Rated Solo Shuffle|205180": {
-      "nResp": 1204,
+      "nResp": 1169,
       "deathResp": 0.02,
-      "nNoResp": 395,
+      "nNoResp": 380,
       "deathNoResp": 0.04,
       "topResponses": [
         [
@@ -1866,15 +2106,55 @@
         ]
       ]
     },
+    "Rated Solo Shuffle|227847": {
+      "nResp": 73,
+      "deathResp": 0,
+      "nNoResp": 33,
+      "deathNoResp": 0,
+      "topResponses": [
+        [
+          "control",
+          0.66
+        ],
+        [
+          "external",
+          0.26
+        ],
+        [
+          "wall",
+          0.18
+        ]
+      ]
+    },
+    "Rated Solo Shuffle|265187": {
+      "nResp": 183,
+      "deathResp": 0.02,
+      "nNoResp": 74,
+      "deathNoResp": 0,
+      "topResponses": [
+        [
+          "control",
+          0.7
+        ],
+        [
+          "wall",
+          0.25
+        ],
+        [
+          "kite",
+          0.21
+        ]
+      ]
+    },
     "Rated Solo Shuffle|274837": {
-      "nResp": 386,
+      "nResp": 382,
       "deathResp": 0.03,
       "nNoResp": 129,
       "deathNoResp": 0.07,
       "topResponses": [
         [
           "control",
-          0.56
+          0.57
         ],
         [
           "wall",
@@ -1887,9 +2167,9 @@
       ]
     },
     "Rated Solo Shuffle|288613": {
-      "nResp": 1314,
+      "nResp": 1273,
       "deathResp": 0.03,
-      "nNoResp": 455,
+      "nNoResp": 441,
       "deathNoResp": 0.08,
       "topResponses": [
         [
@@ -1898,18 +2178,18 @@
         ],
         [
           "external",
-          0.35
+          0.34
         ],
         [
           "wall",
-          0.28
+          0.29
         ]
       ]
     },
     "Rated Solo Shuffle|31884": {
-      "nResp": 1747,
+      "nResp": 1677,
       "deathResp": 0.02,
-      "nNoResp": 882,
+      "nNoResp": 855,
       "deathNoResp": 0.02,
       "topResponses": [
         [
@@ -1927,10 +2207,10 @@
       ]
     },
     "Rated Solo Shuffle|360194": {
-      "nResp": 2031,
+      "nResp": 1965,
       "deathResp": 0.07,
-      "nNoResp": 580,
-      "deathNoResp": 0.2,
+      "nNoResp": 557,
+      "deathNoResp": 0.19,
       "topResponses": [
         [
           "external",
@@ -1947,9 +2227,9 @@
       ]
     },
     "Rated Solo Shuffle|365350": {
-      "nResp": 347,
+      "nResp": 349,
       "deathResp": 0.02,
-      "nNoResp": 80,
+      "nNoResp": 79,
       "deathNoResp": 0.01,
       "topResponses": [
         [
@@ -1967,7 +2247,7 @@
       ]
     },
     "Rated Solo Shuffle|370965": {
-      "nResp": 830,
+      "nResp": 820,
       "deathResp": 0.02,
       "nNoResp": 282,
       "deathNoResp": 0.04,
@@ -1987,9 +2267,9 @@
       ]
     },
     "Rated Solo Shuffle|375087": {
-      "nResp": 545,
+      "nResp": 532,
       "deathResp": 0.02,
-      "nNoResp": 176,
+      "nNoResp": 168,
       "deathNoResp": 0.04,
       "topResponses": [
         [
@@ -2007,9 +2287,9 @@
       ]
     },
     "Rated Solo Shuffle|392983": {
-      "nResp": 608,
+      "nResp": 600,
       "deathResp": 0.03,
-      "nNoResp": 177,
+      "nNoResp": 176,
       "deathNoResp": 0.05,
       "topResponses": [
         [
@@ -2027,9 +2307,9 @@
       ]
     },
     "Rated Solo Shuffle|42650": {
-      "nResp": 1381,
+      "nResp": 1347,
       "deathResp": 0.03,
-      "nNoResp": 628,
+      "nNoResp": 612,
       "deathNoResp": 0.06,
       "topResponses": [
         [
@@ -2047,9 +2327,9 @@
       ]
     },
     "Rated Solo Shuffle|442726": {
-      "nResp": 789,
+      "nResp": 772,
       "deathResp": 0.03,
-      "nNoResp": 236,
+      "nNoResp": 229,
       "deathNoResp": 0.02,
       "topResponses": [
         [
@@ -2062,43 +2342,63 @@
         ],
         [
           "wall",
-          0.22
+          0.23
         ]
       ]
     },
-    "Rated Solo Shuffle|51271": {
-      "nResp": 239,
+    "Rated Solo Shuffle|47568": {
+      "nResp": 549,
       "deathResp": 0.02,
-      "nNoResp": 58,
-      "deathNoResp": 0.1,
+      "nNoResp": 313,
+      "deathNoResp": 0.04,
       "topResponses": [
         [
           "control",
-          0.57
-        ],
-        [
-          "wall",
           0.41
         ],
         [
           "external",
-          0.37
+          0.33
+        ],
+        [
+          "wall",
+          0.33
+        ]
+      ]
+    },
+    "Rated Solo Shuffle|51271": {
+      "nResp": 201,
+      "deathResp": 0.04,
+      "nNoResp": 76,
+      "deathNoResp": 0.07,
+      "topResponses": [
+        [
+          "control",
+          0.51
+        ],
+        [
+          "wall",
+          0.35
+        ],
+        [
+          "external",
+          0.32
         ]
       ]
     },
     "Rated Solo Shuffle|6353": {
-      "nResp": 276,
+      "nResp": 263,
       "deathResp": 0.03,
-      "nNoResp": 85,
-      "deathNoResp": 0.06,
+      "nNoResp": 83,
+      "deathNoResp": 0.05,
       "topResponses": [
         [
           "control",
-          0.61
+          0.62
         ],
         [
           "external",
-          0.28
+          0.27
         ],
         [
           "kite",
@@ -2107,9 +2407,9 @@
       ]
     },
     "Rated Solo Shuffle|84714": {
-      "nResp": 1186,
+      "nResp": 1143,
       "deathResp": 0.01,
-      "nNoResp": 486,
+      "nNoResp": 472,
       "deathNoResp": 0.02,
       "topResponses": [
         [

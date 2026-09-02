@@ -15,6 +15,8 @@
  *                 [--limit N]           # lapse floor × lapse seconds grid
  *   report      tsx burstWindowScan.ts report --in <file.jsonl>
  *   overreact   tsx burstWindowScan.ts overreact --in <file.jsonl>   # probe only
+ *   gradient    tsx burstWindowScan.ts gradient --in <file.jsonl>
+ *                 --ledger <dir> [--md <out>]   # skill gradient, measurement only
  *   emit-table  tsx burstWindowScan.ts emit-table --in <file.jsonl>
  *                 --out <file.json> [--corpus <label>]
  *
@@ -26,8 +28,8 @@ import { ensureAnalysisData } from "@gladlog/analysis";
 import {
   boundedBurstSegments,
   BURST_LAPSE_DMG_PCT_PER_S,
-  BURST_RESPONSE_WINDOW_SEC,
   BURST_LAPSE_SECONDS,
+  BURST_RESPONSE_WINDOW_SEC,
   BURST_TRIAGE_MIN_HP_DROP_PP,
   type BurstWindowDecisionPoint,
   burstWindowDecisionPoints,
@@ -36,6 +38,7 @@ import { BURST_WINDOW_MIN_JUDGED_S } from "@gladlog/analysis/src/analysis/candid
 import { CRISIS_HP_PCT_RENDERED } from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
 import {
   BURST_REF_MIN_CONTRAST_PP,
+  burstRefClearsMinContrast,
   burstRefContrastPp,
   lookupBurstWindowPrior,
 } from "@gladlog/analysis/src/data/burstWindowPrior";
@@ -60,6 +63,12 @@ import {
   buildBurstWindowPriorTable,
   type BurstWindowPriorRow,
 } from "../src/explore/burstWindowPriorTable";
+import {
+  bandOfPct,
+  PCT_BANDS,
+  rankLedger,
+} from "../src/explore/ratingPercentile";
+import { wilson95 } from "../src/explore/signalSkillGradient";
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
@@ -1158,15 +1167,125 @@ function overreact(): void {
   } else process.stdout.write(text);
 }
 
+
+// ────────────────────────────────────────────────────────────── gradient ───
+/**
+ * Skill gradient for `slow-defensive-response` on its OWN denominator
+ * (GH #60 tail, 2026-09-02). MEASUREMENT ONLY — nothing here is wired into
+ * the product and no threshold is derived from it.
+ *
+ * Denominator: the candidate's exact opportunity population — a bounded
+ * window that is `feasible` AND `triaged` AND at least
+ * `BURST_WINDOW_MIN_JUDGED_S` long AND whose resolved reference cell clears
+ * the minimum-contrast door (the same four doors `burstWindowResponseEvents`
+ * applies before its per-round cap, read off the scan rows the shared engine
+ * produced). Trigger: such a window going unanswered within 8 s. The rate is
+ * per WINDOW (windows unanswered ÷ windows that were a real opportunity),
+ * i.e. the opportunity-normalised form the Value-Gate rules require.
+ *
+ * Rank axis: rating percentile within (bracket, ISO week) — the house
+ * convention (`../src/explore/ratingPercentile.ts`), NOT absolute rating and
+ * NOT the fixed `RATING_BUCKETS` — with the `signalSkillGradient` reading:
+ * a negative top10−<30 gap (better players leave fewer opportunities
+ * unanswered) is consistent with a teachable mistake; flat or positive is a
+ * red flag on the predicate. Brackets are never pooled (Simpson).
+ *
+ * The retired predicate's "+15.3 pp opportunity-normalised" line
+ * (docs/coaching-grounding-audit.md §F.5) was a WIN/LOSS conversion contrast
+ * on the old window definition — a different axis (outcome, circular) and a
+ * different denominator; it is not comparable number-for-number, which is
+ * exactly why this command exists.
+ */
+function gradient(): void {
+  const inPath = flag("--in");
+  const ledgerDir = flag("--ledger");
+  if (!inPath || !ledgerDir) {
+    console.error("usage: gradient --in <file.jsonl> --ledger <dir> [--md <out>]");
+    process.exit(1);
+  }
+  const { rows, rounds } = readRows(inPath);
+  const ledger = loadLedger(ledgerDir);
+  const pctOf = rankLedger(ledger);
+
+  interface Opp {
+    bracket: string;
+    band: string;
+    unanswered: boolean;
+    roundKey: string;
+  }
+  const opps: Opp[] = [];
+  let noRank = 0;
+  for (const r of rows) {
+    const p = r.point;
+    if (!p.feasible || !p.triaged) continue;
+    if (p.durationSec < BURST_WINDOW_MIN_JUDGED_S) continue;
+    const ref = lookupBurstWindowPrior(r.bracket, p.leadCd.spellId);
+    if (ref === null || !burstRefClearsMinContrast(ref)) continue;
+    const pct = pctOf.get(r.matchId);
+    if (pct == null) {
+      noRank++;
+      continue;
+    }
+    opps.push({
+      bracket: r.bracket,
+      band: bandOfPct(pct),
+      unanswered: !p.responded,
+      roundKey: `${r.matchId}|${r.seq}`,
+    });
+  }
+
+  const L: string[] = [];
+  L.push(`# slow-defensive-response — skill gradient on the NEW denominator (2026-09-02)\n`);
+  L.push(
+    `Denominator: feasible ∧ triaged ∧ ≥ ${BURST_WINDOW_MIN_JUDGED_S}s ∧ contrast-door windows (the candidate's own opportunity population). Trigger: unanswered within 8 s. Rate per window. Rank: rating percentile within (bracket, ISO week).\n`,
+  );
+  L.push(
+    `rounds ${rounds.length}, opportunity windows ${opps.length + noRank}, of which ${noRank} without a ledger rank (excluded).\n`,
+  );
+  L.push(
+    `Reading: NEGATIVE (top10 lower than <30) = higher-ranked teams leave fewer opportunity windows unanswered — consistent with a teachable mistake. Flat/positive = red flag. Old form's +15.3 pp was a win/loss conversion on the OLD window definition — different axis, not comparable number-for-number.\n`,
+  );
+  const brackets = [...new Set(opps.map((o) => o.bracket))].sort();
+  for (const b of ["ALL", ...brackets]) {
+    const os = b === "ALL" ? opps : opps.filter((o) => o.bracket === b);
+    if (!os.length) continue;
+    L.push(`## ${b}${b === "ALL" ? " (pooled — context only, never the verdict)" : ""} — ${os.length} opportunity windows, ${new Set(os.map((o) => o.roundKey)).size} rounds\n`);
+    L.push(`| band | opportunity windows | unanswered | rate | 95% CI |`);
+    L.push(`|---|---|---|---|---|`);
+    const rate = new Map<string, number>();
+    for (const band of [...PCT_BANDS].reverse()) {
+      const bs = os.filter((o) => o.band === band);
+      const k = bs.filter((o) => o.unanswered).length;
+      const ci = wilson95(k, bs.length);
+      rate.set(band, bs.length ? k / bs.length : NaN);
+      L.push(
+        `| ${band === "top10" ? "≥90" : band} | ${bs.length} | ${k} | ${bs.length ? ((100 * k) / bs.length).toFixed(1) + "%" : "—"} | ${ci ? `[${(ci[0] * 100).toFixed(1)}–${(ci[1] * 100).toFixed(1)}]` : "—"} |`,
+      );
+    }
+    const g = rate.get("top10")! - rate.get("<30")!;
+    L.push(
+      `\ngradient (≥90 − <30): ${isNaN(g) ? "—" : `${g >= 0 ? "+" : ""}${(100 * g).toFixed(1)} pp`}\n`,
+    );
+  }
+  const outPath = flag("--md");
+  const text = L.join("\n") + "\n";
+  if (outPath) {
+    mkdirSync(dirname(outPath), { recursive: true });
+    writeFileSync(outPath, text);
+    console.error(`wrote ${outPath}`);
+  } else process.stdout.write(text);
+}
+
 if (cmd === "scan") await scan();
 else if (cmd === "examples") await examples();
 else if (cmd === "sweep") await sweep();
 else if (cmd === "report") report();
 else if (cmd === "overreact") overreact();
 else if (cmd === "emit-table") await emitTable();
+else if (cmd === "gradient") gradient();
 else {
   console.error(
-    "usage: burstWindowScan.ts scan|sweep|report|emit-table|examples|overreact ...",
+    "usage: burstWindowScan.ts scan|sweep|report|emit-table|examples|overreact|gradient ...",
   );
   process.exit(1);
 }

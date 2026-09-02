@@ -29,16 +29,17 @@ import type { ICombatUnit } from "@gladlog/parser-compat";
 import { CombatUnitReaction } from "@gladlog/parser-compat";
 
 import { DR_CATEGORIES_GENERATED } from "../data/drCategoriesGenerated";
+import { getEnglishSpellName } from "../data/spellEffectData";
 import { buildAuraIntervals } from "./auraIntervals";
 import { isHealerSpec, isMeleeSpec } from "./cooldowns";
 import {
   distanceBetween,
   getUnitPositionAtTime,
   hasLineOfSight,
+  type IPosition,
 } from "./losAnalysis";
 import { CLOSE_RANGE_YARDS, isDeadAt } from "./positionAnalysis";
 import { CC_MAX_CAST_RANGE_YARDS, LOS_SWEEP_GAP_MS } from "./positionSampling";
-import { getEnglishSpellName } from "../data/spellEffectData";
 
 /** Official root class (DB2 DiminishType 1), string ids. */
 export const ROOT_SPELL_IDS: ReadonlySet<string> = new Set(
@@ -86,6 +87,41 @@ function roleOf(unit: ICombatUnit): RootedRole {
   return "ranged";
 }
 
+/**
+ * Whether `target` was reachable from position `from` at instant `tMs` with a
+ * tool of range `rangeYards` — THE per-second position predicate of the root
+ * work, extracted (verbatim semantics) on 2026-09-02 so the burst-window
+ * feasibility gate (GH #60 tail: "could the teammate actually deliver it")
+ * consumes the same range + LoS decision instead of a copy.
+ *
+ * Returns `null` = UNKNOWN — the target was dead at `tMs`, or has no position
+ * sample within `LOS_SWEEP_GAP_MS` of it. Callers must never turn unknown
+ * into a claim: the [ROOT] sweep skips the second, the burst gate treats it
+ * as reachable (missing data must not manufacture infeasibility).
+ *
+ * `checkLoS=false` is melee reach — the rooted-melee branch has no LoS test
+ * (a melee swing at `CLOSE_RANGE_YARDS` is not blocked by pillar geometry at
+ * that scale). With `checkLoS=true`, LoS **not disproven** counts as
+ * reachable (`hasLineOfSight` returns null on an unknown map / no zoneId).
+ */
+export function canReachTargetAt(
+  from: IPosition,
+  target: ICombatUnit,
+  tMs: number,
+  zoneId: string | undefined,
+  rangeYards: number,
+  checkLoS: boolean,
+): boolean | null {
+  if (isDeadAt(target, tMs)) return null;
+  const q = getUnitPositionAtTime(target, tMs, LOS_SWEEP_GAP_MS);
+  if (!q) return null;
+  const d = distanceBetween(from, q);
+  if (d > rangeYards) return false;
+  if (!checkLoS) return true;
+  const los = zoneId ? hasLineOfSight(zoneId, from, q) : null;
+  return los !== false; // LoS not disproven counts as reachable
+}
+
 export function computeRootReachability(
   combat: {
     startTime: number;
@@ -131,16 +167,10 @@ export function computeRootReachability(
         const p = getUnitPositionAtTime(X, t, LOS_SWEEP_GAP_MS);
         if (!p) continue;
         sampled++;
-        const inReach = (T: ICombatUnit): boolean | null => {
-          if (isDeadAt(T, t)) return null;
-          const q = getUnitPositionAtTime(T, t, LOS_SWEEP_GAP_MS);
-          if (!q) return null;
-          const d = distanceBetween(p, q);
-          if (role === "melee") return d <= CLOSE_RANGE_YARDS;
-          if (d > CC_MAX_CAST_RANGE_YARDS) return false;
-          const los = zoneId ? hasLineOfSight(zoneId, p, q) : null;
-          return los !== false; // LoS not disproven counts as reachable
-        };
+        const inReach = (T: ICombatUnit): boolean | null =>
+          role === "melee"
+            ? canReachTargetAt(p, T, t, zoneId, CLOSE_RANGE_YARDS, false)
+            : canReachTargetAt(p, T, t, zoneId, CC_MAX_CAST_RANGE_YARDS, true);
         if (role === "healer") {
           let bad = false;
           for (const a of hitAllies) {

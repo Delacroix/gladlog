@@ -7,6 +7,7 @@ import {
   LogEvent,
 } from "@gladlog/parser-compat";
 
+import { isSurvivalWall } from "../data/abilityProfile";
 import { classMetadata } from "../data/classSpells";
 import { CURATED_ABILITY_FACTS } from "../data/curatedAbilityFacts";
 import { DISCOVERY_TAG_RULES } from "../data/discoveryRules";
@@ -14,14 +15,14 @@ import { PVP_TALENT_REPLACES_GENERATED } from "../data/pvpTalentReplacesGenerate
 import { OFFENSIVE_RACIAL_SPELL_IDS } from "../data/racialAbilities";
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
+import { reachesAlly } from "../data/spellTargeting";
 import { SpellTag } from "../data/spellTypes";
 import { USABLE_WHILE_CC_GENERATED } from "../data/usableWhileCcGenerated";
 import { binarySearchClosest } from "./binarySearch";
 import { COPY_CAST_IDS } from "./castPress";
 import { incomingPressureEvents } from "./incomingPressure";
 import { fmtTime, toRenderSecond } from "./renderGrid";
-import { isSurvivalWall } from "../data/abilityProfile";
-import { reachesAlly } from "../data/spellTargeting";
+import { OFFENSIVE_CD_SPELL_IDS } from "./spellDanger";
 import { CD_TALENT_MODIFIERS, type ICDModifier } from "./talentModifiers";
 import {
   getPlayerTalentedSpellInfo,
@@ -332,14 +333,13 @@ export function selfForbearanceActiveAt(
   return false;
 }
 
-// All spells tagged 'Offensive' in classMetadata — used to detect active enemy burst windows
-const OFFENSIVE_SPELL_IDS = new Set<string>(
-  classMetadata.flatMap((cls) =>
-    cls.abilities
-      .filter((a) => a.tags.includes(SpellTag.Offensive))
-      .map((a) => a.spellId),
-  ),
-);
+// "Is this an offensive cooldown" — the canonical table (GH #60 coarse spot 4,
+// unified 2026-09-02). This used to be a private classMetadata-only set (34
+// ids, 9 of them corpus-dead) that disagreed with `spellDanger.ts`'s
+// `isOffensiveSpell` (41 ids) on 22+6 live ids; both sides now read ONE
+// export, so the aura evidence (`hasOffensiveSpellActive` → `threatActiveAt`,
+// panic-press) and the enemy-CD window builder can no longer drift apart.
+const OFFENSIVE_SPELL_IDS = OFFENSIVE_CD_SPELL_IDS;
 
 /** Only track cooldowns at or above this threshold.
  *

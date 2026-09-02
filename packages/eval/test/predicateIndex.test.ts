@@ -22,14 +22,12 @@
  *     end to end, each with a negative control so it cannot silently no-op.
  */
 import { ensureAnalysisData } from "@gladlog/analysis";
-import * as candidateTypeFlags from "@gladlog/analysis/src/data/candidateTypeFlags";
-import * as death from "@gladlog/analysis/src/analysis/candidates/death";
-import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFindings";
-import * as bracketKey from "@gladlog/analysis/src/utils/bracketKey";
-import * as cooldownTiming from "@gladlog/analysis/src/analysis/candidates/cooldownTiming";
-import * as candidatesShared from "@gladlog/analysis/src/analysis/candidates/shared";
 import * as burstWindowDecisionPoints from "@gladlog/analysis/src/analysis/burstWindowDecisionPoints";
+import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFindings";
 import * as burstWindowResponse from "@gladlog/analysis/src/analysis/candidates/burstWindowResponse";
+import * as cooldownTiming from "@gladlog/analysis/src/analysis/candidates/cooldownTiming";
+import * as death from "@gladlog/analysis/src/analysis/candidates/death";
+import * as candidatesShared from "@gladlog/analysis/src/analysis/candidates/shared";
 import * as crisisDecisionPoints from "@gladlog/analysis/src/analysis/crisisDecisionPoints";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
 import * as findingCategories from "@gladlog/analysis/src/analysis/findingCategories";
@@ -44,6 +42,7 @@ import * as timelineHelpers from "@gladlog/analysis/src/context/timelineHelpers"
 import * as arenaGeometry from "@gladlog/analysis/src/data/arenaGeometry";
 import * as behaviorPrior from "@gladlog/analysis/src/data/behaviorPrior";
 import * as burstWindowPrior from "@gladlog/analysis/src/data/burstWindowPrior";
+import * as candidateTypeFlags from "@gladlog/analysis/src/data/candidateTypeFlags";
 import { CANDIDATE_TYPE_FLAGS } from "@gladlog/analysis/src/data/candidateTypeFlags";
 import { DISPEL_FEATURE_FLAGS } from "@gladlog/analysis/src/data/dispelFeatureFlags";
 import * as dispelObservedGenerated from "@gladlog/analysis/src/data/dispelObservedGenerated";
@@ -57,6 +56,7 @@ import * as spellSchools from "@gladlog/analysis/src/data/spellSchools";
 import * as spellTags from "@gladlog/analysis/src/data/spellTags";
 import * as spellTargeting from "@gladlog/analysis/src/data/spellTargeting";
 import * as auraIntervals from "@gladlog/analysis/src/utils/auraIntervals";
+import * as bracketKey from "@gladlog/analysis/src/utils/bracketKey";
 import * as cooldowns from "@gladlog/analysis/src/utils/cooldowns";
 import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
 import * as deathOutcomeAnalysis from "@gladlog/analysis/src/utils/deathOutcomeAnalysis";
@@ -70,10 +70,11 @@ import * as incomingPressure from "@gladlog/analysis/src/utils/incomingPressure"
 import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWindowTargetSelection";
 import * as losAnalysis from "@gladlog/analysis/src/utils/losAnalysis";
 import * as positionAnalysis from "@gladlog/analysis/src/utils/positionAnalysis";
-import * as rootReachability from "@gladlog/analysis/src/utils/rootReachability";
 import * as positionSampling from "@gladlog/analysis/src/utils/positionSampling";
 import * as rawStreams from "@gladlog/analysis/src/utils/rawStreams";
 import * as renderGrid from "@gladlog/analysis/src/utils/renderGrid";
+import * as rootReachability from "@gladlog/analysis/src/utils/rootReachability";
+import * as spellDanger from "@gladlog/analysis/src/utils/spellDanger";
 import * as stats from "@gladlog/analysis/src/utils/stats";
 import * as talentBehaviors from "@gladlog/analysis/src/utils/talentBehaviors";
 import * as talentOwnership from "@gladlog/analysis/src/utils/talentOwnership";
@@ -418,6 +419,11 @@ const INDEX: PredicateRow[] = [
     mod: rootReachability,
   },
   {
+    file: `${A}/utils/rootReachability.ts`,
+    symbol: "canReachTargetAt",
+    mod: rootReachability,
+  },
+  {
     file: `${A}/utils/positionSampling.ts`,
     symbol: "LOS_SWEEP_SLACK_S",
     mod: positionSampling,
@@ -681,6 +687,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/analysis/burstWindowDecisionPoints.ts`,
     symbol: "isBurstWindowOffensiveCd",
     mod: burstWindowDecisionPoints,
+  },
+  {
+    file: `${A}/utils/spellDanger.ts`,
+    symbol: "OFFENSIVE_CD_SPELL_IDS",
+    mod: spellDanger,
   },
   {
     file: `${A}/analysis/burstWindowDecisionPoints.ts`,

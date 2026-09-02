@@ -20,21 +20,6 @@
  */
 import { BURST_LEAD_CD_EXCLUDED_IDS } from "../analysis/burstWindowDecisionPoints";
 import { IMMUNITY_BREAKERS } from "../analysis/candidates/death";
-import { classMetadata } from "./classSpells";
-import { CURATED_ABILITY_FACTS } from "./curatedAbilityFacts";
-import { DISPEL_VERDICTS } from "./dispelVerdicts";
-import { spellClassMap } from "./drCategories";
-import { HEALING_VERDICTS, PROPOSED_HEALING_VERDICTS } from "./healingVerdicts";
-import { MITIGATION_OVERRIDES, NO_MITIGATION_IDS } from "./mitigationData";
-import { MITIGATION_VERDICTS } from "./mitigationVerdicts";
-import {
-  RACIAL_ABILITIES,
-  SHARED_CD_RACIAL_SPELL_IDS,
-} from "./racialAbilities";
-import { SPELL_CATEGORIES } from "./spellCategories";
-import { DISPEL_TYPES, SPELL_EFFECT_OVERRIDES } from "./spellEffectOverrides";
-import spellIdLists from "./spellIdLists";
-import { trinketSpellIds } from "./spellTags";
 import {
   HIGH_VALUE_PURGEABLE_BUFFS,
   PURGE_WHITELIST_DATA_BLOCKED,
@@ -92,11 +77,29 @@ import { AOE_CC_SPELL_IDS } from "../utils/drAnalysis";
 import { CLASS_INTERRUPTS } from "../utils/enemyInterrupts";
 import { HEALER_AVOIDANCE_SPELLS } from "../utils/healerExposureAnalysis";
 import { PVP_TRINKET_SPELL_IDS } from "../utils/killWindowTargetSelection";
-import { SPELL_EFFECT_OVERRIDES as SPELL_DANGER_OVERRIDES } from "../utils/spellDanger";
+import {
+  OFFENSIVE_CD_SPELL_IDS,
+  SPELL_EFFECT_OVERRIDES as SPELL_DANGER_OVERRIDES,
+} from "../utils/spellDanger";
 import {
   OFFENSIVE_PURGE_TALENT_IDS,
   TALENT_BEHAVIORS,
 } from "../utils/talentBehaviors";
+import { classMetadata } from "./classSpells";
+import { CURATED_ABILITY_FACTS } from "./curatedAbilityFacts";
+import { DISPEL_VERDICTS } from "./dispelVerdicts";
+import { spellClassMap } from "./drCategories";
+import { HEALING_VERDICTS, PROPOSED_HEALING_VERDICTS } from "./healingVerdicts";
+import { MITIGATION_OVERRIDES, NO_MITIGATION_IDS } from "./mitigationData";
+import { MITIGATION_VERDICTS } from "./mitigationVerdicts";
+import {
+  RACIAL_ABILITIES,
+  SHARED_CD_RACIAL_SPELL_IDS,
+} from "./racialAbilities";
+import { SPELL_CATEGORIES } from "./spellCategories";
+import { DISPEL_TYPES, SPELL_EFFECT_OVERRIDES } from "./spellEffectOverrides";
+import spellIdLists from "./spellIdLists";
+import { trinketSpellIds } from "./spellTags";
 
 /** What kind of id the list holds — decides which corpus event stream can vouch for it. */
 export type CuratedIdKind = "cast" | "aura" | "talent" | "mixed";
@@ -385,5 +388,14 @@ export const CURATED_ID_TABLES: readonly CuratedIdTable[] = [
   ),
   t("spellDanger.SPELL_EFFECT_OVERRIDES", "utils/spellDanger.ts", "aura", () =>
     keys(SPELL_DANGER_OVERRIDES),
+  ),
+  // The canonical offensive-cooldown table (GH #60 tail, unified 2026-09-02).
+  // Union of SPELL_CATEGORIES offensive types (aura ids) and classMetadata
+  // SpellTag.Offensive (cast ids) minus the corpus-dead exclusions, hence
+  // "mixed". Registering the union keeps the rot scans watching the very set
+  // consumers key on — the two source tables are registered above, but the
+  // dead-id exclusion layer is new hand curation.
+  t("OFFENSIVE_CD_SPELL_IDS", "utils/spellDanger.ts", "mixed", () =>
+    set(OFFENSIVE_CD_SPELL_IDS),
   ),
 ];

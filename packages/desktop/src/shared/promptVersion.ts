@@ -289,4 +289,32 @@
 //  byte of every prompt is unchanged (diff: 731 insertions, 0 deletions).
 //  The prompt text changed, so the version rolls; old caches carry no
 //  [BURST ANSWERED] lines and must be void.
-export const PROMPT_VERSION = 46;
+//  v47 (2026-09-02, GH #60 tail — chg9): three coupled changes, all of which
+//  move rendered text or the candidate population, so v46 caches are void.
+//  1. Teammate reachability gate on burst-window feasibility branch (b):
+//     a teammate's ready ally-reaching tool now counts only if the teammate
+//     could DELIVER it to the pressured friendly at the window-start render
+//     second — `canReachTargetAt` (the [ROOT] work's per-second reach
+//     predicate, rootReachability.ts) with per-spell official range
+//     (`externalReachYards`) and LoS-not-disproven; missing position data
+//     fails OPEN (missing data must not manufacture infeasibility).
+//     Archive: feasibility 90.6% → 88.8% (windows with no new-table id:
+//     88.7%). Corpus: slow-defensive-response 39 → 36 lines; the same gate
+//     also narrows which windows earn [BURST ANSWERED] credit.
+//  2. ONE canonical offensive-cooldown table (`OFFENSIVE_CD_SPELL_IDS`,
+//     spellDanger.ts): union of the two former disjoint tables (41 ∪ 34,
+//     overlap 19) minus 9 corpus-dead ids = 47, read by isOffensiveSpell
+//     (the enemy-CD window builder → [ENEMY CD] lines gain 6 previously
+//     invisible lead CDs: Empower Rune Weapon, Ascendance (Elemental),
+//     Invoke Xuen, Metamorphosis, Bladestorm, Summon Demonic Tyrant), by
+//     `hasOffensiveSpellActive`/`threatActiveAt` (richer aura evidence:
+//     missed-cleanse's timing door exempts more whole-threat windows,
+//     58 → 50 corpus lines) and by the position/kill-attempt threat gates
+//     (position-mistake 4 → 5). Closed docs/predicate-index.md's open
+//     "Not yet unified" divergence.
+//  3. `burstWindowPriorGenerated.json` regenerated on the 2026-09-02 rescan
+//     (18,134 matches, 71,332 windows, 106 → 121 cells) — every
+//     slow-defensive-response line's refN/refDeathResp/refDeathNoResp/refTop
+//     comes from the new table, and a v46 cached line's reference numbers
+//     are hardFailures under the v47 `checkBurstWindowRefConsistency` gate.
+export const PROMPT_VERSION = 47;

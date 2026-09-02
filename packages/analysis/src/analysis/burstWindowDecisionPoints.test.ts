@@ -19,7 +19,6 @@ import {
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { ensureAnalysisData } from "../data/ensure";
-import { CRISIS_HP_PCT_RENDERED } from "./crisisDecisionPoints";
 import {
   BURST_HEAL_CD_IDS,
   BURST_LEAD_CD_EXCLUDED_IDS,
@@ -28,6 +27,7 @@ import {
   BURST_TRIAGE_MIN_HP_DROP_PP,
   burstWindowDecisionPoints,
 } from "./burstWindowDecisionPoints";
+import { CRISIS_HP_PCT_RENDERED } from "./crisisDecisionPoints";
 
 const T0 = 1_000_000;
 
@@ -572,5 +572,100 @@ describe("burstWindowDecisionPoints — excluded lead CDs (correction 3)", () =>
       ]),
     );
     expect(pts).toEqual([]);
+  });
+});
+
+describe("burstWindowDecisionPoints — teammate reachability gate (GH #60 tail, 2026-09-02)", () => {
+  /** HP sample carrying a real position (the shared `hp` fixture pins
+   * everyone at (0,0), which the reachability gate reads as "everyone
+   * stacked" — these cases need actual distance). */
+  const hpAt = (
+    tSec: number,
+    cur: number,
+    actorId: string,
+    x: number,
+    y: number,
+  ) => ({
+    ...hp(tSec, cur, actorId),
+    advancedActorPositionX: x,
+    advancedActorPositionY: y,
+  });
+  const trackAt = (
+    actorId: string,
+    from: number,
+    to: number,
+    value: number,
+    x: number,
+    y: number,
+  ) => {
+    const out = [];
+    for (let s = from; s <= to; s++) out.push(hpAt(s, value, actorId, x, y));
+    return out;
+  };
+  /** F1 pressured at the origin; F2 is the Tranquility-holding teammate whose
+   * position each case varies. */
+  const withMateAt = (mateOver: Record<string, unknown>) => [
+    friendly({
+      damageIn: steadyDamage(10, 20),
+      advancedActions: trackAt("F1", 0, 40, 25, 0, 0),
+    }),
+    friendly({
+      id: "F2",
+      name: "Mate-R",
+      info: { teamId: "0", specId: "105" },
+      spellCastEvents: [cast(TRANQUILITY, 120)],
+      ...mateOver,
+    }),
+    hostile({ spellCastEvents: [cast(AR, 10)] }),
+  ];
+
+  it("a teammate 500 yd away with a ready ally tool does NOT make the window feasible — they could not deliver it", () => {
+    const pts = burstWindowDecisionPoints(
+      combat(withMateAt({ advancedActions: trackAt("F2", 0, 40, 95, 0, 500) })),
+    );
+    expect(pts[0]!.pressured?.name).toBe("Friend-R");
+    expect(pts[0]!.feasible).toBe(false);
+    expect(pts[0]!.feasibleUnits).toEqual([]);
+  });
+
+  it("the same teammate 10 yd away DOES make it feasible", () => {
+    const pts = burstWindowDecisionPoints(
+      combat(withMateAt({ advancedActions: trackAt("F2", 0, 40, 95, 0, 10) })),
+    );
+    expect(pts[0]!.feasible).toBe(true);
+    expect(pts[0]!.feasibleUnits).toEqual(["Mate-R"]);
+  });
+
+  it("a teammate with NO position samples counts as reachable — missing data must not manufacture infeasibility", () => {
+    // no advancedActions at all → getUnitPositionAtTime returns null for the
+    // helper → the gate fails OPEN (documented choice, 2026-09-02).
+    const pts = burstWindowDecisionPoints(
+      combat(withMateAt({ advancedActions: [] })),
+    );
+    expect(pts[0]!.feasible).toBe(true);
+    expect(pts[0]!.feasibleUnits).toEqual(["Mate-R"]);
+  });
+
+  it("the pressured friendly's OWN ready tool is untouched by the gate — branch (a) needs no delivery", () => {
+    const pts = burstWindowDecisionPoints(
+      combat([
+        friendly({
+          damageIn: steadyDamage(10, 20),
+          advancedActions: trackAt("F1", 0, 40, 25, 0, 0),
+          spellCastEvents: [cast(BARKSKIN, 120)],
+        }),
+        friendly({
+          id: "F2",
+          name: "Mate-R",
+          info: { teamId: "0", specId: "105" },
+          spellCastEvents: [cast(TRANQUILITY, 120)],
+          advancedActions: trackAt("F2", 0, 40, 95, 0, 500),
+        }),
+        hostile({ spellCastEvents: [cast(AR, 10)] }),
+      ]),
+    );
+    expect(pts[0]!.feasible).toBe(true);
+    // the unreachable teammate is still not credited
+    expect(pts[0]!.feasibleUnits).toEqual(["Friend-R"]);
   });
 });

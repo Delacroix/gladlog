@@ -49,12 +49,16 @@ import {
   specToString,
   TEAM_HEAL_CD_IDS,
 } from "../utils/cooldowns";
+import { externalReachYards } from "../utils/deathOutcomeAnalysis";
 import {
   type IAlignedBurstWindow,
   type IEnemyCDTimeline,
   reconstructEnemyCDTimeline,
   SOLO_WINDOW_MIN_WEIGHT,
 } from "../utils/enemyCDs";
+import { getUnitPositionAtTime } from "../utils/losAnalysis";
+import { LOS_SWEEP_GAP_MS } from "../utils/positionSampling";
+import { canReachTargetAt } from "../utils/rootReachability";
 import { isOffensiveSpell, spellDangerWeight } from "../utils/spellDanger";
 import { buildFilteredAuraIntervals } from "../utils/utils";
 import { CRISIS_HP_PCT_RENDERED, kitedAway } from "./crisisDecisionPoints";
@@ -122,23 +126,20 @@ export const BURST_LAPSE_DMG_PCT_PER_S = 0.03;
  * | `isOffensiveSpell` (spellTags ← `SPELL_CATEGORIES`) | 41 | 19 | **0** |
  * | `OFFENSIVE_SPELL_IDS` (`classMetadata` `SpellTag.Offensive`, cooldowns.ts) | 34 | 19 | **9** |
  *
- * `isOffensiveSpell` wins on both directions: none of its 41 entries is dead,
- * while 9 of the classMetadata table's 34 are ids the whole 10,682-match S2
- * archive never saw (Dark Soul: Misery 113860, Storm Earth and Fire 137639,
- * Unholy Assault 207289, Avenging Wrath 231895, Coordinated Assault 266779,
- * Apocalypse 275699, Convoke the Spirits 323764, Call of the Wild 359844,
- * Dark Ascension 391109 — 323764 is the very id `SPELL_EFFECT_OVERRIDES`
- * already replaced with 322109 in 2026-08-21). The FORWARD gap is recorded,
- * not silently closed: 6 live ids sit in the classMetadata table and not here
- * (Empower Rune Weapon 47568, Ascendance 114050 (Elemental — 114051
- * Enhancement IS here), Invoke Xuen 123904, Metamorphosis 191427, Bladestorm
- * 227847, Summon Demonic Tyrant 265187), so this engine cannot see a window
- * those six open alone. Widening means widening
- * `reconstructEnemyCDTimeline`, which every other burst-window consumer reads
- * — out of scope here; the divergence is registered in
- * `docs/predicate-index.md` "Not yet unified". Both source tables are already
- * in `curatedIdRegistry` (`SPELL_CATEGORIES`, `classMetadata`), so the rot
- * scans already cover them and no new registration is owed.
+ * **Unified 2026-09-02 (GH #60 tail).** `isOffensiveSpell` now reads the ONE
+ * canonical table `spellDanger.ts`'s `OFFENSIVE_CD_SPELL_IDS` — the union of
+ * the two former tables minus the 9 corpus-dead classMetadata ids (see
+ * `OFFENSIVE_CD_DEAD_IDS` for the names and the deadness evidence), 47 ids,
+ * registered in `curatedIdRegistry`. The forward gap is closed: the 6 live
+ * ids that used to sit only in the classMetadata table (Empower Rune Weapon
+ * 47568, Ascendance 114050, Invoke Xuen 123904, Metamorphosis 191427,
+ * Bladestorm 227847, Summon Demonic Tyrant 265187) can now open a window,
+ * and `reconstructEnemyCDTimeline` + `threatActiveAt` +
+ * `signalSkillGradientScan` all key on the same set. The
+ * `docs/predicate-index.md` "Not yet unified" entry this used to point at is
+ * closed; the re-assertion below stays, because the structural point (the
+ * builder cannot widen what this engine calls a burst without this line
+ * going with it) survives unification.
  */
 export const isBurstWindowOffensiveCd = isOffensiveSpell;
 
@@ -347,7 +348,13 @@ export interface BurstWindowDecisionPoint {
    *      cooldown at `tSec`, and was not hard-CC'd for the whole 8 s; OR
    *  (b) a **teammate** had a tool that can reach somebody else
    *      (`canHelpAnotherUnit`, GH #28's predicate) off cooldown at `tSec`,
-   *      and was not hard-CC'd for the whole 8 s.
+   *      was not hard-CC'd for the whole 8 s, AND could actually DELIVER it
+   *      to the pressured friendly from where they stood at the window-start
+   *      render second (2026-09-02, GH #60 tail): positions from the same
+   *      sampler the root-reachability work uses, per-tool official range
+   *      (`externalReachYards`), LoS not disproven counts as reachable, and
+   *      missing position data for either unit counts as reachable — the
+   *      gate may only remove windows the log PROVES undeliverable.
    *
    * Control cooldowns no longer make a window feasible on their own (they
    * still count as a *response*): "you could have stunned somebody" is not
@@ -967,21 +974,49 @@ export function burstWindowDecisionPoints(
         )
           feasibleUnits.push(pressuredUnit.name);
       }
+      // (b)'s reachability gate (2026-09-02, GH #60 tail — chg7b §5 closed):
+      // a teammate's ready tool only counts if the teammate could DELIVER it
+      // to the pressured friendly at the window-start render second. One
+      // predicate, shared with the [ROOT] work (`canReachTargetAt`): same
+      // position sampler (`getUnitPositionAtTime` at `LOS_SWEEP_GAP_MS`),
+      // same "LoS not disproven counts as reachable" posture, and the range
+      // is per tool via `externalReachYards` (official DB2 reach, 40 yd
+      // fallback — never lower, so an unlisted spell cannot start acquitting
+      // or accusing silently). Fail OPEN on missing data: no pressured
+      // friendly, no position sample for the helper, or an unknown reach
+      // (`null`: target dead at t / no target sample) all count as reachable
+      // — sampling gaps must not manufacture infeasibility, only a position
+      // pair the log actually recorded may remove a window.
+      const teammateCanDeliver = (
+        u: any,
+        readyCds: IMajorCooldownInfo[],
+      ): boolean => {
+        if (!pressuredUnit) return true;
+        const helperPos = getUnitPositionAtTime(u, tMs, LOS_SWEEP_GAP_MS);
+        if (!helperPos) return true;
+        return readyCds.some(
+          (cd) =>
+            canReachTargetAt(
+              helperPos,
+              pressuredUnit,
+              tMs,
+              combat?.startInfo?.zoneId,
+              externalReachYards(cd.spellId),
+              true,
+            ) !== false,
+        );
+      };
       for (const u of friendlies) {
         // (b) a teammate could have reached them
         if (pressuredUnit && u.id === pressuredUnit.id) continue;
         if (!freeToAct(u)) continue;
-        if (
-          !(allyCdsByUnit.get(u.id) ?? []).some((cd) => cdAvailableAt(cd, tSec))
-        )
-          continue;
+        const readyCds = (allyCdsByUnit.get(u.id) ?? []).filter((cd) =>
+          cdAvailableAt(cd, tSec),
+        );
+        if (!readyCds.length) continue;
+        if (!teammateCanDeliver(u, readyCds)) continue;
         feasibleUnits.push(u.name);
       }
-      // Reachability (docs/…root-reachability) is NOT applied to (b): telling
-      // an external apart by its cast range needs official per-spell range
-      // facts the cooldown ledger does not carry, and every window would then
-      // pay a position/LoS sweep in a scan that already runs ~55 minutes.
-      // Recorded as future work rather than approximated.
 
       const deathsInWindow = friendlyOutcomes.filter((f) => f.died).length;
       const mins = friendlyOutcomes
