@@ -1,3 +1,4 @@
+import { SPELL_CATEGORIES } from "./spellCategories";
 import { SPELL_EFFECT_OVERRIDES } from "./spellEffectOverrides";
 import { SPELL_EFFECTS_GENERATED } from "./spellEffectGenerated";
 
@@ -48,6 +49,43 @@ export const spellEffectData = (() => {
   }
   return merged;
 })();
+
+// ── CC full duration: one predicate ─────────────────────────────────────────
+/**
+ * Oppressing Roar (Evoker), the one effect that lengthens CC in arena: aura
+ * 232 "mechanic duration mod" on every enemy within 30 yd for 10 s — DB2
+ * SpellEffect@12.1.0.69404 EffectBasePointsF 50 × PvpMultiplier 0.6 = **+30 %
+ * in PvP** while the debuff sits on the holder. User ruling 2026-09-02:
+ * "羊本身永远是6秒 除非有龙给的加持续时间的debuff".
+ */
+export const OPPRESSING_ROAR_SPELL_ID = "372048";
+export const OPPRESSING_ROAR_PVP_CC_DURATION_MULT = 1.3;
+
+/**
+ * Full, undiminished PvP duration of a CC / root aura in seconds — the fact the
+ * "Xs of CC wasted" estimate in ccBreakAnalysis rests on. Reads the official
+ * DB2 duration (`durationSeconds`: PvPDurationIndex when the spell has one,
+ * spellEffectOverrides layered on top) and falls back to the hand
+ * `SPELL_CATEGORIES[id].duration` only for ids DB2 leaves blank
+ * (combo-point-scaled Kidney Shot, cast-side ids that never appear as auras).
+ *
+ * 2026-09-02 S2 corpus check (605 archive files, APPLIED→REMOVED lifetime mode
+ * per id): of the 22 hard-CC / root ids where the hand table and DB2
+ * disagreed, 21 sided with DB2 (Polymorph family 8→6, Hex 8→6, Freezing Trap
+ * 8→6, Entangling Roots 8→6, Hammer of Justice 6→5, Cyclone 6→5, Blind 6→5,
+ * Blinding Light 6→4, Leg Sweep 3→4, Freeze 6→8, Imprison 6→3, …); the one
+ * that did not — Binding Shot 117526, DB2 2 s vs observed 3.0 s ×1084 — is
+ * corrected in `CORPUS_DURATION_PATCHES` (spellEffectOverrides.ts) so this
+ * accessor still has a single source. The hand durations that DB2 covers were
+ * removed from SPELL_CATEGORIES the same day (pinned by
+ * `test/ccFullDuration.test.ts`), so the fallback cannot silently disagree.
+ */
+export function ccFullDurationSeconds(spellId: string): number | undefined {
+  return (
+    spellEffectData[spellId]?.durationSeconds ??
+    SPELL_CATEGORIES[spellId]?.duration
+  );
+}
 
 // Loaded in the background rather than via a top-level await: TLA would make
 // the entire module graph (including the renderer's first paint) serialize

@@ -183,3 +183,30 @@ for (const [id, t] of Object.entries(DISPEL_TYPES)) {
       dispelType: t,
     } as IMinedSpell;
 }
+
+// ── Corpus-corrected durations (layered ON TOP of the generated entry, never a
+// stub — same shadowing lesson as the DISPEL_TYPES loop above) ────────────────
+// Ids whose official DB2 duration is contradicted by the observed aura lifetime.
+// Every entry carries its measurement; `ccFullDurationSeconds` (spellEffectData.ts)
+// reads the merged table, so this is the only place a corpus-vs-DB2 duration
+// disagreement is allowed to live. Registered in curatedIdRegistry.
+export const CORPUS_DURATION_PATCHES: Record<string, number> = {
+  // Binding Shot stun: DB2 SpellDuration says 2 s, the 12.1 archive says 3 s —
+  // S2 605-file sample, n=2290 lifetimes: 3.0 s ×1084 (full-duration cluster),
+  // 1.5 s ×309 (the 50 % DR cluster), p90 3.1 s. GH #44 tail, 2026-09-02.
+  "117526": 3,
+};
+for (const [id, durationSeconds] of Object.entries(CORPUS_DURATION_PATCHES)) {
+  const cur = SPELL_EFFECT_OVERRIDES[id];
+  if (cur)
+    (cur as { durationSeconds?: number }).durationSeconds = durationSeconds;
+  else
+    SPELL_EFFECT_OVERRIDES[id] = {
+      ...(SPELL_EFFECTS_GENERATED as Record<string, IMinedSpell>)[id],
+      spellId: id,
+      name:
+        (SPELL_EFFECTS_GENERATED as Record<string, IMinedSpell>)[id]?.name ??
+        id,
+      durationSeconds,
+    } as IMinedSpell;
+}

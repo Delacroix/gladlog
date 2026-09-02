@@ -464,6 +464,11 @@ const INDEX: PredicateRow[] = [
     mod: spellCategories,
   },
   {
+    file: `${A}/data/spellEffectData.ts`,
+    symbol: "ccFullDurationSeconds",
+    mod: spellEffectData,
+  },
+  {
     file: `${A}/utils/dispelAnalysis.ts`,
     symbol: "DR_CHAIN_LOOKAHEAD_S",
     mod: dispelAnalysis,

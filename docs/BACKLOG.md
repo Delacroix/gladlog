@@ -881,11 +881,34 @@ Classified by suspected root cause; work begins after completing the currently r
      healer was sheeped → healing-gap −1 / −3; the `enemyCDs` healer-CC multiplier lifts one `[HEALER EXPOSURE]` burst
      label High → Critical). `[CC ON ENEMY]` lines are unchanged — that path reads the official DR table and already
      knew the variants.
-     **Parked for a separate ruling — Polymorph family duration**: the whole family carries `cc(8)` while DB2
-     `spellEffectGenerated` (PvP duration) says 6 s for 118 and every variant; the number only feeds `ccBreakAnalysis`'s
-     remaining-duration estimate, and the mismatch is already visible on one prompt: `[CC BROKEN] … Shadeburst broke own
-team's Polymorph on 4(WMonk) — 7.1s of CC wasted` next to `[CC ON ENEMY] … Polymorph … (6s)` from the official
-     table. Kept identical to the base entry per the ruling rather than half-fixed on the variants.
+     **Polymorph family duration — ruled and closed 2026-09-02** ("羊本身永远是6秒 除非有龙给的加持续时间的debuff").
+     The family carried `cc(8)` while DB2 (PvPDurationIndex-aware) says 6 s, visible on one prompt as `[CC BROKEN] …
+     7.1s of CC wasted` next to `[CC ON ENEMY] … Polymorph … (6s)` (the latter is the *observed* aura lifetime,
+     `ccTrinketAnalysis` removeMs − applyMs — an earlier note here called it "the official table", which was wrong).
+     The ruling was applied as a rule, not a one-id patch, because the hand table was wrong far beyond sheep: of 135
+     hand durations, 50 disagreed with DB2 and 9 had no DB2 value; the S2 605-file lifetime scan (APPLIED→REMOVED
+     mode per id, Oppressing Roar-tagged) sided with DB2 on **21 of the 22 hard-CC / root disagreements** (Polymorph
+     ×11 8→6, Hex 8→6, Freezing Trap 8→6, Entangling Roots / Mass Entanglement 8→6, Hammer of Justice 6→5, Cyclone
+     6→5, Blind 6→5, Blinding Light 6→4, Leg Sweep 3→4, Freeze 6→8, Imprison 6→3, Gouge / Intimidation / Dragon's
+     Breath / Paralysis / Axe Toss / Storm Bolt 4→3, Asphyxiate 5→3, Blinding Sleet 5→4, Chaos Nova 2→3) and against
+     it once (Binding Shot 117526: DB2 2 s, observed 3.0 s ×1084). Landed as one predicate:
+     `spellEffectData.ccFullDurationSeconds` (official DB2 duration, overrides layered, hand `SPELL_CATEGORIES` value
+     only where DB2 is blank — Kidney Shot set to the observed 5 s, three cast-side ids), the Binding Shot correction
+     as `CORPUS_DURATION_PATCHES` (layered on the generated entry, registered in `curatedIdRegistry`), 61 DB2-covered
+     hand durations removed from `SPELL_CATEGORIES` with `test/ccFullDuration.test.ts` refusing any new duplicate, and
+     the one CC-lengthening effect in arena, Oppressing Roar 372048 (DB2 aura 232 basepoints 50 × PvpMultiplier 0.6 =
+     **+30 % in PvP**), applied by `ccBreakAnalysis` when the debuff was on the holder at application. Predicate-index
+     row added (EN + zh-CN). `[CC ON ENEMY]` and the DR tables never read the hand duration, so nothing else moves.
+     **Acceptance, same code path before/after, S2 605 files / 1,270 rounds / 3,520 owner views**: findings-prompt
+     SHA256 identical and all 26 per-type candidate counts identical (the estimate feeds a context line only);
+     `[CC BROKEN]` lines 7,618 → 6,400 (distinct events 6,067 → 5,082) — the 1,218 dropped lines are breaks whose
+     remaining time fell under `CC_BREAK_REPORT_MIN_REMAINING_S` = 2 once the duration shrank (Dragon's Breath 247,
+     Gouge 192, Blinding Light 182, Polymorph 169, Freezing Trap 144, Blinding Sleet 77, Paralysis 67, Imprison 52,
+     Sigil of Misery 38, Hex 34, Blind 18); "wasted" values ≥ 6 s **646 → 7 lines**, all seven explained (5 Psychic
+     Scream lines at 6.8 / 7.2 s = 6 × 1.3 under a same-team Evoker's Oppressing Roar, 2 Freezing Trap lines at
+     exactly 6.0 s = broken on landing); 2 lines appear only after (Sleep Walk under Oppressing Roar crossing the
+     2 s threshold); 73 lines that used to render without a number (ids with no hand duration) now carry the DB2
+     one. Full analysis suite 148 files / 2,372 tests green, predicate-index test 222.
 6. **eval baseline / candidate incidence rates full recalibration**: 63.6/14.1/15.6 and other old numbers considered
    expired after 12.1; rerun `/eval-baseline`, rate-limiting type (#22 temporary gate) thresholds reviewed alongside incidence rates.
    > **2026-09-01 status (GH #44)**: the deterministic half already exists — the 2026-08-22 skill-gradient study

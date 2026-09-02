@@ -25,6 +25,15 @@ export interface ISpellCategoryEntry {
     | "buffs_speed_boost"
     | "interrupts"
     | "disarms";
+  /**
+   * Seconds. For `cc` / `roots` this is ONLY a fallback for ids DB2 leaves
+   * blank (Kidney Shot, cast-side ids) — the full CC duration predicate is
+   * `ccFullDurationSeconds` in spellEffectData.ts (official DB2 PvP duration),
+   * and `test/ccFullDuration.test.ts` fails if a cc/root entry carries a hand
+   * duration DB2 already covers (2026-09-02: 61 such numbers removed, 21 of
+   * the 22 that disagreed with DB2 were wrong). For `interrupts` it is the
+   * school-lockout length (`kickLockoutSeconds`). Other types: informational.
+   */
   duration?: number;
   priority?: boolean;
   nounitFrames?: boolean;
@@ -77,60 +86,61 @@ const root = (duration?: number): ISpellCategoryEntry => ({
 // 2026-08-21 S2 corpus scan (10,682 matches): removed Mesmerize 115268, Psychic Horror 64044, Mind Bomb 226943, Repentance 20066, Fel Eruption 211881, Wyvern Sting 19386, Netherwalk 196555, Icy Veins 12472, Fel Barrage 258925, Soul Rot 386997, Coordinated Assault 360952 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   // -- CC (stun / polymorph / fear / blind / imprison etc.) --
-  "118": cc(8), // Polymorph
-  "28271": cc(8), // Polymorph (Turtle)
-  "28272": cc(8), // Polymorph (Pig)
+  "118": cc(), // Polymorph
+  "28271": cc(), // Polymorph (Turtle)
+  "28272": cc(), // Polymorph (Pig)
   // Polymorph glyph variants: 8 further ids of the same spell that the 12.1 archive logs as their own aura ids — all in the observed
   // universe, all seen dispelled (dispelObservedGenerated: 161354 ×238, 460392 ×137, …), all in the official DR table
   // (drGapScan 2026-08-21 listed them among the 63 CC ids SPELL_CATEGORIES lacked). User ruling 2026-09-02 (GH #44):
-  // "变形变体和变形一模一样" — registered exactly like 118 / 28271 / 28272 above. Note for a separate ruling: the whole
-  // family carries cc(8) here while DB2 (spellEffectGenerated, PvP duration) says 6 s for 118 and every variant;
-  // the number only feeds ccBreakAnalysis's "remaining duration" estimate, kept identical rather than half-fixed.
-  "61305": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
-  "61721": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
-  "161353": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
-  "161354": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
-  "277787": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
-  "277792": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
-  "391622": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
-  "460392": cc(8), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
-  "51514": cc(8), // Hex
+  // "变形变体和变形一模一样" — registered exactly like 118 / 28271 / 28272 above. Duration: same-day ruling
+  // "羊本身永远是6秒 除非有龙给的加持续时间的debuff" — the family (and every other CC/root id DB2 covers) no longer
+  // carries a hand duration; `ccFullDurationSeconds` (spellEffectData.ts) reads the official 6 s, Oppressing Roar is
+  // applied by the consumer.
+  "61305": cc(), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "61721": cc(), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "161353": cc(), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "161354": cc(), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "277787": cc(), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "277792": cc(), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "391622": cc(), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "460392": cc(), // Polymorph (glyph variant; DB2 SpellName carries no subtext)
+  "51514": cc(), // Hex
   "5782": cc(6), // Fear
-  "5484": cc(6), // Howl of Terror
-  "6789": cc(3), // Mortal Coil (DR: Incapacitate)
-  "30283": cc(3), // Shadowfury
-  "710": cc(6), // Banish
-  "6358": cc(6), // Seduction
-  "89766": cc(4), // Axe Toss
-  "8122": cc(6), // Psychic Scream
-  "605": cc(6), // Mind Control
-  "9484": cc(6), // Shackle Undead
-  "2094": cc(6), // Blind
-  "6770": cc(6), // Sap
-  "1833": cc(4), // Cheap Shot
-  "408": cc(6), // Kidney Shot
-  "1776": cc(4), // Gouge
-  "5211": cc(4), // Mighty Bash
-  "99": cc(3), // Incapacitating Roar
-  "33786": cc(6), // Cyclone
-  "2637": cc(6), // Hibernate
-  "853": cc(6), // Hammer of Justice
-  "105421": cc(6), // Blinding Light
-  "31661": cc(4), // Dragon's Breath
-  "82691": cc(6), // Ring of Frost
-  "119381": cc(3), // Leg Sweep
-  "115078": cc(4), // Paralysis
-  "217832": cc(6), // Imprison
-  "179057": cc(2), // Chaos Nova
-  "221562": cc(5), // Asphyxiate
-  "108194": cc(4), // Asphyxiate (Unholy)
-  "207167": cc(5), // Blinding Sleet
-  "3355": cc(8), // Freezing Trap
-  "24394": cc(4), // Intimidation
-  "117526": cc(3), // Binding Shot
-  "213691": cc(3), // Scatter Shot — 3s since its 12.1 PvP-talent return (corpus 2026-08-13: expiry cluster 2.99–3.02s, 50%-DR cluster 1.50s, n=18)
+  "5484": cc(), // Howl of Terror
+  "6789": cc(), // Mortal Coil (DR: Incapacitate)
+  "30283": cc(), // Shadowfury
+  "710": cc(), // Banish
+  "6358": cc(), // Seduction
+  "89766": cc(), // Axe Toss
+  "8122": cc(), // Psychic Scream
+  "605": cc(), // Mind Control
+  "9484": cc(), // Shackle Undead
+  "2094": cc(), // Blind
+  "6770": cc(), // Sap
+  "1833": cc(), // Cheap Shot
+  "408": cc(5), // Kidney Shot — DB2 has no duration (combo-point scaled); S2 lifetime mode 5.0 s ×700 of 1635, p90 5.2 (2026-09-02)
+  "1776": cc(), // Gouge
+  "5211": cc(), // Mighty Bash
+  "99": cc(), // Incapacitating Roar
+  "33786": cc(), // Cyclone
+  "2637": cc(), // Hibernate
+  "853": cc(), // Hammer of Justice
+  "105421": cc(), // Blinding Light
+  "31661": cc(), // Dragon's Breath
+  "82691": cc(), // Ring of Frost
+  "119381": cc(), // Leg Sweep
+  "115078": cc(), // Paralysis
+  "217832": cc(), // Imprison
+  "179057": cc(), // Chaos Nova
+  "221562": cc(), // Asphyxiate
+  "108194": cc(), // Asphyxiate (Unholy)
+  "207167": cc(), // Blinding Sleet
+  "3355": cc(), // Freezing Trap
+  "24394": cc(), // Intimidation
+  "117526": cc(), // Binding Shot
+  "213691": cc(), // Scatter Shot — 3s since its 12.1 PvP-talent return (corpus 2026-08-13: expiry cluster 2.99–3.02s, 50%-DR cluster 1.50s, n=18)
   "46968": cc(2), // Shockwave
-  "107570": cc(4), // Storm Bolt
+  "107570": cc(3), // Storm Bolt — cast id, DB2 blank; the stun aura 132169 is DB2 3 s = S2 lifetime mode 3.0 s ×727 (2026-09-02)
   // -- Cast-id / aura-id mismatch fill-ins (proven on the fuzz-1000
   // thousand-match corpus, 2026-07-19) --
   // The whitelist holds cast ids, but SPELL_AURA_APPLIED records aura ids --
@@ -140,24 +150,24 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   // mining the corpus.
   // Durations are measured from corpus applied->removed (p50-p90, DR
   // included).
-  "132168": cc(2), // Shockwave stun aura (4102 hits / 1000 matches; cast id 46968)
-  "132169": cc(4), // Storm Bolt stun aura (2895 hits; cast id 107570)
-  "118699": cc(6), // Fear aura (1830 hits; cast id 5782)
-  "5246": cc(6), // Intimidating Shout (2811 hits; previously absent entirely)
-  "360806": cc(6), // Sleep Walk (2035 hits; Evoker main CC, previously absent entirely)
-  "163505": cc(4), // Rake stealth stun (928 hits; present in the DR table, absent from cc)
-  "372245": cc(3), // Terror of the Skies -- Evoker Deep Breath talent stun (2481 hits, p50=3.0s; found by agy cross-review)
-  "20549": cc(2), // War Stomp
-  "118905": cc(3), // Static Charge (debuff)
-  "192058": cc(3), // Capacitor Totem
+  "132168": cc(), // Shockwave stun aura (4102 hits / 1000 matches; cast id 46968)
+  "132169": cc(), // Storm Bolt stun aura (2895 hits; cast id 107570)
+  "118699": cc(), // Fear aura (1830 hits; cast id 5782)
+  "5246": cc(), // Intimidating Shout (2811 hits; previously absent entirely)
+  "360806": cc(), // Sleep Walk (2035 hits; Evoker main CC, previously absent entirely)
+  "163505": cc(), // Rake stealth stun (928 hits; present in the DR table, absent from cc)
+  "372245": cc(), // Terror of the Skies -- Evoker Deep Breath talent stun (2481 hits, p50=3.0s; found by agy cross-review)
+  "20549": cc(), // War Stomp
+  "118905": cc(), // Static Charge (debuff)
+  "192058": cc(), // Capacitor Totem
   "207685": cc(), // Sigil of Misery (disorient debuff aura id; duration is taken from measured log aura applied->removed. Found missing by the audit: DH fear was entirely outside CC coverage)
   // -- Roots --
-  "122": root(6), // Frost Nova
-  "355689": root(6), // Landslide (Shaman totem root; official Magic/6 s; ×59 in the dispel corpus). Was the one dispellable root with no entry → priority Low → a missed cleanse on it could never be reported (registry rule). User 2026-08-30 (GH #24 tail): "same tier as Frost Nova".
-  "33395": root(6), // Freeze (Water Elemental)
-  "339": root(8), // Entangling Roots
-  "102359": root(8), // Mass Entanglement
-  "64695": root(6), // Earthgrab Totem
+  "122": root(), // Frost Nova
+  "355689": root(), // Landslide (Shaman totem root; official Magic/6 s; ×59 in the dispel corpus). Was the one dispellable root with no entry → priority Low → a missed cleanse on it could never be reported (registry rule). User 2026-08-30 (GH #24 tail): "same tier as Frost Nova".
+  "33395": root(), // Freeze (Water Elemental)
+  "339": root(), // Entangling Roots
+  "102359": root(), // Mass Entanglement
+  "64695": root(), // Earthgrab Totem
   // Void Nova (Devourer DH). A STUN, not a root — reclassified 2026-08-19
   // after a user challenge (「治疗没法给自己驱散啊」) exposed 84 missed-cleanse
   // windows accusing a Void-Nova'd sole dispeller of not dispelling their own
@@ -176,7 +186,7 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   // (ccSpellIds excluded it), priority High instead of Critical, and — the
   // accusation-shaped one — `isCastBlockingAuraType` false, so the
   // sole-dispeller exemption never fired for it.
-  "1234195": cc(3),
+  "1234195": cc(),
   // -- Disarms --
   "236077": { type: "disarms", duration: 5 }, // Disarm (Warrior)
   "207777": { type: "disarms", duration: 5 }, // Dismantle

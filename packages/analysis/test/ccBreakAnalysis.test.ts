@@ -18,8 +18,11 @@ const MATCH_START = 1_000_000;
 const S = (sec: number) => MATCH_START + sec * 1000;
 const COMBAT = { startTime: MATCH_START, endTime: MATCH_START + 120_000 };
 
-/** Polymorph: cc category, full table duration 8s. */
+/** Polymorph: cc category; full duration 6 s from DB2 via ccFullDurationSeconds
+ * (user ruling 2026-09-02 "羊本身永远是6秒"; the hand table used to say 8). */
 const POLY = "118";
+/** Oppressing Roar debuff: +30 % CC duration in PvP while on the holder. */
+const ROAR = "372048";
 /** Frost Nova: roots category. */
 const NOVA = "122";
 
@@ -86,8 +89,8 @@ describe("analyzeCcBreaks — ground truth 打破事件", () => {
     expect(ev.breakerIsFriendly).toBe(true);
     expect(ev.breakSpellId).toBe("589");
     expect(ev.heldSeconds).toBeCloseTo(1.5);
-    // Polymorph's full table duration is 8s and DR is fresh → 6.5s remaining
-    expect(ev.remainingSeconds).toBeCloseTo(6.5);
+    // Polymorph's official full duration is 6 s and DR is fresh → 4.5 s remaining
+    expect(ev.remainingSeconds).toBeCloseTo(4.5);
     expect(stats.friendlySquander).toHaveLength(1);
     expect(stats.enemySquander).toHaveLength(0);
   });
@@ -116,8 +119,8 @@ describe("analyzeCcBreaks — ground truth 打破事件", () => {
 
   it("DR 折半:同类第二次控被打破,剩余按半时长算", () => {
     // e1 first eats a full poly (S2→S8, expires naturally), takes another poly
-    // at S12 (half duration, 4s), and it is broken at S13 → remaining
-    // = 4 - 1 = 3
+    // at S12 (half duration, 3 s), and it is broken at S13 → remaining
+    // = 3 - 1 = 2
     const e1 = makeUnit("e1", {
       auraEvents: [
         aura(LogEvent.SPELL_AURA_APPLIED, POLY, S(2), "h1", "OurMage"),
@@ -135,15 +138,15 @@ describe("analyzeCcBreaks — ground truth 打破事件", () => {
       COMBAT,
     );
     expect(stats.events).toHaveLength(1);
-    expect(stats.events[0].remainingSeconds).toBeCloseTo(3);
+    expect(stats.events[0].remainingSeconds).toBeCloseTo(2);
   });
 
   it("剩余 < 阈值的资敌打破不进可教清单(尾巴上的打破无关紧要)", () => {
-    // An 8s poly is broken after 7s → 1s remaining, below the 2s threshold
+    // A 6 s poly is broken after 5 s → 1 s remaining, below the 2 s threshold
     const e1 = makeUnit("e1", {
       auraEvents: [
         aura(LogEvent.SPELL_AURA_APPLIED, POLY, S(10), "h1", "OurMage"),
-        aura(LogEvent.SPELL_AURA_BROKEN_SPELL, POLY, S(17), "d1", "OurPriest", {
+        aura(LogEvent.SPELL_AURA_BROKEN_SPELL, POLY, S(15), "d1", "OurPriest", {
           breakSpellId: "589",
           breakSpellName: "Shadow Word: Pain",
         }),
@@ -185,6 +188,40 @@ describe("analyzeCcBreaks — ground truth 打破事件", () => {
     );
     expect(stats.events).toHaveLength(1);
     expect(stats.events[0].remainingSeconds).toBeCloseTo(2);
+  });
+
+  it("压迫咆哮在身时上的控按 ×1.3 算满时长;咆哮已掉则按官方 6s", () => {
+    // Oppressing Roar (372048) lands on e1 at S9 and is still up when the
+    // poly lands at S10 → base 6 × 1.3 = 7.8, broken at S11.5 → 6.3 left.
+    // e2 had the roar removed at S9.5 before its poly at S10 → plain 6 − 1.5.
+    const breakAt = (t: number) =>
+      aura(LogEvent.SPELL_AURA_BROKEN_SPELL, POLY, S(t), "d1", "OurPriest", {
+        breakSpellId: "589",
+        breakSpellName: "Shadow Word: Pain",
+      });
+    const e1 = makeUnit("e1", {
+      auraEvents: [
+        aura(LogEvent.SPELL_AURA_APPLIED, ROAR, S(9), "v1", "OurEvoker"),
+        aura(LogEvent.SPELL_AURA_APPLIED, POLY, S(10), "h1", "OurMage"),
+        breakAt(11.5),
+      ],
+    });
+    const e2 = makeUnit("e2", {
+      auraEvents: [
+        aura(LogEvent.SPELL_AURA_APPLIED, ROAR, S(9), "v1", "OurEvoker"),
+        aura(LogEvent.SPELL_AURA_REMOVED, ROAR, S(9.5), "v1", "OurEvoker"),
+        aura(LogEvent.SPELL_AURA_APPLIED, POLY, S(10), "h1", "OurMage"),
+        breakAt(11.5),
+      ],
+    });
+    const stats = analyzeCcBreaks(
+      [makeUnit("h1"), makeUnit("d1"), makeUnit("v1")],
+      [e1, e2],
+      COMBAT,
+    );
+    const byHolder = new Map(stats.events.map((e) => [e.holderName, e]));
+    expect(byHolder.get("e1")?.remainingSeconds).toBeCloseTo(6.3);
+    expect(byHolder.get("e2")?.remainingSeconds).toBeCloseTo(4.5);
   });
 
   it("root 打破单列计数,不混进硬 CC 事件", () => {

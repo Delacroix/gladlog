@@ -97,7 +97,12 @@ import {
   SHARED_CD_RACIAL_SPELL_IDS,
 } from "./racialAbilities";
 import { SPELL_CATEGORIES } from "./spellCategories";
-import { DISPEL_TYPES, SPELL_EFFECT_OVERRIDES } from "./spellEffectOverrides";
+import { OPPRESSING_ROAR_SPELL_ID } from "./spellEffectData";
+import {
+  CORPUS_DURATION_PATCHES,
+  DISPEL_TYPES,
+  SPELL_EFFECT_OVERRIDES,
+} from "./spellEffectOverrides";
 import spellIdLists from "./spellIdLists";
 import { trinketSpellIds } from "./spellTags";
 
@@ -398,4 +403,13 @@ export const CURATED_ID_TABLES: readonly CuratedIdTable[] = [
   t("OFFENSIVE_CD_SPELL_IDS", "utils/spellDanger.ts", "mixed", () =>
     set(OFFENSIVE_CD_SPELL_IDS),
   ),
+  // CC full-duration predicate (GH #44 tail, 2026-09-02): the corpus-vs-DB2
+  // duration corrections and the one aura that lengthens CC in arena. Both are
+  // hand-keyed ids a patch can renumber, so both sit under the rot scans.
+  t("CORPUS_DURATION_PATCHES", "data/spellEffectOverrides.ts", "aura", () =>
+    keys(CORPUS_DURATION_PATCHES),
+  ),
+  t("OPPRESSING_ROAR_SPELL_ID", "data/spellEffectData.ts", "aura", () => [
+    OPPRESSING_ROAR_SPELL_ID,
+  ]),
 ];

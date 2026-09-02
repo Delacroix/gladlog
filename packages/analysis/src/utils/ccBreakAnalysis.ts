@@ -1,6 +1,11 @@
 import { ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 
-import { getEnglishSpellName } from "../data/spellEffectData";
+import {
+  ccFullDurationSeconds,
+  getEnglishSpellName,
+  OPPRESSING_ROAR_PVP_CC_DURATION_MULT,
+  OPPRESSING_ROAR_SPELL_ID,
+} from "../data/spellEffectData";
 import { SPELL_CATEGORIES } from "../data/spellCategories";
 import {
   buildCcCategoryHistory,
@@ -39,10 +44,13 @@ export interface ICcBreakEvent {
   breakSpellName: string;
   /** How long the CC actually held. */
   heldSeconds: number;
-  /** How much CC time was left: the full duration (spellCategories duration
-   * table) scaled by the holder's DR level at that moment (Full = full,
-   * 50% = halved) minus the time already elapsed; no table entry → null (we do
-   * not guess). */
+  /** How much CC time was left: the official full duration
+   * (`ccFullDurationSeconds` — DB2 PvP duration, hand fallback only where DB2
+   * is blank; 2026-09-02 user ruling "羊本身永远是6秒") scaled by the
+   * holder's DR level at that moment (Full = full, 50% = halved) and by
+   * Oppressing Roar (+30 % if the debuff was on the holder at application)
+   * minus the time already elapsed; no duration known → null (we do not
+   * guess). */
   remainingSeconds: number | null;
   isRoot: boolean;
 }
@@ -105,15 +113,31 @@ export function analyzeCcBreaks(
     // (same semantics as the timeline's [DR] annotation)
     const opponentIds = holderIsFriendly ? enemyIds : friendlyIds;
 
-    const pending = new Map<string, { applyMs: number; casterName: string }>();
+    const pending = new Map<
+      string,
+      { applyMs: number; casterName: string; roarAtApply: boolean }
+    >();
+    // Oppressing Roar debuff on the holder lengthens every CC applied while it
+    // is up (+30 % in PvP, official) — tracked from the holder's own aura
+    // stream so the remaining-duration estimate uses the lengthened base.
+    let roarActive = false;
 
     for (const aura of holder.auraEvents) {
       const spellId = aura.spellId;
       if (!spellId) continue;
+      const ev = aura.logLine.event;
+      if (spellId === OPPRESSING_ROAR_SPELL_ID) {
+        if (
+          ev === LogEvent.SPELL_AURA_APPLIED ||
+          ev === LogEvent.SPELL_AURA_REFRESH
+        )
+          roarActive = true;
+        else if (ev === LogEvent.SPELL_AURA_REMOVED) roarActive = false;
+        continue;
+      }
       const cc = isCcType(spellId);
       const root = isRootType(spellId);
       if (!cc && !root) continue;
-      const ev = aura.logLine.event;
       const key = `${spellId}:${aura.srcUnitId}`;
 
       if (
@@ -123,6 +147,7 @@ export function analyzeCcBreaks(
         pending.set(key, {
           applyMs: aura.timestamp,
           casterName: aura.srcUnitName,
+          roarAtApply: roarActive,
         });
       } else if (ev === LogEvent.SPELL_AURA_REMOVED) {
         pending.delete(key);
@@ -167,10 +192,17 @@ export function analyzeCcBreaks(
 
         const heldSeconds = (aura.timestamp - entry.applyMs) / 1000;
 
-        // Remaining duration: full-duration table × DR factor − time already
-        // held; no table entry means no guess (null)
+        // Remaining duration: official full duration (ccFullDurationSeconds:
+        // DB2 PvP duration, hand fallback only where DB2 is blank) × DR factor
+        // × Oppressing Roar (+30 % when the debuff was on the holder at
+        // application) − time already held; no duration known → no guess (null)
         let remainingSeconds: number | null = null;
-        const tableDuration = SPELL_CATEGORIES[spellId]?.duration;
+        const baseDuration = ccFullDurationSeconds(spellId);
+        const tableDuration =
+          baseDuration === undefined
+            ? undefined
+            : baseDuration *
+              (entry.roarAtApply ? OPPRESSING_ROAR_PVP_CC_DURATION_MULT : 1);
         if (tableDuration !== undefined) {
           const category = getDRCategory(spellId);
           let factor = 1;
