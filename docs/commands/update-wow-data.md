@@ -254,6 +254,12 @@ npx tsx packages/eval/scripts/curatedRotScan.ts \
 #    ground truth vs getDispelType (the awk extraction from the Notes below, over .gz via gzip -dc).
 npx tsx packages/eval/scripts/drGapScan.ts $GLADLOG_EVAL_HOME/corpus/observedSpellIds-S<n>-archive-<date>.json
 npx tsx packages/eval/scripts/dispelCompletenessScan.ts <dispel-counts.txt>
+# 4. Official durations vs the game (GH #44 tail, 2026-09-02): every CC / root id's observed aura lifetime
+#    (APPLIED→REMOVED, 0.5 s-bin mode) against ccFullDurationSeconds (DB2 PvP duration + CORPUS_DURATION_PATCHES).
+#    ~1 min on every 30th archive file. A FLAG row is a ruling question — DB2 wins unless the corpus contradicts it
+#    this clearly (Binding Shot 2 s vs 3.0 s ×1084 was the one that did); fix goes into CORPUS_DURATION_PATCHES.
+npx tsx packages/eval/scripts/ccLifetimeScan.ts \
+  --manifest $GLADLOG_EVAL_HOME/corpus/manifest-archive-<date>.txt --every 30
 ```
 
 npm aliases for the same three (identical flags): `npm run -w @gladlog/eval scan:rot` ·

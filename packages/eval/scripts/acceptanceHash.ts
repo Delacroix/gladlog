@@ -15,6 +15,9 @@
  *
  * 用法:npx tsx packages/eval/scripts/acceptanceHash.ts 300 > before.txt
  *(单进程跑,全库扫描一次只跑一个 —— 32GB 机器扛不住并行。)
+ *
+ * 归档 .gz 语料 / DPS owner / match context 行级对照 → 用姊妹工具
+ * acceptanceCapture.ts(2026-09-02 转正),两者搭配就是完整的前后验收。
  */
 import { createHash } from "node:crypto";
 
