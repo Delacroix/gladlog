@@ -377,7 +377,7 @@ logged but not scheduled:
     (2026-07-31, 79 windows) shows ~22% of runnable windows hit this path, clicking "AI analyze this segment" again on the same window will
     make another model call. Consider caching empty terminal state (with version stamp) or UI-side hint.
 
-## 22. Temporary rate limiting: dispel/trinket-type candidates per-round cap (logged 2026-08-06, TEMPORARY)
+## 22. Temporary rate limiting: dispel/trinket-type candidates per-round cap (logged 2026-08-06; **TEMPORARY status ended 2026-08-20 — kept long-term by user ruling**, see the closing note at the end of this entry)
 
 **Motivation**: 200-match candidate menu empirical test (healer perspective default owner — `extractCandidateFindings` defaults to
 friendly healer), `cc-locked`/`missed-purge`/`missed-cleanse`/`wasted-trinket` four types combined account for
@@ -435,6 +435,16 @@ not breached), new types still get selected from menu as before (healing-gap 1/1
 **Conclusion: do not remove** — removing yields zero benefit (report side only skews without improving, menu side four-type share rises +5.6pt), new types' combined menu
 share still only ~8.5%, removal threshold maintains original judgment: wait for batch 2 expansion (DEATH-002 / OFFENSIVE-001) to land before re-evaluating.
 n=12 selection layer difference (+4.3pt) is near judge noise floor, not used as independent evidence — directional consistency with menu layer used only as supporting evidence.
+
+**Closed 2026-08-20 (user ruling, commit `551438fb`): the caps stay, long-term — the TEMPORARY label and the "wait for batch 2"
+removal condition above are void.** Re-measured then (after cc-locked / wasted-trinket retired on 2026-08-19, GH #14): with cap=2 the
+cleanse/purge family was 16.8 % of the menu, the no-cap simulation was 64.6 % — the same 64 % that triggered this entry — because
+missed-purge raw windows ran 12.6 per match; restoring 3 would push the family to ~25 % with no benefit evidence. The ruling and its
+numbers live in the `candidateFindings.ts` constant-block comment. Since then: missed-purge was demoted to context facts on 2026-08-29
+(`17356e93`, GH #50 (a); `CANDIDATE_TYPE_FLAGS.missedPurge = false`), so the family the caps govern is missed-cleanse alone (28 % of its
+producing rounds at cap in the 2026-08-26 at-cap check) plus kick-eaten's own cap. Nothing left to decide; entry kept for the numbers,
+listed under "done, pending archive" in the preface. (Bookkeeping fix 2026-09-02: #24-6 and GH #44 had carried the stale "gated on
+batch 2" wording for two weeks.)
 
 ## 14. eval / QA system residuals (logged 2026-07-20)
 
@@ -883,7 +893,7 @@ Classified by suspected root cause; work begins after completing the currently r
      knew the variants.
      **Polymorph family duration — ruled and closed 2026-09-02** ("羊本身永远是6秒 除非有龙给的加持续时间的debuff").
      The family carried `cc(8)` while DB2 (PvPDurationIndex-aware) says 6 s, visible on one prompt as `[CC BROKEN] …
-     7.1s of CC wasted` next to `[CC ON ENEMY] … Polymorph … (6s)` (the latter is the *observed* aura lifetime,
+7.1s of CC wasted` next to `[CC ON ENEMY] … Polymorph … (6s)` (the latter is the _observed_ aura lifetime,
      `ccTrinketAnalysis` removeMs − applyMs — an earlier note here called it "the official table", which was wrong).
      The ruling was applied as a rule, not a one-id patch, because the hand table was wrong far beyond sheep: of 135
      hand durations, 50 disagreed with DB2 and 9 had no DB2 value; the S2 605-file lifetime scan (APPLIED→REMOVED
@@ -928,6 +938,9 @@ Classified by suspected root cause; work begins after completing the currently r
    > external was `available`, same-second `[RES]` lists it on `cd:`) → filed as its own GH issue. Report:
    > `eval-private/runs/2026-09-02-baseline/eval-report.md`, ledger row added. With this, #24-6's only open item is the
    > #22 cap review, still gated on batch 2.
+   > **Correction 2026-09-02**: the #22 cap review was never pending — the user ruled on 2026-08-20 (`551438fb`) that the
+   > caps stay long-term (no-cap simulation 64.6 % vs 16.8 % with cap=2), and missed-purge was demoted to context facts on
+   > 2026-08-29 (`17356e93`, GH #50 (a)); "(b)" above and the same wording in GH #44 comments were stale. **#24-6 closed.**
 7. ~~observedSpellIds +7 new ids into icons/offGcd universe~~ **Done 2026-08-11**
    (pipeline fix ac3a6a2f same-day opportunistic: observed 3346→3353, icons 41729→41734,
    offGcd 295→296, validateCatalogs green) — didn't actually depend on S2 corpus, was incorrectly categorized in this batch.
