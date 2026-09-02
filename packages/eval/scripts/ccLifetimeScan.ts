@@ -26,6 +26,7 @@
  */
 import { SPELL_CATEGORIES } from "@gladlog/analysis/src/data/spellCategories";
 import {
+  CC_DURATION_TALENT_MODIFIERS,
   ccFullDurationSeconds,
   OPPRESSING_ROAR_SPELL_ID,
   spellEffectData,
@@ -182,16 +183,31 @@ for (const id of [...tracked].sort(
   const db2 = spellEffectData[id]?.durationSeconds;
   const predicate = ccFullDurationSeconds(id);
   const mode = n >= MIN_N ? fullDurationBin(s!.plain) : null;
-  const disagree =
+  const rawDisagree =
     mode !== null &&
     predicate !== undefined &&
     Math.abs(mode - predicate) >= BIN_S;
+  // A peak that equals base × (1 + pct) for a registered talent modifier is
+  // the talent-lengthened cluster (casters holding the talent), not a DB2
+  // disagreement — labelled "talent" and not counted as a flag.
+  const talentExplained =
+    rawDisagree &&
+    (CC_DURATION_TALENT_MODIFIERS[id] ?? []).some(
+      (m) => Math.abs(mode! - predicate! * (1 + m.pct / 100)) < BIN_S,
+    );
+  const disagree = rawDisagree && !talentExplained;
   const blank = db2 === undefined;
   if (disagree) flagged++;
-  if (!args.all && !disagree && !blank) continue;
+  if (!args.all && !disagree && !blank && !talentExplained) continue;
   rows.push(
     [
-      disagree ? "FLAG" : blank ? "db2-blank" : "ok",
+      disagree
+        ? "FLAG"
+        : talentExplained
+          ? "talent"
+          : blank
+            ? "db2-blank"
+            : "ok",
       id,
       names[id] ?? "?",
       `db2=${db2 ?? "-"}`,

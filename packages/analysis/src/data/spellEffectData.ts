@@ -87,6 +87,38 @@ export function ccFullDurationSeconds(spellId: string): number | undefined {
   );
 }
 
+/**
+ * Talent-conditional CC duration modifiers: applied on top of
+ * `ccFullDurationSeconds` when the CASTER holds the talent
+ * (`utils/ccDuration.ts` → `ccFullDurationForCaster`, ownership via
+ * `talentOwnershipOf`). Hand-keyed — registered in curatedIdRegistry. Every
+ * entry needs both halves of the evidence: the DB2 modifier row (aura 108
+ * SPELLMOD_DURATION on the spell's class mask) AND the corpus split (casters
+ * whose aura lived the extended length vs the base length, by talent).
+ *
+ * 2026-09-02 (GH #44 tail, ccLifetimeScan FLAG): Intimidating Shout peaked at
+ * 7 s against DB2's 6 s. DB2: Resonant Voice 1243660 (Warrior class tree, node
+ * 108685, all three specs) carries aura 108 +20 % duration on the shout mask.
+ * S2 605-file corpus: 79 % of casters whose Intimidating Shout lived ~7 s held
+ * the talent, 0 % of those at ~6 s. The two other DB2 rows on the same mask —
+ * Thundering Roar 322093 (+100 %) and Warchanter 266143 (+50 %) — are not in
+ * the 12.1 talent trees and never separated any caster group, so they are not
+ * registered. Chaos Nova / Void Nova (the other two FLAGs) showed NO separating
+ * talent and no DB2 row — left on the DB2 value, recorded in BACKLOG.
+ */
+export const CC_DURATION_TALENT_MODIFIERS: Record<
+  string,
+  ReadonlyArray<{ talentSpellId: string; pct: number; note: string }>
+> = {
+  "5246": [
+    {
+      talentSpellId: "1243660",
+      pct: 20,
+      note: "Resonant Voice — DB2 aura 108 +20 % on the Warrior shout mask; S2 corpus 79 % of ~7 s casters vs 0 % of ~6 s casters",
+    },
+  ],
+};
+
 // Loaded in the background rather than via a top-level await: TLA would make
 // the entire module graph (including the renderer's first paint) serialize
 // behind the 12MB table finishing its load — and the first screen (the match

@@ -1,12 +1,12 @@
 import { ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 
 import {
-  ccFullDurationSeconds,
   getEnglishSpellName,
   OPPRESSING_ROAR_PVP_CC_DURATION_MULT,
   OPPRESSING_ROAR_SPELL_ID,
 } from "../data/spellEffectData";
 import { SPELL_CATEGORIES } from "../data/spellCategories";
+import { ccFullDurationForCaster } from "./ccDuration";
 import {
   buildCcCategoryHistory,
   getDRCategory,
@@ -115,7 +115,12 @@ export function analyzeCcBreaks(
 
     const pending = new Map<
       string,
-      { applyMs: number; casterName: string; roarAtApply: boolean }
+      {
+        applyMs: number;
+        casterId: string;
+        casterName: string;
+        roarAtApply: boolean;
+      }
     >();
     // Oppressing Roar debuff on the holder lengthens every CC applied while it
     // is up (+30 % in PvP, official) — tracked from the holder's own aura
@@ -146,6 +151,7 @@ export function analyzeCcBreaks(
       ) {
         pending.set(key, {
           applyMs: aura.timestamp,
+          casterId: aura.srcUnitId,
           casterName: aura.srcUnitName,
           roarAtApply: roarActive,
         });
@@ -197,7 +203,13 @@ export function analyzeCcBreaks(
         // × Oppressing Roar (+30 % when the debuff was on the holder at
         // application) − time already held; no duration known → no guess (null)
         let remainingSeconds: number | null = null;
-        const baseDuration = ccFullDurationSeconds(spellId);
+        // Caster-aware: talent-lengthened CC (CC_DURATION_TALENT_MODIFIERS,
+        // e.g. Resonant Voice → Intimidating Shout 7.2 s) counts as the full
+        // duration only when the caster is known to hold the talent.
+        const baseDuration = ccFullDurationForCaster(
+          spellId,
+          playerById.get(entry.casterId),
+        );
         const tableDuration =
           baseDuration === undefined
             ? undefined

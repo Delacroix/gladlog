@@ -97,7 +97,10 @@ import {
   SHARED_CD_RACIAL_SPELL_IDS,
 } from "./racialAbilities";
 import { SPELL_CATEGORIES } from "./spellCategories";
-import { OPPRESSING_ROAR_SPELL_ID } from "./spellEffectData";
+import {
+  CC_DURATION_TALENT_MODIFIERS,
+  OPPRESSING_ROAR_SPELL_ID,
+} from "./spellEffectData";
 import {
   CORPUS_DURATION_PATCHES,
   DISPEL_TYPES,
@@ -411,5 +414,15 @@ export const CURATED_ID_TABLES: readonly CuratedIdTable[] = [
   ),
   t("OPPRESSING_ROAR_SPELL_ID", "data/spellEffectData.ts", "aura", () => [
     OPPRESSING_ROAR_SPELL_ID,
+  ]),
+  // Talent-conditional CC duration modifiers (GH #44 tail, 2026-09-02): the CC
+  // aura ids it keys on plus the talent spell ids it gates on — a renumbered
+  // talent would silently stop lengthening the CC, so both sets sit under the
+  // rot scans ("mixed": aura ids + talent ids).
+  t("CC_DURATION_TALENT_MODIFIERS", "data/spellEffectData.ts", "mixed", () => [
+    ...keys(CC_DURATION_TALENT_MODIFIERS),
+    ...Object.values(CC_DURATION_TALENT_MODIFIERS).flatMap((mods) =>
+      mods.map((m) => m.talentSpellId),
+    ),
   ]),
 ];

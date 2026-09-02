@@ -224,6 +224,47 @@ describe("analyzeCcBreaks — ground truth 打破事件", () => {
     expect(byHolder.get("e2")?.remainingSeconds).toBeCloseTo(4.5);
   });
 
+  it("施法者持有 Resonant Voice 时威吓怒吼按 7.2s 算满时长(天赋条件时长,GH #44 尾)", () => {
+    // Intimidating Shout 5246: DB2 6 s; the Warrior class talent Resonant Voice
+    // (node 108685 / entry 134225) lengthens it 20 %. Applied at S10, broken by
+    // our priest at S11.5 → 7.2 − 1.5 = 5.7 s left (4.5 s for a caster whose
+    // talents are unknown).
+    const SHOUT = "5246";
+    const breakAt = (t: number) =>
+      aura(LogEvent.SPELL_AURA_BROKEN_SPELL, SHOUT, S(t), "d1", "OurPriest", {
+        breakSpellId: "589",
+        breakSpellName: "Shadow Word: Pain",
+      });
+    const talented = makeUnit("w1", {
+      spec: CombatUnitSpec.Warrior_Arms,
+      info: {
+        talents: [{ id1: 108685, id2: 134225, count: 1 }],
+        pvpTalents: [],
+      },
+    });
+    const untalented = makeUnit("w2", { spec: CombatUnitSpec.Warrior_Arms });
+    const e1 = makeUnit("e1", {
+      auraEvents: [
+        aura(LogEvent.SPELL_AURA_APPLIED, SHOUT, S(10), "w1", "TalentedWar"),
+        breakAt(11.5),
+      ],
+    });
+    const e2 = makeUnit("e2", {
+      auraEvents: [
+        aura(LogEvent.SPELL_AURA_APPLIED, SHOUT, S(10), "w2", "PlainWar"),
+        breakAt(11.5),
+      ],
+    });
+    const stats = analyzeCcBreaks(
+      [talented, untalented, makeUnit("d1")],
+      [e1, e2],
+      COMBAT,
+    );
+    const byHolder = new Map(stats.events.map((e) => [e.holderName, e]));
+    expect(byHolder.get("e1")?.remainingSeconds).toBeCloseTo(5.7);
+    expect(byHolder.get("e2")?.remainingSeconds).toBeCloseTo(4.5);
+  });
+
   it("root 打破单列计数,不混进硬 CC 事件", () => {
     const e1 = makeUnit("e1", {
       auraEvents: [

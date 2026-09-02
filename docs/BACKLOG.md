@@ -927,6 +927,26 @@ Classified by suspected root cause; work begins after completing the currently r
      605-file capture, findings-prompt and match-context SHA256 both byte-identical to the previous run, 26 per-type counts
      identical. Side finding recorded as GH #62: no `interrupts` entry has ever carried a duration and DB2 gives none for
      kick ids, so `kickLockoutSeconds` has always returned its 3 s fallback for every kick.
+     **ccLifetimeScan FLAGs, adjudicated 2026-09-02 (user: "查一下是不是天赋延长,是就登记")**. The promoted scan
+     (`packages/eval/scripts/ccLifetimeScan.ts`, highest local-peak bin) left three ids where the observed full
+     duration beats DB2 by ≥ 0.5 s. Two-sided check — DB2 duration-modifier rows (aura 108 SPELLMOD_DURATION on the
+     spell's class mask) and a corpus split of casters by observed full length vs their COMBATANT_INFO talents:
+     - **Intimidating Shout 5246, 7 s vs 6 — talent, registered.** DB2: Resonant Voice 1243660 (Warrior class tree
+       node 108685, all three specs) +20 %; corpus: 79 % of casters whose shout lived ~7 s held it, 0 % of those at
+       ~6 s (28 vs 88 casters). Landed as `CC_DURATION_TALENT_MODIFIERS` (spellEffectData.ts, registered in
+       curatedIdRegistry) + `utils/ccDuration.ts` → `ccFullDurationForCaster` (multiplies only on
+       `talentOwnershipOf` === "yes"); `ccBreakAnalysis` now passes the caster. The two other DB2 rows on the same
+       mask (Thundering Roar 322093 +100 %, Warchanter 266143 +50 %) are not in the 12.1 trees and separated nobody
+       — not registered. The scan labels the 7 s peak `talent` from now on.
+     - **Chaos Nova 179057 and Void Nova 1234195, 4 s vs 3 — not a talent, left on DB2.** No DB2 modifier row hits
+       either mask; no talent, PvP talent or spec separates the ~4 s casters from the ~3 s ones (Chaos Nova 27 vs 14
+       casters, best talent 22 % vs 7 %; Void Nova: all 9 casters with talent data reach 4 s and the 3.0 s cluster
+       sits inside the same casters, 4.0 s ×45 vs 3.0 s ×54). Whatever lengthens them is not in the loadout — open
+       question, DB2 3 s kept, the scan will keep flagging them until someone finds the mechanism.
+       Acceptance (S2 605 files / 1,270 rounds / 3,520 owner views): all candidate types identical; `[CC BROKEN]` lines
+       6,400 → 6,416, every changed line an Intimidating Shout break — 130 rewritten (+1.2 s "wasted" for casters holding
+       the talent) and 16 that crossed the 2 s report threshold. Tests: `test/ccDuration.test.ts` (real talent tree,
+       node 108685 → 7.2 s; unknown loadout → 6 s), a ccBreakAnalysis case (5.7 s vs 4.5 s remaining).
 6. **eval baseline / candidate incidence rates full recalibration**: 63.6/14.1/15.6 and other old numbers considered
    expired after 12.1; rerun `/eval-baseline`, rate-limiting type (#22 temporary gate) thresholds reviewed alongside incidence rates.
    > **2026-09-01 status (GH #44)**: the deterministic half already exists — the 2026-08-22 skill-gradient study
