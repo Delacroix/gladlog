@@ -29,6 +29,46 @@ git status --short && git log -1 --format='%h %s'
    (25 分钟级的 acceptanceHash)尤其要在开跑前后各记一次 HEAD。
 3. **`git add -A` / `git commit -a` 会把对方的在制品提交掉**。→ 永远显式列路径。
 
+### push 被拒(non-fast-forward)且树里有对方未提交文件时
+
+无 skill 的反射是 `git stash && git pull --rebase && git stash pop && git push` —— 正是第 1 条的陷阱,
+而且全程无报错。2026-08-29 实测的安全路径是**在临时 worktree 里 cherry-pick 后推**,共享树的
+`main` 指针一根手指都不碰:
+
+```bash
+G=/Users/mingjianliu/code/gladlog; WT=<scratchpad>/push-<sha>
+git -C $G fetch origin main                       # 被拒的 push 不会更新 origin/main,不 fetch 就在旧基上重蹈
+git -C $G show --stat --format= <sha>              # 闸门:提交里不能有对方的文件(add -A 事故可能已经发生)
+git -C $G diff | shasum                            # 对方在制品的指纹,收工后比对
+git -C $G worktree add --detach "$WT" origin/main
+git -C "$WT" cherry-pick <sha>                     # 冲突且不在自己文件里 → --abort + worktree remove + 汇报
+git -C "$WT" range-diff <sha>^..<sha> HEAD^..HEAD  # 期望 "="(推的补丁与原提交逐字相同)
+npm --prefix "$WT" install && npm --prefix "$WT" run typecheck   # §3:不装会爬到共享树的 node_modules(对方的在制品源码)
+git -C "$WT" push origin HEAD:main
+git ls-remote origin refs/heads/main               # 自证 origin 真有了,不是 worktree HEAD 有了
+git -C $G worktree remove "$WT"                    # node_modules 被 gitignore,remove 干净
+```
+
+到这里用户要的已经满足。**同步共享树的本地 `main` 是可选的第二步**,只在四道只读闸门全过时做
+`git -C $G rebase --autostash origin/main`(autostash 存在 `.git/rebase-merge/autostash`,不在
+`refs/stash` 上,对方 pop 不到 —— 这就是它比手工 stash 安全的全部原因;但 pop 冲突时 git 会把它
+丢回 `refs/stash`,又回到陷阱 1):
+
+1. `git cherry origin/main main` 打印且只打印 `- <sha>`(补丁已在上游,rebase 自动丢弃);
+2. `git status --short` 第一列全空(autostash 不恢复 index,对方 staged 的东西会变成 unstaged);
+3. `git diff --stat main...origin/main -- $(git diff --name-only)` 为空 —— 是**所有**脏文件,不是「那一个」,
+   脏集在你干活期间会长;
+4. `git diff --name-only main...origin/main` 与 `git ls-files --others --exclude-standard` 不相交
+   (上游新增了对方未跟踪目录里的路径,rebase 会中途拒绝)。
+
+做完 `git diff | shasum` 必须等于开工前的指纹。任一不满足就停下汇报,让本地 `main` 分叉着
+(代价只是下次有人裸 `git pull` 会产生一个重复补丁的合并提交)。EnterWorktree 会话里这些命令
+含 `packages/eval` 路径会被 §4 的守卫拒,pathspec 写 `packages/ev[a]l/...`。
+
+**绝不**:`git update-ref refs/heads/main …` / `branch -f` / `reset --hard origin/main` ——
+08-29 跑了 update-ref,HEAD 跳到远端而工作树没动,`git status` 瞬间几百个「已暂存删改」,
+全是对方合并的反向差异(用 `update-ref` 指回原 sha 才救回来)。也绝不 `checkout --` 对方的文件。
+
 ## 1. 派子代理:cwd 必须硬检查,不能靠一句话
 
 **子代理的工作目录是会话启动目录(主 checkout),不是 `EnterWorktree` 之后的目录。**
@@ -46,6 +86,10 @@ git status --short && git log -1 --format='%h %s'
    落错报 BLOCKED 而不是自己补救。
 
 加了这段之后后续所有 Task 都落对了位置。
+
+同类错位还有一个软的:子代理评审会到 **worktree 里的 `.superpowers/` 副本**找 spec / 报告,
+而文件在主 checkout 的 `.superpowers/sdd/...`(2026-08-29 crisis-no-response 评审)。派评审时
+把报告的绝对路径直接写进提示。
 
 **事故恢复**:提交对象仍在,`git cat-file -t <sha>` 查得到。先只读评估(是不是 tip、
 推没推、主工作树干不干净、上面还有没有别人的提交),再 `git checkout <sha> -- <paths>`

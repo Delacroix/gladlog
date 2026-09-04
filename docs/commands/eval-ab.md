@@ -121,7 +121,7 @@ Then re-run the two interpolation/`responses/` steps in the new arm (cheap, dete
    ```
    If the intersection is too small to clear the MDE for the target dimension (see below), **sample extra ordinals** from the corpus at random, add them to `ab-ordinals.json`, and say in the report that they were added as sampled extras — never silently pad, and never report the padded n as if every pair were change-touching.
 5. Shared response generation (BASE=treatment), including `interpolateResponses`.
-6. **Blind Evaluation:**
+6. **Blind Evaluation** — if the treatment adds **context lines / facts rather than menu items**, blind scoring at n ≤ 24 cannot adjudicate it; run the **Reverse probe** section below as the primary instrument and treat blind scoring as a regression check only.
 
    ```bash
    AB_DIR="$GLADLOG_EVAL_HOME/ab/<abId>" npx tsx packages/eval/scripts/blindPool.ts
@@ -179,7 +179,7 @@ Then re-run the two interpolation/`responses/` steps in the new arm (cheap, dete
    - **Non-verified claims table (mandatory).** List every claim the judges' `factAudit` marked non-verified, per ordinal and per arm, and classify each one as exactly one of:
      **responder error** (the model asserted something the prompt does not support) · **judge misread** (the prompt does support it; the judge read the line wrong) · **genuine prompt contradiction** (the prompt really is self-inconsistent — this one is a bug in the builder and outranks any score).
      Without this column an accuracy delta is uninterpretable: on 2026-08-30 the entire negative accuracy point estimate of the `healing-gap-hp` A/B was **one judge misread of a gap's start timestamp, present identically in both arms**. Do the classification by re-reading the cited prompt lines yourself — after unblinding, so it costs nothing.
-     Report structure: Deterministic Metrics table → Target dimension per-ordinal table (after unblinding) → Non-verified claims table → All-dimension blind eval stats table → Regressions (dimensions where CI is entirely negative + clearly worsened deterministic metrics; inconclusive dimensions with negative point estimates are labeled "(inconclusive — monitor)" and not counted as regressions) → New Issues (items where treatment blind score ≤2 while paired control >2) → Triage (fix now / next cycle / backlog) → Rubric Feedback → Decision (IMPROVED/INCONCLUSIVE/REGRESSED + recommendation ADOPT/ABANDON/ITERATE; state inconclusive plainly, adopting based on deterministic reasons is user discretion — never package inconclusive as a win).
+     Report structure: Deterministic Metrics table → Consumption table (context-line treatments only: genuine / coincidental / guard-rail per arm, from the Reverse probe section) → Target dimension per-ordinal table (after unblinding) → Non-verified claims table → All-dimension blind eval stats table → Regressions (dimensions where CI is entirely negative + clearly worsened deterministic metrics; inconclusive dimensions with negative point estimates are labeled "(inconclusive — monitor)" and not counted as regressions) → New Issues (items where treatment blind score ≤2 while paired control >2) → Triage (fix now / next cycle / backlog) → Rubric Feedback → Decision (IMPROVED/INCONCLUSIVE/REGRESSED + recommendation ADOPT/ABANDON/ITERATE; state inconclusive plainly, adopting based on deterministic reasons is user discretion — never package inconclusive as a win).
 8. Increment `treatmentRuns` in state by 1, keep phase as `treatment-ready`; print summary.
 
 ## Phase 3 — Wrap-up (adopt / abandon)
@@ -195,7 +195,7 @@ Then re-run the two interpolation/`responses/` steps in the new arm (cheap, dete
    ```
    `done` is the phase that says "adjudicated". Leaving a wrapped-up run at `treatment-ready` is what made the five 2026-08-30 runs look like pending treatments to the next argument-less `/eval-ab`.
    Then delete the bulky untracked artifacts — `prompts/`, `manifests/`, `responses*/`, `blind/`, `index.json`, `quality-report.json`, `fingerprint.txt` — and **keep**:
-   `comparison-report.md` · `comparison-stats.json` · `state.json` · `ab-ordinals.json` · `{control,treatment}/audit-summary.json` · `responder-brief.md` · `judge-brief.md`.
+   `comparison-report.md` · `comparison-stats.json` · `state.json` · `ab-ordinals.json` · `{control,treatment}/audit-summary.json` · `responder-brief.md` · `judge-brief.md` · `reverse-probe-brief.md` and `reverse-probe/` when the run had one (the adopt-on-deterministic-grounds verdict rests on them).
    That set is ~40 KB per run and is what makes a ruling re-readable a month later: the decision, the numbers behind it, the exact pair set, the deterministic per-ordinal audit, and the verbatim instructions both models were given. The ledger row alone cannot reconstruct any of them.
 4. Print rubric feedback and next steps (adopt → change is live; abandon → revert).
 
@@ -251,6 +251,17 @@ point estimate, CI, and MDE for that n, enabling readers to distinguish "measure
 > CI crosses 0, not significant; point estimate is negative, aligned in direction with factAudit refuted rate (8.7% → 14.0%,
 > CI −0.024 ~ +0.131). Both fall below the detectable threshold for this sample size, **qualifying as "underpowered to detect"
 > rather than "detected no difference"**, labeled (inconclusive — monitor).
+
+## Reverse probe — "did the LLM actually use it?" (2026-09-02, kw-facts)
+
+Run this whenever the treatment adds **context lines or facts** rather than menu items (`[BURST ANSWERED]`, `[KILL WINDOW]` facts, `[ROOT]`). Blind scores at n ≤ 24 are inconclusive by construction; the question that discriminates is consumption, and the user asks for it verbatim ("反向问一下 llm 用没用").
+
+1. **Deterministic join first, zero model calls.** No script exists for this yet (the 2026-09-02 run aggregated by hand) — write `packages/eval/scripts/reverseProbeJoin.ts` and book it. Join key: a finding carries `eventIds`, not `t`; resolve `t`/target through the prompt's menu line (`menuOf()` in `interpolateResponses.ts`), then overlap against the new lines' `M:SS` spans (both are on the `fmtTime` render grid). For every ordinal in both arms, parse the new lines out of `<arm>/prompts/NNN.txt` and the findings JSON out of `<arm>/responses-raw/NNN.txt`; count findings whose resolved `t`/target overlaps a new line's span, findings whose text contains vocabulary that exists **only** in the new lines, and findings that assert what a new line negates. Control on the same ordinals is the denominator for "coincidental overlap" — the 2026-09-02 run audited treatment only and its 3/20 coincidental had no baseline.
+2. **Per-item reverse-probe audit, both arms.** Write `ab/<abId>/reverse-probe-brief.md` (precedent: `ab/2026-09-02-kw-facts/reverse-probe-brief.md`, which may have been pruned — the contract is fully stated here): one sonnet subagent per item, reads **only** `prompts/NNN.txt` + `responses-raw/NNN.txt`, is told what the new lines look like and which fact phrases are new, and writes `reverse-probe/<arm>/NNN.json` as `{"item": "...", "usedLines": [finding indices], "usedNewFacts": ["exact quoted fragment", ...], "contradictsFacts": ["exact quoted fragment", ...]}`, quoting fragments verbatim. The control arm gets the identical brief: with the new lines absent, anything it reports as "used" is the probe's false-positive rate, and its accusations are the ones the new line would acquit. Aggregate by **reading the array contents**: the probe writes `"none found"` as an array element, so counting non-empty arrays fabricates consumption.
+3. **Read the result in three classes**: genuine consumption (text mirrors the new fact) / coincidental overlap (same timestamp or target, fact not used) / **guard-rail effect** (`contradictsFacts` = 0 while the control arm made the accusation the new line acquits). Findings anchor on menu eventIds, so genuine consumption of context lines is structurally rare (1/20, 2/14 on the two runs); the guard-rail count is where a context line proves its value.
+4. **Refuted-claim triage is mandatory, not optional.** Unblind, pair every `factAudit` refuted/unsupported claim by ordinal, and classify each by re-reading the cited prompt lines: **responder error / judge misread / genuine prompt contradiction**, plus a column _touches the new lines?_. A genuine contradiction originating in a new line is a builder bug that outranks every score and becomes a `hardFailures` class; a judge misread of `t=` semantics (gap start, rounding) means the span endpoints must be checked against the render grid; the two 2026-08-30 accuracy deltas were one judge misread duplicated in both arms.
+
+Verdict wording for this shape: "ADOPT on deterministic grounds — blind inconclusive at n = N, zero regression, consumption X/N genuine, guard-rail Y/N, new-line claims refuted 0/K" — never packaged as an A/B win.
 
 ## Notes
 

@@ -38,7 +38,10 @@ git tag v0.0.N+1 && git push && git push origin v0.0.N+1
   都要能在 changelog 里找到归属,不许静默漏(一个 commit 跨多面时可拆到
   多条,各自标同一哈希)。
 - 写给用户而不是写给 git:说行为变化(「死亡行高亮 + 回顾直达」),不说
-  实现细节;中文短句、破折号、不用 emoji(全站文案口吻)。
+  实现细节;短句、破折号、不用 emoji(全站文案口吻)。
+- **双语**:`CHANGELOG.md` 是英文正本,`CHANGELOG.zh-CN.md` 同步一节(Bilingual Docs Rule);
+  GitHub Release 的 notes 用**英文**节。2026-08-27 v0.1.30 因为挂了中文节且被截断被用户点名,
+  挂完 `gh release view vX --json body -q .body | wc -c` 与 awk 抽出的节字数对一下。
 - 构建绿、资产验收后,把本节内容同步挂到 GitHub Release:
   ```bash
   awk '/^## v0\.0\.X/{f=1; next} /^## v/{f=0} f' CHANGELOG.md > /tmp/notes.md

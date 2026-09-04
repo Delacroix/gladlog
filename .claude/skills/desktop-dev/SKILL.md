@@ -74,6 +74,21 @@ for f in /tmp/bl/scenes.spec.ts/*.png; do n=$(basename $f);   cmp -s "$f" packag
 - test.yml 的 run 要**按 headSha 选**,push 后立取 latest 会抓到上一条
 - 开着 PR 时每次 push 触发 push+pull_request **两条** run,红的可能是另一条
 
+## 只在 CI 红的 flaky 测试(GH #26,2026-09-02 根因)
+
+- **绝不制造整机负载复现**(14 个 `yes` 死循环 + 并发全量 vitest 把机器搞死一次,load 248)。
+  复现不了就写「未能本机复现」+ 按机理改,让用户决定。
+- 先拿**失败那次**的日志:`gh run view <id> --attempt 1 --log-failed`(重跑后默认只给绿的那次)。
+  RTL 失败信息里的 DOM 快照比「超时」字样有信息量:`aria-expanded="false"` 说明点击发生了又被撤销,
+  是状态竞态,不是慢。
+- 两处已知根因同构:**「挂载即 setState / 只翻一次的值」的被动 effect 排在交互之后**,React 在渲染
+  交互更新前先刷被动 effect,复位把交互静默撤销;高负载下 RTL 的 `setTimeout(0)` 与 React 的
+  `setImmediate` 先后翻转才暴露。修法是渲染期派生(`prevRoot` state)或依赖用户动作计数(`langSwitches`),
+  不是加 `act()` / 抬 `asyncUtilTimeout` / 加重试。
+- 确定性复现帮手 `test/support/untilDom.ts`:设 `IS_REACT_ACT_ENVIRONMENT=false`,用 `createRoot().render`
+  挂载,在 MutationObserver 微任务里交互;范例 `test/devpanel.jsonTree.race.test.tsx`。
+  同形状再红 = 还有第三个这样的 effect,按这个模式找。
+
 ## 大数据文件纪律(2026-07-25 图标事故)
 
 生成数据 >1MB 必须走 `.json` 文件(vite 已配 `json.stringify` → JSON.parse
