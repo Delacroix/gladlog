@@ -904,15 +904,26 @@ export function StructuredAnalysisPanel({
             看一个演示分析
           </button>
         )}
-        {result && (
-          <span className="rpt-ai-status">
+        {/* Status + Export follow the placeholder state, not the underlying
+            `result` (GH #38 residual, archive #10 final-review handoff):
+            while an invalidated slot is selected, `result` still holds the
+            *previous* slot's content (kept so clicking back is free), so
+            reading it here would say "已缓存 · N findings" and export the
+            other slot's findings under this slot's tab. */}
+        {result && displayEmpty === "stale" && (
+          <span className="rpt-ai-status" data-testid="ai-status">
+            旧版本槽 · 无可用结果
+          </span>
+        )}
+        {result && displayEmpty !== "stale" && (
+          <span className="rpt-ai-status" data-testid="ai-status">
             已缓存 · {result.findings.length} 条 findings
             {result.findings[0]?.severity
               ? ` · 最高严重度 ${severityLabel(result.findings[0].severity, lang ?? "zh")}`
               : ""}
           </span>
         )}
-        {result && (
+        {result && displayEmpty !== "stale" && (
           <span className="rpt-ai-export">
             <ExportButtons
               findings={result.findings}

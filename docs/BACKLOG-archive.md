@@ -303,7 +303,7 @@ consistently fail (vitest/tsc can't catch this, only production build does) — 
 old slot tabs with invalidated cache (prompt version upgrade etc.) correctly show placeholder prompt and don't clear underlying
 `result`, but the top status line ("Cached · N findings") and Export still read from the underlying old
 `result` — in placeholder state these two will show stale slot numbers/content that don't match the placeholder message, won't
-crash, just visually inconsistent, can be disabled or hidden in the same batch.
+crash, just visually inconsistent, can be disabled or hidden in the same batch. **Closed 2026-09-04 (GH #38)**: status line now shows a stale-slot message and Export is hidden while the placeholder is up.
 
 ## 20. AI analysis chat box (logged 2026-07-30, user request) ✅ (actually already completed, status not updated: Ask Coach shipped 2026-08-02, spec docs/superpowers/specs/2026-08-02-coach-chat-design.md, CLI three-backend resume sessions; 2026-08-06 archive note)
 

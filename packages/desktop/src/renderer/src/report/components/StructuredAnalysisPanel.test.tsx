@@ -416,12 +416,24 @@ describe("多模型槽 tab 切换(Task 3)", () => {
       .getAllByRole("button")
       .find((b) => b.className.includes("active"));
     expect(staleTab?.textContent).toContain("旧版");
+    // GH #38 residual (archive #10 final-review handoff): the header status
+    // line and the Export button used to keep reading the underlying (not
+    // cleared) `result`, so the placeholder note sat under "已缓存 · 2 条
+    // findings" + a Copy Markdown button that would export the *previous*
+    // slot's findings as if they were this slot's. Both must follow the
+    // placeholder: the status says the slot is stale, and there is nothing to
+    // export.
+    expect(screen.queryByText(/已缓存/)).toBeNull();
+    expect(screen.getByTestId("ai-status").textContent).toMatch(/旧版本/);
+    expect(screen.queryByText("Copy Markdown")).toBeNull();
 
     // Click back to the active slot (index 1, getCached still returns resultA)
     // → content comes back and the placeholder disappears.
     fireEvent.click(within(tabs).getAllByRole("button")[1]);
     expect(await screen.findByText(/第30秒阵亡/)).toBeTruthy();
     expect(screen.queryByTestId("slot-stale-note")).toBeNull();
+    expect(screen.getByText(/已缓存/)).toBeTruthy();
+    expect(screen.getByText("Copy Markdown")).toBeTruthy();
   });
 
   it("查看旧槽后 onDone 触发 → selectedSlotKey 重置,回到新结果", async () => {
