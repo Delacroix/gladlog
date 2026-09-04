@@ -6,6 +6,72 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.31 (2026-09-03)
+
+Coaching-signal value release. A week of work anchored on one question: is this signal worth existing, and could the player actually have acted? New: crisis-no-response for healers, backed by a corpus reference of what top-ranked players actually do in the same state; enemy-burst-window decision points; kill-window killability facts. Four signals whose skill gradient came back flat once normalised by opportunity were retired or demoted. CC durations now read official game data. Also in this release: the OBS phase-2 branch (managed portable OBS recording) merges to main for the first time, the parser labels incomplete matches instead of passing them off as whole games, and the long-standing flaky desktop test was root-caused.
+
+### AI coaching — new signals
+
+- **crisis-no-response (healer v1)**: `e74a37c5` shared crisis decision-point predicate; `879f4a80` `60a445ae` producer (cap 2, ordered by danger); `8f7933ba` wired into the healer menu and legend; `120a4050` desktop mistake rule, label and detail; `3a5a6c31` `a0194ff0` behavior-prior table (top-10% healer crisis responses over 18,134 matches) with lookup; `2427cf8b` `e8e26ac0` new hard-failure class — rendered reference numbers must equal the table; `22ac9a2a` `d46bb4cd` manifest registration and predicate-index rows; `6365dfa1` attacker count resolves pets and guardians to their owner
+  - Reference redesigned as outcome-based with a damage floor (§1b): `60e5cd79` `24dc92d9` spec; `334640a1` `78d3384a` predicate, table, legend and gate; `86be4f59` table regenerated; `3810bf82` `a1203cc2` `a19b55fa` `ebb7f761` review-round fixes (silence coverage, shared aura pairing, gradient denominator, NaN guard) and regeneration
+  - Solo Shuffle reference counts any friendly death within 15 s (§1c): `d31c6f6f` spec; `9fb21d9d` `90cf1b47` `5f4d9dac` `0662afd5` `db566d9e` outcome propagated through prompt, gate and desktop; `c7661bdb` the reference outcome renders as prose, not an enum token
+  - Role dimension (§1d, GH #59): `c819faf3` spec; `4d64e556` `4856ce78` `1a4d4c16` `6b2c6529` `6b6d4ab7` role carried through predicate, table, gate and index; `5f71683e` DPS cells scanned (120,439 decision points), `2dab0084` then withheld from the published table — DPS "no response" fires in 68% of rounds with a 10.5% vs 6.5% contrast, not worth a signal; `6f1070d6` table regenerated on the render-grid-anchored population
+  - The corpus scan behind it: `44f331fb` v1, `5c928285` v3 context features, `932132b9` v4 response mix, `400a6225` DPS perspective, `ee8f0850` formatting; design docs `d6479350` `6140129b` `396cb075`
+- **Enemy burst window (GH #60)**: `85b7549b` decision points and corpus reference table; `1b345750` `ab6e8d18` slow-defensive-response reshaped as a decision point with two doors and an over-react probe; `9db3bbdd` [BURST ANSWERED] context lines, the positive side of the window; `860279f0` teammate reachability gate, canonical offensive-cooldown table, gradient re-measured
+- **Kill window (GH #31)**: `d726b6db` killability facts and a DPS view; `a0f1eee3` the major-defensive roster single-sourced
+- `7b5e8d3f` missed-sync-window resurrected in redesigned form (GH #13 reversal, user ruling)
+- `365418e1` [ROOT] context facts — a root matters when its target cannot reach anyone (GH #24)
+- `c1f240ea` [HEALER TRAINED] states the fact per line and the steering rule once (GH #36); `fc794ce5` `bd1b9960` the two prompt probes behind that ruling
+
+### AI coaching — retired or demoted signals
+
+All four on the same criterion: a flat skill gradient once the denominator is the number of opportunities, not the number of rounds.
+
+- `e069f4cc` `1ecda5af` death-unused-defensive retired (GH #58), superseded by crisis-no-response
+- `17356e93` missed-purge and unsynced-burst demoted to context facts (GH #50)
+- `3f5f3b38` `7d219a66` `90747bbb` cc-held retired after its gradient came back flat with a proper opportunity denominator; visual baselines follow
+- `fdc18785` cd-spent-idle retired — the outcome probe found no measurable cost
+
+### AI coaching — accuracy fixes
+
+- `4fb50953` healing-gap gates on the lowest teammate HP, not gap seconds; `e719f549` the legend states that t is the gap start; `b4e66e48` `086baed5` free time now subtracts kick school lockouts (GH #54)
+- `de35230b` cd-hoarded becomes decision-point shaped; `8ec64f96` attempt-into-trinket cites the corpus outcome contrast (6.8% vs 3.8%)
+- `af5504b5` every "cooldown available at t" predicate shares one rendered-second slack (GH #61, ledger hard failures 3 → 0) and kick lockouts come from corpus observation instead of a flat 3 s (GH #62)
+- `eaa1cd0e` `f6e4f504` kick-eaten, death, missed-cleanse and crisis time facts floor to the render grid instead of rounding past it
+- `8705d976` four review-bench rulings: 2v2 allow-list, kill review demoted, immunity-breaker feasibility gate, shared bracket key (GH #18)
+- **CC duration reads official data (GH #44)**: `c7451a1d` full duration via ccFullDurationSeconds (the hand table disagreed on 22 entries and was wrong on 21); `553e35cb` talent-conditional duration — Resonant Voice lengthens Intimidating Shout 6 → 7.2 s; `c43fe8e2` the 8 Polymorph glyph variants registered; `5960ee7b` 70 consumer-less hand durations on non-CC spells dropped
+- Registries: `e26ee81e` Landslide registered as a dispellable root; `e3322e1f` Ancient of Lore in the mitigation table at the official 30%; `10c23d82` dispel-observed table regenerated over 12.0 and 12.1 (305 → 421 ids), benchmarks rebuilt on the 12.1 archive
+- **Constants audit, closing batch (GH #34)**: `75219d2f` buff-expiry pairing and four hand-typed durations — Power Infusion is no longer always "ended early"; `bf924bf0` per-spell official reach for externals replaces the false "every 40-yard targeted spell" constant; `2fe0bdb5` Rallying Cry reads its 10 s from the official aura; `c8361f07` trinket cooldown single-sourced, Forbearance reads official data, two hand assumptions falsified and annotated; `167c5d40` MIN_CD_SECONDS single-sourced; `8531db55` `d71e2530` `ef833c6b` `c9c603be` `7916b201` `ef473068` `41e423b5` `eb260831` `c581d31e` `d47946aa` measured distributions written next to each threshold (zero value changes); `49535842` datagen emit-table writes temp-then-copy
+- `87efe544` "cheaper available" teammate reach uses the official can-help predicate, not a hand list; `a60a3e3c` ninth hard-failure class — a [DMG SPIKE] "healed through" must match the same-line HP delta (GH #36)
+- `f2cf35a5` corpus dispel gate no longer counts rider dispels as "someone dispelled it" (GH #32); `2fa060bd` the last predicate-index divergence closed — DR categories read through the override layer (GH #33)
+
+### Parser
+
+- `cf27d2fa` structural completeness — partial shuffles, short rosters and no-result matches are labelled instead of passing as whole games
+- `35164768` `51c1b3b7` pets and summoned units merge into their owner by SUMMON relationship and PET flag, so their damage and healing land on the right player (GH #57)
+
+### Recording — OBS phase 2 merged to main
+
+The managed portable-OBS recording that shipped as the v0.1.20-obs2.1 and v0.1.26-obs2.2 test builds is now on main and in a regular release for the first time; see the v0.1.26-obs2.2 section above for what it does. Branch commits carried in: `ab3ab014` `13fe39d4` `64f45a8b` `368ae5f1` `4136a3e7` `49a18636` `0a62c0c2` `8b5924d3` `167ff96e` `bf799dce` `86f1f95b` `fb9d4c72` `a322713c` `96d8660f` `aa401e7a` `81831590` `1d3cd4ee` `3026bc54` `ea558d87` `54c99380` `7841af71` `e9e15556` `c3e00e73` `db3e7214` `88fdfc1a` `d47b5d87` `92f9e24f` `1e228b1b` `ea2a63bc` `cbc46460` `f6a80b21` `7efe296b`. Merge fixups: `eade0146` settings fixture gains uiZoom, download-progress assertion anchored; `2140f3a0` settings and video visual baselines regenerated. Real-machine end-to-end of the managed recorder is still pending.
+
+### Desktop
+
+- `58ae7bba` atomic file writes retry once on Windows target-lock errors
+- `fa2dec06` dampening-lane hover dead zone fixed, panic naming, owner resolution consolidated (GH #38)
+- `bec96609` the GH #26 flaky-test root cause — passive state resets were ordered after the interaction; `5c8a38e5` `47ae43aa` `909c5280` the timeouts and diagnostics that led there
+- `8005b835` `a5459678` visual baselines follow the 2v2 allow-list and the cd-hoarded decision-point form
+
+### Eval tooling
+
+- `9a15ee45` headlessAnalyze — run the real product analysis on library matches without the app (GH #18)
+- `641f683f` `18b18c83` findings-prompt corpus rendering and response interpolation for blind candidate-menu A/Bs
+- `0c7560dc` `d69238f1` review bench keeps baseline candidate types and resolves shuffle rounds by round id
+- `e1818153` `9a20ee7d` session probes and capture tools booked into the repo; `f3bfd976` doc/script hygiene from the eval-repo audit
+
+### Other (docs / ledger)
+
+- `153aa886` `a4eeaeb0` CLAUDE.md alignment; `4d9e5d8b` `88a547bb` `5d01efd3` `b5b84ee2` backlog rulings recorded; `a69d268f` `aa7ff481` `10761813` `017b375b` `d5b483b9` `a0e59ac5` `5c25bd62` `30461249` OBS phase-2 design and plan docs, arenacoach rule survey
+
 ## v0.1.30 (2026-08-26)
 
 Coaching-accuracy + sixth-backend release. Two main threads over three days: a batch of coaching fixes that stop accusing players of things they could not do, plus five new fact annotations in the prompt (each backed by real-model measurement); and CodeBuddy CLI joining as the 6th AI backend. Also a "gut-feel constants" audit (zero value changes, two real bugs caught) and a reusable prompt line-effect probe.
